@@ -12,7 +12,7 @@ DeploySmith consist of 3 components:
 
 **smithd** The server component, which runs inside k8s. It exposes an API and mutates the gitops state to match the requested state.
 
-**forge** The CI component, it helps "forge" new versions by transforming a YAML file into Kubernetes manifest files and delivers them to smithd.
+**forge** The CI component, it helps "forge" new versions by packaging Kubernetes manifest files and delivering them to smithd. (Future: may transform a simplified YAML file into Kubernetes manifests)
 
 **smithctl** The controller which the user/developer interacts with for controlling which version to run.
 
@@ -20,7 +20,7 @@ DeploySmith consist of 3 components:
 
 smithd does not deal with manifest mutations itself, but it enables the CI pipelines of other applications to publish new versions of itself which contains the k8s manifests.
 
-Although smithd does not build manifest files, there is an auxiliary application, **forge**, which can help build manifest files from a much simpler yaml file.
+The CI pipelines are responsible for building their own Kubernetes manifest files. The auxiliary application **forge** helps package and deliver these manifests to smithd.
 
 **smithd** will then decide if the new version should be deployed automatically - or the user can manually command that it wants the version deployed by using the Rest API.
 
@@ -81,8 +81,8 @@ There will be a few auxiliary CLI apps available to interact with the APIs:
 
 1. **forge** (Version Builder)
    This is used in a CI pipeline, it can interact with the draft and publish APIs of smithd.
-   It can also upload files to the pre-signed URL blob storage.
-   And it may help generate and validate the version metadata file. Finally, it may eventually feature a command which can build k8s manifest files based on a simpler service yaml file, so the user does not need to know that much about k8s.
+   It can package and upload manifest files to the pre-signed URL blob storage.
+   It helps generate and validate the version metadata file (version.yml).
 
 2. **smithctl** (Deployment Manager)
    smithctl is used by the developer to list available versions and initiate deployments (including rollbacks).
@@ -283,4 +283,4 @@ As mentioned in the clarifications above, the following features are out of scop
 6. **Deployment queuing** - In-memory queue for sequential deployment processing (nice-to-have depending on complexity)
 7. **Per-app API key scoping** - All API keys have global access initially
 8. **OIDC authentication** - Starting with simple API keys only
-9. **Advanced manifest building** - CLI feature to generate k8s manifests from simpler YAML (forge will be basic)
+9. **Manifest generation from simplified YAML** - forge feature to transform a simplified YAML spec into full Kubernetes manifests (initial MVP: users provide their own manifests)
