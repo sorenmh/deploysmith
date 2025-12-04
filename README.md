@@ -72,14 +72,14 @@ docker-compose down
 ### Building
 
 ```bash
-# Build smithd server
-go build -o bin/smithd ./cmd/smithd
-
-# Build forge CI tool
-go build -o bin/forge ./cmd/forge
-
-# Or use Earthly
+# Using Earthly (recommended - same as CI)
 earthly +build-smithd
+earthly +build-forge
+earthly +all  # Build everything, run tests and linter
+
+# Or build directly with Go
+go build -o bin/smithd ./cmd/smithd
+go build -o bin/forge ./cmd/forge
 ```
 
 ### Configuration

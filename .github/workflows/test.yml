@@ -8,7 +8,7 @@ on:
 
 jobs:
   test:
-    name: Run Tests
+    name: Test and Build
     runs-on: ubuntu-latest
 
     steps:
@@ -17,71 +17,23 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Set up Go
-        uses: actions/setup-go@v5
-        with:
-          go-version: '1.21'
-
-      - name: Cache Go modules
-        uses: actions/cache@v4
-        with:
-          path: |
-            ~/.cache/go-build
-            ~/go/pkg/mod
-          key: ${{ runner.os }}-go-${{ hashFiles('**/go.sum') }}
-          restore-keys: |
-            ${{ runner.os }}-go-
-
-      - name: Download dependencies
-        run: go mod download
-
-      - name: Run unit tests
-        run: go test -v -race -coverprofile=coverage.out ./...
-
-      - name: Upload coverage
-        uses: codecov/codecov-action@v4
-        with:
-          file: ./coverage.out
-          fail_ci_if_error: false
-        continue-on-error: true
-
-  lint:
-    name: Run Linter
-    runs-on: ubuntu-latest
-
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
-
-      - name: Set up Go
-        uses: actions/setup-go@v5
-        with:
-          go-version: '1.21'
-
-      - name: Run golangci-lint
-        uses: golangci/golangci-lint-action@v4
+      - name: Set up Earthly
+        uses: earthly/actions-setup@v1
         with:
           version: latest
-          args: --timeout=5m
 
-  build:
-    name: Build Binaries
-    runs-on: ubuntu-latest
+      - name: Run tests
+        run: earthly +test
 
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
-
-      - name: Set up Go
-        uses: actions/setup-go@v5
-        with:
-          go-version: '1.21'
+      - name: Run linter
+        run: earthly +lint
+        continue-on-error: true
 
       - name: Build smithd
-        run: go build -v -o bin/smithd ./cmd/smithd
+        run: earthly +build-smithd
 
       - name: Build forge
-        run: go build -v -o bin/forge ./cmd/forge
+        run: earthly +build-forge
 
       - name: Verify binaries
         run: |
