@@ -30,6 +30,16 @@ build-forge:
         ./cmd/forge
     SAVE ARTIFACT bin/forge AS LOCAL bin/forge
 
+build-smithctl:
+    FROM +deps
+    COPY cmd/smithctl ./cmd/smithctl
+    COPY internal/smithctl ./internal/smithctl
+    RUN apk add --no-cache git
+    RUN CGO_ENABLED=0 go build -o bin/smithctl \
+        -ldflags "-X github.com/deploysmith/deploysmith/internal/smithctl/cmd.Version=dev -X github.com/deploysmith/deploysmith/internal/smithctl/cmd.GitCommit=$(git rev-parse --short HEAD 2>/dev/null || echo 'unknown') -X github.com/deploysmith/deploysmith/internal/smithctl/cmd.BuildTime=$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+        ./cmd/smithctl
+    SAVE ARTIFACT bin/smithctl AS LOCAL bin/smithctl
+
 test:
     FROM +deps
     COPY . .
@@ -60,8 +70,16 @@ docker-forge:
     ENTRYPOINT ["/usr/local/bin/forge"]
     SAVE IMAGE forge:latest
 
+docker-smithctl:
+    FROM alpine:3.19
+    RUN apk add --no-cache ca-certificates
+    COPY +build-smithctl/smithctl /usr/local/bin/smithctl
+    ENTRYPOINT ["/usr/local/bin/smithctl"]
+    SAVE IMAGE smithctl:latest
+
 all:
     BUILD +build-smithd
     BUILD +build-forge
+    BUILD +build-smithctl
     BUILD +test
     BUILD +lint
