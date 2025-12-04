@@ -1,0 +1,45 @@
+server:
+  port: 8080
+  api_keys:
+    - name: "ci-pipeline"
+      key: "${CI_API_KEY}"
+    - name: "admin"
+      key: "${ADMIN_API_KEY}"
+
+git:
+  repository_url: "https://github.com/user/k8s-gitops.git"
+  branch: "main"
+  username: "deployment-api-bot"
+  token: "${GIT_TOKEN}"
+  local_path: "/data/gitops-repo"
+  author_name: "Deployment API"
+  author_email: "deploy-api@example.com"
+
+services:
+  - name: "webapp"
+    namespace: "default"
+    manifest_path: "clusters/production/apps/webapp/deployment.yaml"
+    image_repository: "ghcr.io/myuser/webapp"
+    workload_type: "deployment"
+    registry_auth:
+      username: "${REGISTRY_USERNAME}"
+      password: "${REGISTRY_PASSWORD}"
+
+  - name: "api-service"
+    namespace: "default"
+    manifest_path: "clusters/production/apps/api-service/deployment.yaml"
+    image_repository: "ghcr.io/myuser/api-service"
+    workload_type: "deployment"
+
+  - name: "worker"
+    namespace: "default"
+    manifest_path: "clusters/production/apps/worker/cronjob.yaml"
+    image_repository: "ghcr.io/myuser/worker"
+    workload_type: "cronjob"
+
+database:
+  path: "/data/deployments.db"
+
+logging:
+  level: "info"  # debug, info, warn, error
+  format: "json"
