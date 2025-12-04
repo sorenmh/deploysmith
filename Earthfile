@@ -13,8 +13,8 @@ deps:
 build-smithd:
     FROM +deps
     COPY cmd/smithd ./cmd/smithd
-    COPY pkg ./pkg
     COPY internal/smithd ./internal/smithd
+    RUN apk add --no-cache git
     RUN CGO_ENABLED=1 go build -o bin/smithd \
         -ldflags "-X main.version=dev -X main.commit=$(git rev-parse --short HEAD 2>/dev/null || echo 'unknown') -X main.date=$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
         ./cmd/smithd
@@ -23,22 +23,12 @@ build-smithd:
 build-forge:
     FROM +deps
     COPY cmd/forge ./cmd/forge
-    COPY pkg ./pkg
     COPY internal/forge ./internal/forge
+    RUN apk add --no-cache git
     RUN CGO_ENABLED=0 go build -o bin/forge \
-        -ldflags "-X main.version=dev -X main.commit=$(git rev-parse --short HEAD 2>/dev/null || echo 'unknown') -X main.date=$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+        -ldflags "-X github.com/deploysmith/deploysmith/internal/forge/cmd.Version=dev -X github.com/deploysmith/deploysmith/internal/forge/cmd.GitCommit=$(git rev-parse --short HEAD 2>/dev/null || echo 'unknown') -X github.com/deploysmith/deploysmith/internal/forge/cmd.BuildTime=$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
         ./cmd/forge
     SAVE ARTIFACT bin/forge AS LOCAL bin/forge
-
-build-smithctl:
-    FROM +deps
-    COPY cmd/smithctl ./cmd/smithctl
-    COPY pkg ./pkg
-    COPY internal/smithctl ./internal/smithctl
-    RUN CGO_ENABLED=0 go build -o bin/smithctl \
-        -ldflags "-X main.version=dev -X main.commit=$(git rev-parse --short HEAD 2>/dev/null || echo 'unknown') -X main.date=$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
-        ./cmd/smithctl
-    SAVE ARTIFACT bin/smithctl AS LOCAL bin/smithctl
 
 test:
     FROM +deps
@@ -70,16 +60,8 @@ docker-forge:
     ENTRYPOINT ["/usr/local/bin/forge"]
     SAVE IMAGE forge:latest
 
-docker-smithctl:
-    FROM alpine:3.19
-    RUN apk add --no-cache ca-certificates
-    COPY +build-smithctl/smithctl /usr/local/bin/smithctl
-    ENTRYPOINT ["/usr/local/bin/smithctl"]
-    SAVE IMAGE smithctl:latest
-
 all:
     BUILD +build-smithd
     BUILD +build-forge
-    BUILD +build-smithctl
     BUILD +test
     BUILD +lint

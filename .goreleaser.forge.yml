@@ -1,0 +1,68 @@
+version: 2
+
+project_name: forge
+
+before:
+  hooks:
+    - go mod tidy
+
+builds:
+  - id: forge
+    main: ./cmd/forge
+    binary: forge
+    env:
+      - CGO_ENABLED=0
+    goos:
+      - linux
+      - darwin
+      - windows
+    goarch:
+      - amd64
+      - arm64
+    ldflags:
+      - -s -w
+      - -X github.com/deploysmith/deploysmith/internal/forge/cmd.Version={{.Version}}
+      - -X github.com/deploysmith/deploysmith/internal/forge/cmd.GitCommit={{.ShortCommit}}
+      - -X github.com/deploysmith/deploysmith/internal/forge/cmd.BuildTime={{.Date}}
+
+archives:
+  - id: forge
+    name_template: "forge_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
+    format_overrides:
+      - goos: windows
+        format: zip
+    files:
+      - README.md
+      - LICENSE*
+      - docs/specs/forge-spec.md
+
+checksum:
+  name_template: 'checksums.txt'
+
+snapshot:
+  name_template: "{{ incpatch .Version }}-next"
+
+changelog:
+  sort: asc
+  filters:
+    exclude:
+      - '^docs:'
+      - '^test:'
+      - '^chore:'
+      - '^ci:'
+  groups:
+    - title: 'Features'
+      regexp: '^feat:'
+      order: 0
+    - title: 'Bug Fixes'
+      regexp: '^fix:'
+      order: 1
+    - title: 'Others'
+      order: 999
+
+release:
+  github:
+    owner: deploysmith
+    name: deploysmith
+  name_template: "forge {{.Tag}}"
+  prerelease: auto

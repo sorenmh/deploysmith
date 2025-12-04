@@ -1,0 +1,43 @@
+# Build stage
+FROM golang:1.21-alpine AS builder
+
+WORKDIR /build
+
+# Install build dependencies
+RUN apk add --no-cache git
+
+# Copy go mod files
+COPY go.mod go.sum ./
+RUN go mod download
+
+# Copy source code
+COPY cmd/smithd ./cmd/smithd
+COPY internal/smithd ./internal/smithd
+
+# Build binary
+RUN CGO_ENABLED=1 go build -o smithd \
+    -ldflags "-s -w -X main.version=${VERSION:-dev} -X main.commit=${COMMIT:-unknown} -X main.date=$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+    ./cmd/smithd
+
+# Runtime stage
+FROM alpine:3.19
+
+# Install runtime dependencies
+RUN apk add --no-cache ca-certificates git openssh-client sqlite-libs
+
+# Create app user
+RUN addgroup -g 1000 smithd && \
+    adduser -D -u 1000 -G smithd smithd
+
+# Copy binary
+COPY --from=builder /build/smithd /usr/local/bin/smithd
+
+# Create data directory
+RUN mkdir -p /data && chown smithd:smithd /data
+
+USER smithd
+WORKDIR /data
+
+EXPOSE 8080
+
+ENTRYPOINT ["/usr/local/bin/smithd"]
