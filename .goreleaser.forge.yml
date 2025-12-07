@@ -62,7 +62,7 @@ changelog:
 
 release:
   github:
-    owner: deploysmith
+    owner: sorenmh
     name: deploysmith
   name_template: "forge {{.Tag}}"
   prerelease: auto
