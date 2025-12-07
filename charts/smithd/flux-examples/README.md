@@ -9,16 +9,19 @@ This directory contains example Flux CD manifests for deploying smithd using Git
 If your chart is in a Git repository:
 
 1. **Create the GitRepository source:**
+
    ```bash
    kubectl apply -f helmrepository-git.yaml
    ```
 
 2. **Create the namespace:**
+
    ```bash
    kubectl create namespace deploysmith
    ```
 
 3. **Create the secret with sensitive values:**
+
    ```bash
    # Edit the secret.yaml file with your actual values first
    kubectl apply -f secret.yaml
@@ -34,16 +37,19 @@ If your chart is in a Git repository:
 If you're publishing the chart to a Helm repository (GitHub Pages, ChartMuseum, Harbor, etc.):
 
 1. **Create the HelmRepository source:**
+
    ```bash
    kubectl apply -f helmrepository.yaml
    ```
 
 2. **Create the namespace:**
+
    ```bash
    kubectl create namespace deploysmith
    ```
 
 3. **Create the secret:**
+
    ```bash
    kubectl apply -f secret.yaml
    ```
@@ -195,6 +201,7 @@ flux resume helmrelease smithd -n deploysmith
 ## Upgrading
 
 Flux will automatically upgrade the chart when:
+
 - A new version matching the semver range is available (for HelmRepository)
 - The Git repository is updated (for GitRepository)
 
@@ -233,7 +240,7 @@ metadata:
   namespace: flux-system
 spec:
   interval: 5m
-  url: https://github.com/your-org/deploysmith
+  url: https://github.com/sorenmh/deploysmith
   ref:
     branch: main
 EOF

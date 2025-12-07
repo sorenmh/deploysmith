@@ -9,9 +9,11 @@ keywords:
   - gitops
   - deployment
   - kubernetes
-home: https://github.com/your-org/deploysmith
+home: https://github.com/sorenmh/deploysmith
 sources:
-  - https://github.com/your-org/deploysmith
+  - https://github.com/sorenmh/deploysmith
 maintainers:
-  - name: DeploySmith Team
-    email: smithd@deploysmith.io
+  - name: Søren Møller Hansen
+    email: smh@merk.dk
+# O'Saasy License - See LICENSE.md for details
+# Free to use, modify, and distribute. Cannot be offered as a competing SaaS product.

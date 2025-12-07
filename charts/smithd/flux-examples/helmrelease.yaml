@@ -11,7 +11,7 @@ spec:
   chart:
     spec:
       chart: smithd
-      version: '0.1.x'  # Use semver range or specific version
+      version: "0.1.x" # Use semver range or specific version
       sourceRef:
         kind: HelmRepository
         name: deploysmith
@@ -31,7 +31,7 @@ spec:
   values:
     # Image configuration
     image:
-      repository: ghcr.io/your-org/smithd
+      repository: ghcr.io/sorenmh/smithd
       tag: v1.0.0
       pullPolicy: IfNotPresent
 
@@ -56,7 +56,7 @@ spec:
         bucket: deploysmith-versions
         region: us-east-1
       gitops:
-        repo: git@github.com:your-org/gitops.git
+        repo: git@github.com:sorenmh/gitops.git
         userName: smithd
         userEmail: smithd@your-company.com
 

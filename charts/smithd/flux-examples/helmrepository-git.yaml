@@ -12,6 +12,6 @@ spec:
   ref:
     branch: main
   # For SSH access:
-  # url: ssh://git@github.com/your-org/deploysmith
+  # url: ssh://git@github.com/sorenmh/deploysmith
   # secretRef:
   #   name: deploysmith-git-auth

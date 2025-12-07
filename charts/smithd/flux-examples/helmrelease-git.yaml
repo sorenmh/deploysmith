@@ -29,7 +29,7 @@ spec:
 
   values:
     image:
-      repository: ghcr.io/your-org/smithd
+      repository: ghcr.io/sorenmh/smithd
       tag: v1.0.0
 
     resources:
@@ -49,7 +49,7 @@ spec:
         bucket: deploysmith-versions
         region: us-east-1
       gitops:
-        repo: git@github.com:your-org/gitops.git
+        repo: git@github.com:sorenmh/gitops.git
         userName: smithd
         userEmail: smithd@your-company.com
 
