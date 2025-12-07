@@ -286,4 +286,6 @@ All progress is tracked in:
 
 ## License
 
-TBD - Intended to be open source
+Licensed under the O'Saasy License - see [LICENSE.md](LICENSE.md) for details.
+
+You may freely use, modify, and distribute this software. However, you may not offer it to third parties as a competing hosted, managed, or SaaS product where the primary value is the functionality of DeploySmith itself.
