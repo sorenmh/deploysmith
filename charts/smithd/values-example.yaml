@@ -1,0 +1,59 @@
+# Example values file for deploying smithd to your cluster
+# Copy this file and customize it for your environment
+
+# For production deployment with AWS S3 and GitHub
+config:
+  s3:
+    bucket: my-deploysmith-versions
+    region: us-east-1
+  gitops:
+    repo: git@github.com:myorg/gitops.git
+    userName: smithd
+    userEmail: smithd@mycompany.com
+
+secrets:
+  # Generate with: openssl rand -hex 32
+  apiKeys: "sk_prod_REPLACE_WITH_SECURE_KEY"
+
+  aws:
+    # Use AWS IAM roles in production if running in EKS
+    accessKeyId: "YOUR_AWS_ACCESS_KEY"
+    secretAccessKey: "YOUR_AWS_SECRET_KEY"
+
+  # Generate SSH key with: ssh-keygen -t rsa -b 4096 -f ./id_rsa -N ""
+  # Then add the public key to your Git repository's deploy keys
+  gitopsSshKey: |
+    -----BEGIN OPENSSH PRIVATE KEY-----
+    REPLACE_WITH_YOUR_SSH_PRIVATE_KEY
+    -----END OPENSSH PRIVATE KEY-----
+
+# Optional: Enable ingress for external access
+ingress:
+  enabled: true
+  className: nginx
+  annotations:
+    cert-manager.io/cluster-issuer: letsencrypt-prod
+  hosts:
+    - host: smithd.example.com
+      paths:
+        - path: /
+          pathType: Prefix
+  tls:
+    - secretName: smithd-tls
+      hosts:
+        - smithd.example.com
+
+# Optional: Configure resources based on your workload
+resources:
+  limits:
+    cpu: 1000m
+    memory: 512Mi
+  requests:
+    cpu: 100m
+    memory: 128Mi
+
+# Optional: Configure persistence
+persistence:
+  enabled: true
+  size: 20Gi
+  # storageClass: gp3

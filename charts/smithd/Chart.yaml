@@ -1,0 +1,17 @@
+apiVersion: v2
+name: smithd
+description: A Helm chart for DeploySmith server (smithd) - GitOps-based deployment controller for Kubernetes
+type: application
+version: 0.1.0
+appVersion: "1.0.0"
+keywords:
+  - deploysmith
+  - gitops
+  - deployment
+  - kubernetes
+home: https://github.com/your-org/deploysmith
+sources:
+  - https://github.com/your-org/deploysmith
+maintainers:
+  - name: DeploySmith Team
+    email: smithd@deploysmith.io

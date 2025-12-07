@@ -1,0 +1,21 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "smithd.configMapName" . }}
+  labels:
+    {{- include "smithd.labels" . | nindent 4 }}
+data:
+  PORT: {{ .Values.config.port | quote }}
+  DB_TYPE: {{ .Values.config.database.type | quote }}
+  DB_PATH: {{ .Values.config.database.path | quote }}
+  S3_BUCKET: {{ .Values.config.s3.bucket | quote }}
+  S3_REGION: {{ .Values.config.s3.region | quote }}
+  {{- if .Values.config.s3.endpoint }}
+  AWS_ENDPOINT: {{ .Values.config.s3.endpoint | quote }}
+  {{- end }}
+  {{- if .Values.config.gitops.repo }}
+  GITOPS_REPO: {{ .Values.config.gitops.repo | quote }}
+  {{- end }}
+  GITOPS_SSH_KEY_PATH: {{ .Values.config.gitops.sshKeyPath | quote }}
+  GITOPS_USER_NAME: {{ .Values.config.gitops.userName | quote }}
+  GITOPS_USER_EMAIL: {{ .Values.config.gitops.userEmail | quote }}
