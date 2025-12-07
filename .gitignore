@@ -34,3 +34,22 @@ go.work
 # Environment files
 .env
 .env.local
+
+# Terraform
+*.tfstate
+*.tfstate.*
+.terraform/
+.terraform.lock.hcl
+terraform.tfvars
+*.auto.tfvars
+
+# SSH keys
+scripts/ssh/
+*.pem
+*.key
+id_rsa*
+
+# Secrets
+secrets/
+*.secret
+credentials.json

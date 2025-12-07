@@ -1,0 +1,84 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
+  packages: write
+
+jobs:
+  release:
+    name: Build and Release
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.23'
+
+      - name: Run GoReleaser
+        uses: goreleaser/goreleaser-action@v5
+        with:
+          distribution: goreleaser
+          version: '~> v2'
+          args: release --clean
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  docker:
+    name: Build and Push Docker Images
+    runs-on: ubuntu-latest
+    needs: release
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Earthly
+        uses: earthly/actions-setup@v1
+        with:
+          version: latest
+
+      - name: Log in to GitHub Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Extract version from tag
+        id: version
+        run: echo "VERSION=${GITHUB_REF#refs/tags/v}" >> $GITHUB_OUTPUT
+
+      - name: Build and push smithd
+        run: |
+          earthly +docker-smithd
+          docker tag smithd:latest ghcr.io/${{ github.repository_owner }}/smithd:v${{ steps.version.outputs.VERSION }}
+          docker tag smithd:latest ghcr.io/${{ github.repository_owner }}/smithd:latest
+          docker push ghcr.io/${{ github.repository_owner }}/smithd:v${{ steps.version.outputs.VERSION }}
+          docker push ghcr.io/${{ github.repository_owner }}/smithd:latest
+
+      - name: Build and push forge
+        run: |
+          earthly +docker-forge
+          docker tag forge:latest ghcr.io/${{ github.repository_owner }}/forge:v${{ steps.version.outputs.VERSION }}
+          docker tag forge:latest ghcr.io/${{ github.repository_owner }}/forge:latest
+          docker push ghcr.io/${{ github.repository_owner }}/forge:v${{ steps.version.outputs.VERSION }}
+          docker push ghcr.io/${{ github.repository_owner }}/forge:latest
+
+      - name: Build and push smithctl
+        run: |
+          earthly +docker-smithctl
+          docker tag smithctl:latest ghcr.io/${{ github.repository_owner }}/smithctl:v${{ steps.version.outputs.VERSION }}
+          docker tag smithctl:latest ghcr.io/${{ github.repository_owner }}/smithctl:latest
+          docker push ghcr.io/${{ github.repository_owner }}/smithctl:v${{ steps.version.outputs.VERSION }}
+          docker push ghcr.io/${{ github.repository_owner }}/smithctl:latest
