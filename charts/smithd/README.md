@@ -5,6 +5,7 @@ A Helm chart for deploying DeploySmith server (smithd) - a GitOps-based deployme
 ## Overview
 
 This chart deploys smithd to your Kubernetes cluster with the following components:
+
 - **Deployment**: Runs the smithd server
 - **Service**: Exposes the smithd API
 - **PersistentVolumeClaim**: Stores the SQLite database
@@ -89,14 +90,14 @@ helm install smithd ./charts/smithd \
 
 These values must be set for smithd to function:
 
-| Parameter | Description | Example |
-|-----------|-------------|---------|
-| `secrets.apiKeys` | API keys for authentication | `sk_prod_abc123` |
-| `secrets.aws.accessKeyId` | AWS access key | `AKIAIOSFODNN7EXAMPLE` |
-| `secrets.aws.secretAccessKey` | AWS secret key | `wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY` |
-| `secrets.gitopsSshKey` | SSH private key for Git | See example above |
-| `config.s3.bucket` | S3 bucket name | `deploysmith-versions` |
-| `config.gitops.repo` | Git repository URL | `git@github.com:org/gitops.git` |
+| Parameter                     | Description                 | Example                                    |
+| ----------------------------- | --------------------------- | ------------------------------------------ |
+| `secrets.apiKeys`             | API keys for authentication | `sk_prod_abc123`                           |
+| `secrets.aws.accessKeyId`     | AWS access key              | `AKIAIOSFODNN7EXAMPLE`                     |
+| `secrets.aws.secretAccessKey` | AWS secret key              | `wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY` |
+| `secrets.gitopsSshKey`        | SSH private key for Git     | See example above                          |
+| `config.s3.bucket`            | S3 bucket name              | `deploysmith-versions`                     |
+| `config.gitops.repo`          | Git repository URL          | `git@github.com:org/gitops.git`            |
 
 ### Common Configuration Options
 
@@ -105,7 +106,7 @@ These values must be set for smithd to function:
 ```yaml
 image:
   repository: ghcr.io/your-org/smithd
-  tag: "v1.0.0"
+  tag: "v0.1.1"
   pullPolicy: IfNotPresent
 ```
 
@@ -262,6 +263,7 @@ kubectl logs -l app.kubernetes.io/name=smithd
 **Issue**: Pod crashes with "permission denied" on database
 
 **Solution**: Check PVC permissions and pod security context:
+
 ```yaml
 podSecurityContext:
   fsGroup: 1000
@@ -271,6 +273,7 @@ podSecurityContext:
 **Issue**: Cannot connect to S3
 
 **Solution**: Verify AWS credentials and S3 endpoint:
+
 ```bash
 kubectl exec -it <pod-name> -- env | grep AWS
 ```
@@ -278,6 +281,7 @@ kubectl exec -it <pod-name> -- env | grep AWS
 **Issue**: GitOps commits failing
 
 **Solution**: Check SSH key permissions and Git repository access:
+
 ```bash
 # SSH key should be mode 0600
 kubectl exec -it <pod-name> -- ls -la /app/.ssh/
@@ -313,6 +317,7 @@ helm install smithd ./charts/smithd -f my-values.yaml
 ## Support
 
 For issues and questions:
+
 - GitHub Issues: https://github.com/sorenmh/deploysmith/issues
 - Documentation: See the [main README](../../README.md)
 
