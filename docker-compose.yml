@@ -1,0 +1,116 @@
+version: '3.8'
+
+services:
+  # MinIO - S3-compatible object storage
+  minio:
+    image: minio/minio:latest
+    container_name: deploysmith-minio
+    ports:
+      - "9000:9000"      # API
+      - "9001:9001"      # Console
+    environment:
+      MINIO_ROOT_USER: minioadmin
+      MINIO_ROOT_PASSWORD: minioadmin123
+    command: server /data --console-address ":9001"
+    volumes:
+      - minio-data:/data
+    healthcheck:
+      test: ["CMD", "mc", "ready", "local"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    networks:
+      - deploysmith
+
+  # MinIO Client - Initialize buckets
+  minio-init:
+    image: minio/mc:latest
+    container_name: deploysmith-minio-init
+    depends_on:
+      minio:
+        condition: service_healthy
+    entrypoint: >
+      /bin/sh -c "
+      mc alias set myminio http://minio:9000 minioadmin minioadmin123;
+      mc mb myminio/deploysmith-versions --ignore-existing;
+      mc anonymous set none myminio/deploysmith-versions;
+      echo 'MinIO bucket created: deploysmith-versions';
+      "
+    networks:
+      - deploysmith
+
+  # Gitea - Git server for GitOps repository
+  gitea:
+    image: gitea/gitea:latest
+    container_name: deploysmith-gitea
+    ports:
+      - "3000:3000"      # HTTP
+      - "2222:22"        # SSH
+    environment:
+      - USER_UID=1000
+      - USER_GID=1000
+      - GITEA__database__DB_TYPE=sqlite3
+      - GITEA__database__PATH=/data/gitea/gitea.db
+      - GITEA__server__DOMAIN=localhost
+      - GITEA__server__SSH_DOMAIN=localhost
+      - GITEA__server__HTTP_PORT=3000
+      - GITEA__server__ROOT_URL=http://localhost:3000
+      - GITEA__server__SSH_PORT=2222
+      - GITEA__security__INSTALL_LOCK=true
+      - GITEA__service__DISABLE_REGISTRATION=false
+    volumes:
+      - gitea-data:/data
+      - /etc/timezone:/etc/timezone:ro
+      - /etc/localtime:/etc/localtime:ro
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:3000/"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - deploysmith
+
+  # smithd - DeploySmith server
+  smithd:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: deploysmith-smithd
+    ports:
+      - "8080:8080"
+    environment:
+      - PORT=8080
+      - API_KEYS=${API_KEYS:-sk_local_test_key}
+      - DB_TYPE=sqlite
+      - DB_PATH=/data/smithd.db
+      - S3_BUCKET=deploysmith-versions
+      - S3_REGION=us-east-1
+      - AWS_ACCESS_KEY_ID=minioadmin
+      - AWS_SECRET_ACCESS_KEY=minioadmin123
+      - AWS_ENDPOINT=http://minio:9000
+      - GITOPS_REPO=${GITOPS_REPO:-http://gitea:3000/deploysmith/gitops.git}
+      - GITOPS_SSH_KEY_PATH=/app/.ssh/id_rsa
+      - GITOPS_USER_NAME=smithd
+      - GITOPS_USER_EMAIL=smithd@deploysmith.io
+    volumes:
+      - smithd-data:/data
+      - ./scripts/ssh:/app/.ssh:ro
+    depends_on:
+      minio:
+        condition: service_healthy
+      gitea:
+        condition: service_healthy
+    networks:
+      - deploysmith
+
+volumes:
+  minio-data:
+    driver: local
+  gitea-data:
+    driver: local
+  smithd-data:
+    driver: local
+
+networks:
+  deploysmith:
+    driver: bridge

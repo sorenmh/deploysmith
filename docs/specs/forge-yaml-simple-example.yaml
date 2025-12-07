@@ -1,0 +1,47 @@
+# Simple forge YAML example
+# Minimal configuration for a basic web service
+
+version: "1.0"
+
+app:
+  name: hello-world
+  namespace: production
+
+components:
+  - name: web
+    type: deployment
+    image: ghcr.io/myorg/hello-world:{{.Version}}
+    replicas: 2
+    port: 3000
+
+    resources:
+      requests:
+        cpu: 50m
+        memory: 64Mi
+      limits:
+        cpu: 200m
+        memory: 256Mi
+
+    env:
+      - name: NODE_ENV
+        value: production
+
+    healthcheck:
+      liveness:
+        path: /healthz
+        port: 3000
+      readiness:
+        path: /ready
+        port: 3000
+
+    ingress:
+      enabled: true
+      hostname: hello.example.com
+      tls:
+        enabled: true
+        secretName: hello-tls
+
+config:
+  labels:
+    app: hello-world
+    environment: production

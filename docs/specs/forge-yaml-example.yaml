@@ -1,0 +1,131 @@
+# DeploySmith forge YAML specification
+# This file is used by the forge CLI to generate Kubernetes manifests
+
+version: "1.0"
+
+# Application metadata
+app:
+  name: my-api-service
+  namespace: default
+
+# Components to deploy
+components:
+  # Main API service
+  - name: api
+    type: deployment
+    image: ghcr.io/myorg/my-api:{{.Version}}
+    replicas: 3
+    port: 8080
+
+    # Resource limits
+    resources:
+      requests:
+        cpu: 100m
+        memory: 128Mi
+      limits:
+        cpu: 500m
+        memory: 512Mi
+
+    # Environment variables
+    env:
+      - name: DATABASE_URL
+        valueFrom:
+          secretKeyRef:
+            name: db-credentials
+            key: url
+      - name: LOG_LEVEL
+        value: info
+      - name: PORT
+        value: "8080"
+
+    # Health checks
+    healthcheck:
+      liveness:
+        path: /health/live
+        port: 8080
+        initialDelaySeconds: 30
+        periodSeconds: 10
+      readiness:
+        path: /health/ready
+        port: 8080
+        initialDelaySeconds: 10
+        periodSeconds: 5
+
+    # Ingress configuration
+    ingress:
+      enabled: true
+      hostname: api.example.com
+      tls:
+        enabled: true
+        secretName: api-tls-cert
+      annotations:
+        cert-manager.io/cluster-issuer: letsencrypt-prod
+        traefik.ingress.kubernetes.io/router.middlewares: default-rate-limit@kubernetescrd
+
+  # Background worker
+  - name: worker
+    type: deployment
+    image: ghcr.io/myorg/my-api:{{.Version}}
+    replicas: 2
+    command: ["./worker"]
+
+    resources:
+      requests:
+        cpu: 200m
+        memory: 256Mi
+      limits:
+        cpu: 1000m
+        memory: 1Gi
+
+    env:
+      - name: DATABASE_URL
+        valueFrom:
+          secretKeyRef:
+            name: db-credentials
+            key: url
+      - name: WORKER_CONCURRENCY
+        value: "10"
+
+  # Database migration job (runs once per deployment)
+  - name: migrations
+    type: job
+    image: ghcr.io/myorg/my-api:{{.Version}}
+    command: ["./migrate", "up"]
+    restartPolicy: OnFailure
+
+    resources:
+      requests:
+        cpu: 100m
+        memory: 128Mi
+      limits:
+        cpu: 200m
+        memory: 256Mi
+
+    env:
+      - name: DATABASE_URL
+        valueFrom:
+          secretKeyRef:
+            name: db-credentials
+            key: url
+
+# Global configuration
+config:
+  # Labels applied to all resources
+  labels:
+    team: platform
+    app: my-api-service
+    managedBy: deploysmith
+
+  # Annotations applied to all resources
+  annotations:
+    deploysmith.io/managed: "true"
+    deploysmith.io/docs: "https://docs.example.com/my-api"
+
+  # Image pull secrets
+  imagePullSecrets:
+    - name: ghcr-credentials
+
+  # Service account
+  serviceAccount:
+    name: my-api-service
+    create: false  # Assume it already exists
