@@ -7,7 +7,9 @@ before:
     - go mod tidy
 
 builds:
-  # smithd - Server component
+  # smithd - Server component (CGO required for SQLite)
+  # Only build for linux/amd64 due to CGO cross-compilation complexity
+  # Use Docker images for other platforms
   - id: smithd
     main: ./cmd/smithd
     binary: smithd
@@ -15,10 +17,8 @@ builds:
       - CGO_ENABLED=1
     goos:
       - linux
-      - darwin
     goarch:
       - amd64
-      - arm64
     ldflags:
       - -s -w
       - -X main.version={{.Version}}
