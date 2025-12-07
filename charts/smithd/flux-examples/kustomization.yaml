@@ -1,0 +1,36 @@
+---
+# Flux Kustomization to deploy all smithd resources
+apiVersion: kustomize.toolkit.fluxcd.io/v1
+kind: Kustomization
+metadata:
+  name: smithd
+  namespace: flux-system
+spec:
+  interval: 10m
+  timeout: 5m
+
+  # Source reference
+  sourceRef:
+    kind: GitRepository
+    name: deploysmith
+
+  # Path to the Flux manifests in your repo
+  path: ./charts/smithd/flux-examples
+
+  # Prune resources when removed from Git
+  prune: true
+
+  # Wait for resources to be ready
+  wait: true
+
+  # Health checks
+  healthChecks:
+    - apiVersion: helm.toolkit.fluxcd.io/v2beta1
+      kind: HelmRelease
+      name: smithd
+      namespace: deploysmith
+
+  # Dependencies (if any)
+  dependsOn:
+    - name: cert-manager
+    - name: ingress-nginx

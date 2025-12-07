@@ -1,0 +1,17 @@
+---
+# Alternative: Use GitRepository source instead of HelmRepository
+# This is useful when the chart is in a Git repository but not packaged in a Helm repo
+apiVersion: source.toolkit.fluxcd.io/v1
+kind: GitRepository
+metadata:
+  name: deploysmith
+  namespace: flux-system
+spec:
+  interval: 5m
+  url: https://github.com/sorenmh/deploysmith
+  ref:
+    branch: main
+  # For SSH access:
+  # url: ssh://git@github.com/your-org/deploysmith
+  # secretRef:
+  #   name: deploysmith-git-auth

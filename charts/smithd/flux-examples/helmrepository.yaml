@@ -1,0 +1,18 @@
+---
+apiVersion: source.toolkit.fluxcd.io/v1beta2
+kind: HelmRepository
+metadata:
+  name: deploysmith
+  namespace: flux-system
+spec:
+  interval: 5m
+  # Option 1: If you're hosting the chart in a Helm repository (e.g., GitHub Pages, ChartMuseum, Harbor)
+  url: https://your-org.github.io/deploysmith
+
+  # Option 2: If using OCI registry (e.g., GitHub Container Registry, AWS ECR)
+  # type: oci
+  # url: oci://ghcr.io/your-org/charts
+
+  # Optional: Authentication for private repositories
+  # secretRef:
+  #   name: helm-repo-secret

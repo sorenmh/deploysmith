@@ -1,0 +1,84 @@
+---
+apiVersion: helm.toolkit.fluxcd.io/v2beta1
+kind: HelmRelease
+metadata:
+  name: smithd
+  namespace: deploysmith
+spec:
+  interval: 10m
+  timeout: 5m
+
+  chart:
+    spec:
+      chart: smithd
+      version: '0.1.x'  # Use semver range or specific version
+      sourceRef:
+        kind: HelmRepository
+        name: deploysmith
+        namespace: flux-system
+      interval: 5m
+
+  # Automatically upgrade when new versions are available
+  upgrade:
+    remediation:
+      retries: 3
+
+  # Rollback on failure
+  rollback:
+    recreate: true
+
+  # Values override
+  values:
+    # Image configuration
+    image:
+      repository: ghcr.io/your-org/smithd
+      tag: v1.0.0
+      pullPolicy: IfNotPresent
+
+    # Resource limits
+    resources:
+      limits:
+        cpu: 1000m
+        memory: 512Mi
+      requests:
+        cpu: 100m
+        memory: 128Mi
+
+    # Persistence
+    persistence:
+      enabled: true
+      size: 20Gi
+      storageClass: gp3
+
+    # Configuration
+    config:
+      s3:
+        bucket: deploysmith-versions
+        region: us-east-1
+      gitops:
+        repo: git@github.com:your-org/gitops.git
+        userName: smithd
+        userEmail: smithd@your-company.com
+
+    # Ingress
+    ingress:
+      enabled: true
+      className: nginx
+      annotations:
+        cert-manager.io/cluster-issuer: letsencrypt-prod
+      hosts:
+        - host: smithd.example.com
+          paths:
+            - path: /
+              pathType: Prefix
+      tls:
+        - secretName: smithd-tls
+          hosts:
+            - smithd.example.com
+
+  # Reference to external secrets
+  valuesFrom:
+    - kind: Secret
+      name: smithd-secrets
+      valuesKey: values.yaml
+      optional: false
