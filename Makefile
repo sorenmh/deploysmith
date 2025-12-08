@@ -33,6 +33,10 @@ build-smithctl-all: ## Build smithctl for all platforms (Linux, macOS, Windows) 
 	@echo "Building smithctl for all platforms..."
 	earthly +build-smithctl-all
 
+build-forge-all: ## Build forge for all platforms (Linux, macOS, Windows) using Earthly
+	@echo "Building forge for all platforms..."
+	earthly +build-forge-all
+
 earthly-build-smithd: ## Build smithd using Earthly (Linux binary)
 	earthly +build-smithd
 

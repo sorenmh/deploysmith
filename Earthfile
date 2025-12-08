@@ -30,6 +30,51 @@ build-forge:
         ./cmd/forge
     SAVE ARTIFACT bin/forge AS LOCAL bin/forge
 
+# Build forge for all platforms using cross-compilation
+build-forge-all:
+    FROM +deps
+    COPY cmd/forge ./cmd/forge
+    COPY internal/forge ./internal/forge
+    RUN apk add --no-cache git
+
+    # Build for Linux amd64
+    RUN CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -o bin/forge-linux-amd64 \
+        -ldflags "-X github.com/deploysmith/deploysmith/internal/forge/cmd.Version=dev -X github.com/deploysmith/deploysmith/internal/forge/cmd.GitCommit=$(git rev-parse --short HEAD 2>/dev/null || echo 'unknown') -X github.com/deploysmith/deploysmith/internal/forge/cmd.BuildTime=$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+        ./cmd/forge
+
+    # Build for Linux arm64
+    RUN CGO_ENABLED=0 GOOS=linux GOARCH=arm64 go build -o bin/forge-linux-arm64 \
+        -ldflags "-X github.com/deploysmith/deploysmith/internal/forge/cmd.Version=dev -X github.com/deploysmith/deploysmith/internal/forge/cmd.GitCommit=$(git rev-parse --short HEAD 2>/dev/null || echo 'unknown') -X github.com/deploysmith/deploysmith/internal/forge/cmd.BuildTime=$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+        ./cmd/forge
+
+    # Build for macOS amd64
+    RUN CGO_ENABLED=0 GOOS=darwin GOARCH=amd64 go build -o bin/forge-darwin-amd64 \
+        -ldflags "-X github.com/deploysmith/deploysmith/internal/forge/cmd.Version=dev -X github.com/deploysmith/deploysmith/internal/forge/cmd.GitCommit=$(git rev-parse --short HEAD 2>/dev/null || echo 'unknown') -X github.com/deploysmith/deploysmith/internal/forge/cmd.BuildTime=$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+        ./cmd/forge
+
+    # Build for macOS arm64
+    RUN CGO_ENABLED=0 GOOS=darwin GOARCH=arm64 go build -o bin/forge-darwin-arm64 \
+        -ldflags "-X github.com/deploysmith/deploysmith/internal/forge/cmd.Version=dev -X github.com/deploysmith/deploysmith/internal/forge/cmd.GitCommit=$(git rev-parse --short HEAD 2>/dev/null || echo 'unknown') -X github.com/deploysmith/deploysmith/internal/forge/cmd.BuildTime=$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+        ./cmd/forge
+
+    # Build for Windows amd64
+    RUN CGO_ENABLED=0 GOOS=windows GOARCH=amd64 go build -o bin/forge-windows-amd64.exe \
+        -ldflags "-X github.com/deploysmith/deploysmith/internal/forge/cmd.Version=dev -X github.com/deploysmith/deploysmith/internal/forge/cmd.GitCommit=$(git rev-parse --short HEAD 2>/dev/null || echo 'unknown') -X github.com/deploysmith/deploysmith/internal/forge/cmd.BuildTime=$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+        ./cmd/forge
+
+    # Build for Windows arm64
+    RUN CGO_ENABLED=0 GOOS=windows GOARCH=arm64 go build -o bin/forge-windows-arm64.exe \
+        -ldflags "-X github.com/deploysmith/deploysmith/internal/forge/cmd.Version=dev -X github.com/deploysmith/deploysmith/internal/forge/cmd.GitCommit=$(git rev-parse --short HEAD 2>/dev/null || echo 'unknown') -X github.com/deploysmith/deploysmith/internal/forge/cmd.BuildTime=$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+        ./cmd/forge
+
+    # Save all binaries
+    SAVE ARTIFACT bin/forge-linux-amd64 AS LOCAL bin/forge-linux-amd64
+    SAVE ARTIFACT bin/forge-linux-arm64 AS LOCAL bin/forge-linux-arm64
+    SAVE ARTIFACT bin/forge-darwin-amd64 AS LOCAL bin/forge-darwin-amd64
+    SAVE ARTIFACT bin/forge-darwin-arm64 AS LOCAL bin/forge-darwin-arm64
+    SAVE ARTIFACT bin/forge-windows-amd64.exe AS LOCAL bin/forge-windows-amd64.exe
+    SAVE ARTIFACT bin/forge-windows-arm64.exe AS LOCAL bin/forge-windows-arm64.exe
+
 build-smithctl:
     FROM +deps
     COPY cmd/smithctl ./cmd/smithctl
