@@ -71,15 +71,56 @@ docker-compose down
 
 ### Building
 
-```bash
-# Using Earthly (recommended - same as CI)
-earthly +build-smithd
-earthly +build-forge
-earthly +all  # Build everything, run tests and linter
+DeploySmith uses a Makefile for common build tasks. Run `make help` to see all available targets.
 
-# Or build directly with Go
+```bash
+# Quick start - build all components for your local platform
+make build
+
+# Build individual components
+make build-smithd     # Build smithd server (requires CGO for SQLite)
+make build-forge      # Build forge CI tool
+make build-smithctl   # Build smithctl CLI
+
+# Build smithctl for all platforms (Linux, macOS, Windows)
+make build-smithctl-all
+
+# Build Docker images
+make docker           # Build all Docker images
+make docker-smithd    # Build smithd image
+make docker-forge     # Build forge image
+make docker-smithctl  # Build smithctl image
+
+# Testing
+make test             # Run unit tests
+make test-acceptance  # Run acceptance tests
+make lint             # Run linter
+
+# Clean build artifacts
+make clean
+
+# See all available targets
+make help
+```
+
+**Direct commands (without Makefile):**
+
+```bash
+# Build for your local platform (macOS, Linux, etc.)
 go build -o bin/smithd ./cmd/smithd
 go build -o bin/forge ./cmd/forge
+go build -o bin/smithctl ./cmd/smithctl
+
+# Using Earthly (builds Linux binaries for CI/production)
+earthly +build-smithd    # Builds Linux binary
+earthly +build-forge     # Builds Linux binary
+earthly +build-smithctl  # Builds Linux binary
+earthly +all             # Build everything, run tests and linter
+
+# Build Docker images
+earthly +docker-smithd
+earthly +docker-forge
+earthly +docker-smithctl
 ```
 
 ### Configuration

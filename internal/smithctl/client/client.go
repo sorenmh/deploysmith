@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"net/url"
 	"strconv"
+	"strings"
 	"time"
 )
 
@@ -21,12 +22,17 @@ type Client struct {
 // NewClient creates a new smithd API client
 func NewClient(baseURL, apiKey string) *Client {
 	return &Client{
-		baseURL: baseURL,
+		baseURL: strings.TrimRight(baseURL, "/"),
 		apiKey:  apiKey,
 		client: &http.Client{
 			Timeout: 30 * time.Second,
 		},
 	}
+}
+
+// joinURL safely joins a base URL with a path, handling trailing slashes
+func (c *Client) joinURL(path string) string {
+	return c.baseURL + "/" + strings.TrimLeft(path, "/")
 }
 
 // Application represents an application
@@ -85,14 +91,12 @@ type Policy struct {
 
 // RegisterApplicationRequest is the request body for registering an application
 type RegisterApplicationRequest struct {
-	Name       string `json:"name"`
-	GitopsRepo string `json:"gitopsRepo"`
-	GitopsPath string `json:"gitopsPath"`
+	Name string `json:"name"`
 }
 
 // RegisterApplication registers a new application
 func (c *Client) RegisterApplication(req RegisterApplicationRequest) (*Application, error) {
-	url := fmt.Sprintf("%s/api/v1/apps", c.baseURL)
+	url := c.joinURL("api/v1/apps")
 
 	body, err := json.Marshal(req)
 	if err != nil {
@@ -105,7 +109,7 @@ func (c *Client) RegisterApplication(req RegisterApplicationRequest) (*Applicati
 	}
 
 	httpReq.Header.Set("Content-Type", "application/json")
-	httpReq.Header.Set("Authorization", "Bearer "+c.apiKey)
+	httpReq.Header.Set("X-API-Key", c.apiKey)
 
 	resp, err := c.client.Do(httpReq)
 	if err != nil {
@@ -134,7 +138,7 @@ type ListApplicationsResponse struct {
 
 // ListApplications lists all applications
 func (c *Client) ListApplications(limit, offset int) (*ListApplicationsResponse, error) {
-	u, err := url.Parse(fmt.Sprintf("%s/api/v1/apps", c.baseURL))
+	u, err := url.Parse(c.joinURL("api/v1/apps"))
 	if err != nil {
 		return nil, fmt.Errorf("failed to parse URL: %w", err)
 	}
@@ -153,7 +157,7 @@ func (c *Client) ListApplications(limit, offset int) (*ListApplicationsResponse,
 		return nil, fmt.Errorf("failed to create request: %w", err)
 	}
 
-	httpReq.Header.Set("Authorization", "Bearer "+c.apiKey)
+	httpReq.Header.Set("X-API-Key", c.apiKey)
 
 	resp, err := c.client.Do(httpReq)
 	if err != nil {
@@ -176,14 +180,14 @@ func (c *Client) ListApplications(limit, offset int) (*ListApplicationsResponse,
 
 // GetApplication gets an application by name
 func (c *Client) GetApplication(appName string) (*Application, error) {
-	url := fmt.Sprintf("%s/api/v1/apps/%s", c.baseURL, appName)
+	url := c.joinURL(fmt.Sprintf("api/v1/apps/%s", appName))
 
 	httpReq, err := http.NewRequest("GET", url, nil)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create request: %w", err)
 	}
 
-	httpReq.Header.Set("Authorization", "Bearer "+c.apiKey)
+	httpReq.Header.Set("X-API-Key", c.apiKey)
 
 	resp, err := c.client.Do(httpReq)
 	if err != nil {
@@ -212,7 +216,7 @@ type ListVersionsResponse struct {
 
 // ListVersions lists all versions for an application
 func (c *Client) ListVersions(appName, status string, limit, offset int) (*ListVersionsResponse, error) {
-	u, err := url.Parse(fmt.Sprintf("%s/api/v1/apps/%s/versions", c.baseURL, appName))
+	u, err := url.Parse(c.joinURL(fmt.Sprintf("api/v1/apps/%s/versions", appName)))
 	if err != nil {
 		return nil, fmt.Errorf("failed to parse URL: %w", err)
 	}
@@ -234,7 +238,7 @@ func (c *Client) ListVersions(appName, status string, limit, offset int) (*ListV
 		return nil, fmt.Errorf("failed to create request: %w", err)
 	}
 
-	httpReq.Header.Set("Authorization", "Bearer "+c.apiKey)
+	httpReq.Header.Set("X-API-Key", c.apiKey)
 
 	resp, err := c.client.Do(httpReq)
 	if err != nil {
@@ -257,14 +261,14 @@ func (c *Client) ListVersions(appName, status string, limit, offset int) (*ListV
 
 // GetVersion gets a specific version
 func (c *Client) GetVersion(appName, versionID string) (*Version, error) {
-	url := fmt.Sprintf("%s/api/v1/apps/%s/versions/%s", c.baseURL, appName, versionID)
+	url := c.joinURL(fmt.Sprintf("api/v1/apps/%s/versions/%s", appName, versionID))
 
 	httpReq, err := http.NewRequest("GET", url, nil)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create request: %w", err)
 	}
 
-	httpReq.Header.Set("Authorization", "Bearer "+c.apiKey)
+	httpReq.Header.Set("X-API-Key", c.apiKey)
 
 	resp, err := c.client.Do(httpReq)
 	if err != nil {
@@ -297,7 +301,7 @@ type DeployVersionResponse struct {
 
 // DeployVersion deploys a version to an environment
 func (c *Client) DeployVersion(appName, versionID, environment string) (*DeployVersionResponse, error) {
-	url := fmt.Sprintf("%s/api/v1/apps/%s/versions/%s/deploy", c.baseURL, appName, versionID)
+	url := c.joinURL(fmt.Sprintf("api/v1/apps/%s/versions/%s/deploy", appName, versionID))
 
 	req := DeployVersionRequest{
 		Environment: environment,
@@ -314,7 +318,7 @@ func (c *Client) DeployVersion(appName, versionID, environment string) (*DeployV
 	}
 
 	httpReq.Header.Set("Content-Type", "application/json")
-	httpReq.Header.Set("Authorization", "Bearer "+c.apiKey)
+	httpReq.Header.Set("X-API-Key", c.apiKey)
 
 	resp, err := c.client.Do(httpReq)
 	if err != nil {
@@ -345,7 +349,7 @@ type CreatePolicyRequest struct {
 
 // CreatePolicy creates a new auto-deployment policy
 func (c *Client) CreatePolicy(appName string, req CreatePolicyRequest) (*Policy, error) {
-	url := fmt.Sprintf("%s/api/v1/apps/%s/policies", c.baseURL, appName)
+	url := c.joinURL(fmt.Sprintf("api/v1/apps/%s/policies", appName))
 
 	body, err := json.Marshal(req)
 	if err != nil {
@@ -358,7 +362,7 @@ func (c *Client) CreatePolicy(appName string, req CreatePolicyRequest) (*Policy,
 	}
 
 	httpReq.Header.Set("Content-Type", "application/json")
-	httpReq.Header.Set("Authorization", "Bearer "+c.apiKey)
+	httpReq.Header.Set("X-API-Key", c.apiKey)
 
 	resp, err := c.client.Do(httpReq)
 	if err != nil {
@@ -386,14 +390,14 @@ type ListPoliciesResponse struct {
 
 // ListPolicies lists all policies for an application
 func (c *Client) ListPolicies(appName string) (*ListPoliciesResponse, error) {
-	url := fmt.Sprintf("%s/api/v1/apps/%s/policies", c.baseURL, appName)
+	url := c.joinURL(fmt.Sprintf("api/v1/apps/%s/policies", appName))
 
 	httpReq, err := http.NewRequest("GET", url, nil)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create request: %w", err)
 	}
 
-	httpReq.Header.Set("Authorization", "Bearer "+c.apiKey)
+	httpReq.Header.Set("X-API-Key", c.apiKey)
 
 	resp, err := c.client.Do(httpReq)
 	if err != nil {
@@ -416,14 +420,14 @@ func (c *Client) ListPolicies(appName string) (*ListPoliciesResponse, error) {
 
 // DeletePolicy deletes a policy
 func (c *Client) DeletePolicy(appName, policyID string) error {
-	url := fmt.Sprintf("%s/api/v1/apps/%s/policies/%s", c.baseURL, appName, policyID)
+	url := c.joinURL(fmt.Sprintf("api/v1/apps/%s/policies/%s", appName, policyID))
 
 	httpReq, err := http.NewRequest("DELETE", url, nil)
 	if err != nil {
 		return fmt.Errorf("failed to create request: %w", err)
 	}
 
-	httpReq.Header.Set("Authorization", "Bearer "+c.apiKey)
+	httpReq.Header.Set("X-API-Key", c.apiKey)
 
 	resp, err := c.client.Do(httpReq)
 	if err != nil {

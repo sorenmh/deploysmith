@@ -36,9 +36,54 @@ build-smithctl:
     COPY internal/smithctl ./internal/smithctl
     RUN apk add --no-cache git
     RUN CGO_ENABLED=0 go build -o bin/smithctl \
-        -ldflags "-X github.com/deploysmith/deploysmith/internal/smithctl/cmd.Version=dev -X github.com/deploysmith/deploysmith/internal/smithctl/cmd.GitCommit=$(git rev-parse --short HEAD 2>/dev/null || echo 'unknown') -X github.com/deploysmith/deploysmith/internal/smithctl/cmd.BuildTime=$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+        -ldflags "-X github.com/sorenmh/deploysmith/internal/smithctl/cmd.Version=dev -X github.com/sorenmh/deploysmith/internal/smithctl/cmd.GitCommit=$(git rev-parse --short HEAD 2>/dev/null || echo 'unknown') -X github.com/sorenmh/deploysmith/internal/smithctl/cmd.BuildTime=$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
         ./cmd/smithctl
     SAVE ARTIFACT bin/smithctl AS LOCAL bin/smithctl
+
+# Build smithctl for all platforms using cross-compilation
+build-smithctl-all:
+    FROM +deps
+    COPY cmd/smithctl ./cmd/smithctl
+    COPY internal/smithctl ./internal/smithctl
+    RUN apk add --no-cache git
+
+    # Build for Linux amd64
+    RUN CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -o bin/smithctl-linux-amd64 \
+        -ldflags "-X github.com/sorenmh/deploysmith/internal/smithctl/cmd.Version=dev -X github.com/sorenmh/deploysmith/internal/smithctl/cmd.GitCommit=$(git rev-parse --short HEAD 2>/dev/null || echo 'unknown') -X github.com/sorenmh/deploysmith/internal/smithctl/cmd.BuildTime=$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+        ./cmd/smithctl
+
+    # Build for Linux arm64
+    RUN CGO_ENABLED=0 GOOS=linux GOARCH=arm64 go build -o bin/smithctl-linux-arm64 \
+        -ldflags "-X github.com/sorenmh/deploysmith/internal/smithctl/cmd.Version=dev -X github.com/sorenmh/deploysmith/internal/smithctl/cmd.GitCommit=$(git rev-parse --short HEAD 2>/dev/null || echo 'unknown') -X github.com/sorenmh/deploysmith/internal/smithctl/cmd.BuildTime=$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+        ./cmd/smithctl
+
+    # Build for macOS amd64
+    RUN CGO_ENABLED=0 GOOS=darwin GOARCH=amd64 go build -o bin/smithctl-darwin-amd64 \
+        -ldflags "-X github.com/sorenmh/deploysmith/internal/smithctl/cmd.Version=dev -X github.com/sorenmh/deploysmith/internal/smithctl/cmd.GitCommit=$(git rev-parse --short HEAD 2>/dev/null || echo 'unknown') -X github.com/sorenmh/deploysmith/internal/smithctl/cmd.BuildTime=$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+        ./cmd/smithctl
+
+    # Build for macOS arm64
+    RUN CGO_ENABLED=0 GOOS=darwin GOARCH=arm64 go build -o bin/smithctl-darwin-arm64 \
+        -ldflags "-X github.com/sorenmh/deploysmith/internal/smithctl/cmd.Version=dev -X github.com/sorenmh/deploysmith/internal/smithctl/cmd.GitCommit=$(git rev-parse --short HEAD 2>/dev/null || echo 'unknown') -X github.com/sorenmh/deploysmith/internal/smithctl/cmd.BuildTime=$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+        ./cmd/smithctl
+
+    # Build for Windows amd64
+    RUN CGO_ENABLED=0 GOOS=windows GOARCH=amd64 go build -o bin/smithctl-windows-amd64.exe \
+        -ldflags "-X github.com/sorenmh/deploysmith/internal/smithctl/cmd.Version=dev -X github.com/sorenmh/deploysmith/internal/smithctl/cmd.GitCommit=$(git rev-parse --short HEAD 2>/dev/null || echo 'unknown') -X github.com/sorenmh/deploysmith/internal/smithctl/cmd.BuildTime=$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+        ./cmd/smithctl
+
+    # Build for Windows arm64
+    RUN CGO_ENABLED=0 GOOS=windows GOARCH=arm64 go build -o bin/smithctl-windows-arm64.exe \
+        -ldflags "-X github.com/sorenmh/deploysmith/internal/smithctl/cmd.Version=dev -X github.com/sorenmh/deploysmith/internal/smithctl/cmd.GitCommit=$(git rev-parse --short HEAD 2>/dev/null || echo 'unknown') -X github.com/sorenmh/deploysmith/internal/smithctl/cmd.BuildTime=$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+        ./cmd/smithctl
+
+    # Save all binaries
+    SAVE ARTIFACT bin/smithctl-linux-amd64 AS LOCAL bin/smithctl-linux-amd64
+    SAVE ARTIFACT bin/smithctl-linux-arm64 AS LOCAL bin/smithctl-linux-arm64
+    SAVE ARTIFACT bin/smithctl-darwin-amd64 AS LOCAL bin/smithctl-darwin-amd64
+    SAVE ARTIFACT bin/smithctl-darwin-arm64 AS LOCAL bin/smithctl-darwin-arm64
+    SAVE ARTIFACT bin/smithctl-windows-amd64.exe AS LOCAL bin/smithctl-windows-amd64.exe
+    SAVE ARTIFACT bin/smithctl-windows-arm64.exe AS LOCAL bin/smithctl-windows-arm64.exe
 
 test:
     FROM +deps

@@ -40,17 +40,14 @@ func init() {
 
 func runPublish(cmd *cobra.Command, args []string) error {
 	// Validate required config
-	if smithdURL == "" {
-		return fmt.Errorf("--smithd-url or SMITHD_URL environment variable is required")
-	}
-	if smithdAPIKey == "" {
-		return fmt.Errorf("--smithd-api-key or SMITHD_API_KEY environment variable is required")
+	if err := ValidateConfig(); err != nil {
+		return err
 	}
 
 	fmt.Printf("Publishing version %s...\n", publishVersion)
 
 	// Call smithd API
-	c := client.NewClient(smithdURL, smithdAPIKey)
+	c := client.NewClient(GetSmithdURL(), GetSmithdAPIKey())
 	resp, err := c.PublishVersion(publishApp, publishVersion, publishNoValidate)
 	if err != nil {
 		return fmt.Errorf("failed to publish version: %w", err)

@@ -1,18 +1,11 @@
 package cmd
 
 import (
-	"fmt"
-	"os"
-	"path/filepath"
-
+	"github.com/deploysmith/deploysmith/internal/shared/config"
 	"github.com/spf13/cobra"
-	"github.com/spf13/viper"
 )
 
 var (
-	cfgFile      string
-	smithdURL    string
-	smithdAPIKey string
 	outputFormat string
 )
 
@@ -33,7 +26,7 @@ Configuration:
     SMITHD_URL          - smithd API endpoint (required)
     SMITHD_API_KEY      - smithd API authentication key (required)
 
-  Config file (~/.smithctl/config.yaml):
+  Config file (~/.deploysmith/config.yaml):
     url: https://smithd.example.com
     apiKey: sk_live_abc123
 
@@ -50,62 +43,21 @@ func Execute() error {
 }
 
 func init() {
-	cobra.OnInitialize(initConfig)
+	config.InitConfig()
+	config.AddFlags(rootCmd)
 
-	// Global flags
-	rootCmd.PersistentFlags().StringVar(&cfgFile, "config", "", "config file (default is ~/.smithctl/config.yaml)")
-	rootCmd.PersistentFlags().StringVar(&smithdURL, "url", "", "smithd API endpoint")
-	rootCmd.PersistentFlags().StringVar(&smithdAPIKey, "api-key", "", "smithd API key")
+	// Add smithctl-specific flags
 	rootCmd.PersistentFlags().StringVarP(&outputFormat, "output", "o", "table", "output format (table, json, yaml)")
-
-	// Bind flags to viper
-	viper.BindPFlag("url", rootCmd.PersistentFlags().Lookup("url"))
-	viper.BindPFlag("apiKey", rootCmd.PersistentFlags().Lookup("api-key"))
-}
-
-func initConfig() {
-	if cfgFile != "" {
-		// Use config file from the flag
-		viper.SetConfigFile(cfgFile)
-	} else {
-		// Find home directory
-		home, err := os.UserHomeDir()
-		if err != nil {
-			fmt.Fprintln(os.Stderr, err)
-			os.Exit(1)
-		}
-
-		// Search for config in ~/.smithctl directory
-		configPath := filepath.Join(home, ".smithctl")
-		viper.AddConfigPath(configPath)
-		viper.SetConfigType("yaml")
-		viper.SetConfigName("config")
-	}
-
-	// Read environment variables
-	viper.SetEnvPrefix("SMITHD")
-	viper.AutomaticEnv()
-
-	// If a config file is found, read it
-	if err := viper.ReadInConfig(); err == nil {
-		// Config file found and successfully parsed
-	}
 }
 
 // GetSmithdURL returns the configured smithd URL
 func GetSmithdURL() string {
-	if smithdURL != "" {
-		return smithdURL
-	}
-	return viper.GetString("url")
+	return config.GetSmithdURL()
 }
 
 // GetSmithdAPIKey returns the configured smithd API key
 func GetSmithdAPIKey() string {
-	if smithdAPIKey != "" {
-		return smithdAPIKey
-	}
-	return viper.GetString("apiKey")
+	return config.GetSmithdAPIKey()
 }
 
 // GetOutputFormat returns the output format
@@ -115,11 +67,5 @@ func GetOutputFormat() string {
 
 // ValidateConfig validates that required configuration is present
 func ValidateConfig() error {
-	if GetSmithdURL() == "" {
-		return fmt.Errorf("smithd URL is required (set SMITHD_URL env var, --url flag, or url in config file)")
-	}
-	if GetSmithdAPIKey() == "" {
-		return fmt.Errorf("smithd API key is required (set SMITHD_API_KEY env var, --api-key flag, or apiKey in config file)")
-	}
-	return nil
+	return config.ValidateConfig()
 }

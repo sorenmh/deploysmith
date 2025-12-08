@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"strings"
 	"time"
 )
 
@@ -19,12 +20,17 @@ type Client struct {
 // NewClient creates a new smithd API client
 func NewClient(baseURL, apiKey string) *Client {
 	return &Client{
-		baseURL: baseURL,
+		baseURL: strings.TrimRight(baseURL, "/"),
 		apiKey:  apiKey,
 		client: &http.Client{
 			Timeout: 30 * time.Second,
 		},
 	}
+}
+
+// joinURL safely joins a base URL with a path, handling trailing slashes
+func (c *Client) joinURL(path string) string {
+	return c.baseURL + "/" + strings.TrimLeft(path, "/")
 }
 
 // DraftVersionRequest is the request body for creating a draft version
@@ -45,7 +51,7 @@ type DraftVersionResponse struct {
 
 // CreateDraftVersion creates a new draft version
 func (c *Client) CreateDraftVersion(appName string, req DraftVersionRequest) (*DraftVersionResponse, error) {
-	url := fmt.Sprintf("%s/api/v1/apps/%s/versions/draft", c.baseURL, appName)
+	url := c.joinURL(fmt.Sprintf("api/v1/apps/%s/versions/draft", appName))
 
 	body, err := json.Marshal(req)
 	if err != nil {
@@ -58,7 +64,7 @@ func (c *Client) CreateDraftVersion(appName string, req DraftVersionRequest) (*D
 	}
 
 	httpReq.Header.Set("Content-Type", "application/json")
-	httpReq.Header.Set("Authorization", "Bearer "+c.apiKey)
+	httpReq.Header.Set("X-API-Key", c.apiKey)
 
 	resp, err := c.client.Do(httpReq)
 	if err != nil {
@@ -93,7 +99,7 @@ type PublishVersionResponse struct {
 
 // PublishVersion publishes a draft version
 func (c *Client) PublishVersion(appName, versionID string, noValidate bool) (*PublishVersionResponse, error) {
-	url := fmt.Sprintf("%s/api/v1/apps/%s/versions/%s/publish", c.baseURL, appName, versionID)
+	url := c.joinURL(fmt.Sprintf("api/v1/apps/%s/versions/%s/publish", appName, versionID))
 
 	req := PublishVersionRequest{
 		NoValidate: noValidate,
@@ -110,7 +116,7 @@ func (c *Client) PublishVersion(appName, versionID string, noValidate bool) (*Pu
 	}
 
 	httpReq.Header.Set("Content-Type", "application/json")
-	httpReq.Header.Set("Authorization", "Bearer "+c.apiKey)
+	httpReq.Header.Set("X-API-Key", c.apiKey)
 
 	resp, err := c.client.Do(httpReq)
 	if err != nil {

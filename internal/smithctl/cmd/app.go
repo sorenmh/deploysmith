@@ -20,10 +20,11 @@ var appRegisterCmd = &cobra.Command{
 	Long: `Register a new application with DeploySmith.
 
 The application name can be provided as a positional argument or via the --name flag.
+smithd will deploy manifests to the global GitOps repository configured on the server.
 
 Example:
   smithctl app register my-api-service
-  smithctl app register --name my-api-service --gitops-repo https://github.com/org/gitops --gitops-path apps/my-api-service`,
+  smithctl app register --name my-api-service`,
 	Args: cobra.MaximumNArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		// Validate configuration
@@ -40,26 +41,13 @@ Example:
 			return fmt.Errorf("application name is required")
 		}
 
-		// Get other required flags
-		gitopsRepo, _ := cmd.Flags().GetString("gitops-repo")
-		gitopsPath, _ := cmd.Flags().GetString("gitops-path")
-
-		if gitopsRepo == "" {
-			return fmt.Errorf("--gitops-repo is required")
-		}
-		if gitopsPath == "" {
-			// Default to environments/{environment}/apps/{name}
-			gitopsPath = fmt.Sprintf("environments/{environment}/apps/%s", name)
-		}
-
 		// Create API client
 		c := client.NewClient(GetSmithdURL(), GetSmithdAPIKey())
 
 		// Register application
+		// Note: smithd uses a single global GitOps repo configured at the server level
 		app, err := c.RegisterApplication(client.RegisterApplicationRequest{
-			Name:       name,
-			GitopsRepo: gitopsRepo,
-			GitopsPath: gitopsPath,
+			Name: name,
 		})
 		if err != nil {
 			return err
@@ -70,7 +58,6 @@ Example:
 		fmt.Println()
 		fmt.Printf("  Name: %s\n", app.Name)
 		fmt.Printf("  ID:   %s\n", app.ID)
-		fmt.Printf("  Path: %s\n", app.GitopsPath)
 
 		return nil
 	},
@@ -177,6 +164,4 @@ func init() {
 
 	// Flags for app register
 	appRegisterCmd.Flags().String("name", "", "Application name")
-	appRegisterCmd.Flags().String("gitops-repo", "", "GitOps repository URL (required)")
-	appRegisterCmd.Flags().String("gitops-path", "", "Path in GitOps repository (default: environments/{environment}/apps/{name})")
 }
