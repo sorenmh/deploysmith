@@ -58,6 +58,9 @@ func loadConfig() {
 	// Read environment variables
 	viper.SetEnvPrefix("SMITHD")
 	viper.AutomaticEnv()
+	// Explicitly bind environment variables to handle underscores
+	viper.BindEnv("url", "SMITHD_URL")
+	viper.BindEnv("apiKey", "SMITHD_API_KEY")
 
 	// If a config file is found, read it
 	if err := viper.ReadInConfig(); err == nil {
