@@ -284,6 +284,8 @@ func (s *Server) handlePublishVersion(w http.ResponseWriter, r *http.Request) {
 	appID := chi.URLParam(r, "appId")
 	versionID := chi.URLParam(r, "versionId")
 
+	log.Printf("Publishing version %s for app %s", versionID, appID)
+
 	// Verify application exists
 	app, err := s.appStore.GetByID(appID)
 	if err != nil {
@@ -322,6 +324,8 @@ func (s *Server) handlePublishVersion(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	log.Printf("Found %d files in draft location for version %s: %v", len(files), versionID, files)
+
 	if len(files) == 0 {
 		writeError(w, http.StatusBadRequest, "invalid_request", "No manifest files uploaded")
 		return
@@ -330,7 +334,9 @@ func (s *Server) handlePublishVersion(w http.ResponseWriter, r *http.Request) {
 	// Validate all YAML files
 	manifestFiles := []string{}
 	for _, file := range files {
+		log.Printf("Processing file: %s", file)
 		if strings.HasSuffix(file, ".yaml") || strings.HasSuffix(file, ".yml") {
+			log.Printf("File %s is a YAML file, validating...", file)
 			// Get file content
 			reader, err := s.storage.GetFile(app.Name, versionID, file, false)
 			if err != nil {
@@ -348,14 +354,20 @@ func (s *Server) handlePublishVersion(w http.ResponseWriter, r *http.Request) {
 				return
 			}
 
+			log.Printf("Read %d bytes from file %s", len(content), file)
+
 			// Validate YAML syntax
 			var yamlContent interface{}
 			if err := yaml.Unmarshal(content, &yamlContent); err != nil {
+				log.Printf("YAML validation failed for file %s: %v", file, err)
 				writeError(w, http.StatusBadRequest, "validation_failed", fmt.Sprintf("Invalid YAML in %s: %v", file, err))
 				return
 			}
 
+			log.Printf("File %s validated successfully", file)
 			manifestFiles = append(manifestFiles, file)
+		} else {
+			log.Printf("Skipping non-YAML file: %s", file)
 		}
 	}
 

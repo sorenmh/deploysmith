@@ -99,13 +99,13 @@ func runUpload(cmd *cobra.Command, args []string) error {
 	// Auto-generate version.yml if not present
 	var versionYMLContent []byte
 	if !hasVersionYML {
-		versionInfo, err := loadVersionInfo()
+		versionInfo, err := LoadVersionInfo()
 		if err != nil {
 			return fmt.Errorf("failed to load version info: %w", err)
 		}
 
 		versionData := map[string]interface{}{
-			"version": versionInfo["version"],
+			"version": versionInfo.Version,
 			"metadata": map[string]interface{}{
 				"timestamp": time.Now().Format(time.RFC3339),
 			},
@@ -182,19 +182,6 @@ func runUpload(cmd *cobra.Command, args []string) error {
 	return nil
 }
 
-func loadVersionInfo() (map[string]string, error) {
-	data, err := os.ReadFile(".forge/version-info")
-	if err != nil {
-		return nil, err
-	}
-
-	var info map[string]string
-	if err := yaml.Unmarshal(data, &info); err != nil {
-		return nil, err
-	}
-
-	return info, nil
-}
 
 func validateYAML(filePath string) error {
 	data, err := os.ReadFile(filePath)
