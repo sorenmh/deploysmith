@@ -7,6 +7,7 @@ A GitOps-based deployment controller for Kubernetes applications.
 🚧 **MVP Development in Progress**
 
 ### Completed ✅
+
 - **Phase 1**: MVP Core Platform (smithd API server)
   - Application Management API
   - Version Management with S3 storage
@@ -19,6 +20,7 @@ A GitOps-based deployment controller for Kubernetes applications.
   - Integration with smithd API
 
 ### In Progress 🔨
+
 - Documentation and CI/CD examples
 
 ## Architecture
@@ -51,11 +53,13 @@ go build -o bin/forge ./cmd/forge
 ```
 
 **Services:**
+
 - MinIO Console: http://localhost:9001 (minioadmin / minioadmin123)
 - Gitea: http://localhost:3000 (deploysmith / password123)
 - smithd API: http://localhost:8080
 
 **Stop services:**
+
 ```bash
 docker-compose down
 ```
@@ -175,25 +179,30 @@ export $(cat .env | xargs)
 
 The `forge` CLI tool is designed to be used in CI/CD pipelines to package and publish versions.
 
-### Basic Workflow
+### Quick Start
 
+**One-time setup (recommended):**
 ```bash
-# 1. Initialize a new version draft
-forge init \
-  --app my-app \
-  --version "${GIT_SHA}-${BUILD_NUMBER}" \
-  --git-sha "${GIT_SHA}" \
-  --git-branch "${GIT_BRANCH}" \
-  --git-committer "${GIT_AUTHOR_EMAIL}" \
-  --build-number "${BUILD_NUMBER}"
+# Bind your repository to an application (using binary or container)
+forge app-bind --app my-app
+
+# Or using container:
+docker run --rm -v $(pwd):/workspace -w /workspace \
+  -e SMITHD_URL=https://smithd.example.com \
+  -e SMITHD_API_KEY=sk_live_abc123 \
+  ghcr.io/sorenmh/forge:latest app-bind --app my-app
+```
+
+**CI/CD Pipeline:**
+```bash
+# 1. Initialize a new version draft (no --app needed after binding!)
+forge init --version "${GIT_SHA}-${BUILD_NUMBER}"
 
 # 2. Upload your Kubernetes manifest files
 forge upload manifests/
 
 # 3. Publish the version (triggers auto-deploy if policies match)
-forge publish \
-  --app my-app \
-  --version "${GIT_SHA}-${BUILD_NUMBER}"
+forge publish --version "${GIT_SHA}-${BUILD_NUMBER}"
 ```
 
 ### Configuration
@@ -211,41 +220,36 @@ export SMITHD_API_KEY=sk_live_abc123
 name: Deploy
 on:
   push:
-    branches: [main]
+    branches: [master]
 
 jobs:
   deploy:
     runs-on: ubuntu-latest
+    container: ghcr.io/sorenmh/forge:latest
+    env:
+      SMITHD_URL: ${{ secrets.SMITHD_URL }}
+      SMITHD_API_KEY: ${{ secrets.SMITHD_API_KEY }}
+
     steps:
-      - uses: actions/checkout@v3
+      - uses: actions/checkout@v4
 
-      - name: Download forge
-        run: |
-          curl -L https://github.com/org/deploysmith/releases/download/v1.0.0/forge-linux-amd64 -o forge
-          chmod +x forge
-          sudo mv forge /usr/local/bin/
-
-      - name: Generate manifests
-        run: |
-          # Your manifest generation (Helm, Kustomize, etc.)
-          helm template my-app ./charts/my-app > manifests/deployment.yaml
-
-      - name: Publish version
-        env:
-          SMITHD_URL: ${{ secrets.SMITHD_URL }}
-          SMITHD_API_KEY: ${{ secrets.SMITHD_API_KEY }}
+      - name: Deploy with forge
         run: |
           VERSION="${GITHUB_SHA:0:7}-${GITHUB_RUN_NUMBER}"
-          forge init --app my-app --version "$VERSION" \
-            --git-sha "$GITHUB_SHA" \
-            --git-branch "${GITHUB_REF#refs/heads/}" \
-            --git-committer "$GITHUB_ACTOR@users.noreply.github.com" \
-            --build-number "$GITHUB_RUN_NUMBER"
+
+          # App binding (run once or commit .deploysmith/app.yaml)
+          forge app-bind --app my-app
+
+          # Generate manifests
+          helm template my-app ./charts/my-app > manifests/deployment.yaml
+
+          # Deploy
+          forge init --version "$VERSION" --git-sha "$GITHUB_SHA"
           forge upload manifests/
-          forge publish --app my-app --version "$VERSION"
+          forge publish --version "$VERSION"
 ```
 
-See [docs/specs/forge-spec.md](docs/specs/forge-spec.md) for complete forge documentation.
+See [docs/forge.md](docs/forge.md) for complete forge documentation.
 
 ## API Documentation
 
@@ -302,6 +306,7 @@ go test ./...
 ### Database Schema
 
 SQLite database with tables:
+
 - `applications` - Registered applications
 - `versions` - Application versions
 - `deployments` - Deployment history
@@ -311,16 +316,18 @@ See [docs/specs/smithd-database-schema.md](docs/specs/smithd-database-schema.md)
 
 ## Documentation
 
+- [forge CLI Tool](docs/forge.md) - **Complete forge documentation with examples**
+- [smithd API Spec](docs/specs/smithd-api-spec.md) - REST API documentation
 - [Vision](docs/specs/vision.md) - Product vision and requirements
 - [Implementation Plan](docs/specs/implementation-plan.md) - Development roadmap
-- [smithd API Spec](docs/specs/smithd-api-spec.md) - REST API documentation
 - [Database Schema](docs/specs/smithd-database-schema.md) - Database design
-- [forge Spec](docs/specs/forge-spec.md) - CI tool specification
 - [smithctl Spec](docs/specs/smithctl-spec.md) - CLI tool specification
+- [forge Spec](docs/specs/forge-spec.md) - *Legacy forge specification*
 
 ## Progress Tracking
 
 All progress is tracked in:
+
 - [docs/specs/implementation-plan.md](docs/specs/implementation-plan.md) - Detailed milestones with checkboxes
 - Git commits with clear messages
 - Test scripts validate functionality at each phase

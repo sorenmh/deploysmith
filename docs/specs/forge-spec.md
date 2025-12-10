@@ -14,14 +14,14 @@ forge is a command-line tool used in CI pipelines to:
 
 ```bash
 # Download from GitHub Releases
-curl -L https://github.com/org/deploysmith/releases/download/v1.0.0/forge-linux-amd64 -o forge
+curl -L https://github.com/sorenmh/deploysmith/releases/download/v1.0.0/forge-linux-amd64 -o forge
 chmod +x forge
 sudo mv forge /usr/local/bin/
 ```
 
 Or via Docker:
 ```bash
-docker run ghcr.io/org/forge:latest --help
+docker run ghcr.io/sorenmh/forge:latest --help
 ```
 
 ## Configuration
@@ -32,11 +32,9 @@ forge is configured via environment variables or CLI flags.
 # smithd API endpoint
 SMITHD_URL=https://smithd.example.com
 SMITHD_API_KEY=sk_live_abc123
-
-# Optional: AWS credentials (if not using instance profile)
-AWS_ACCESS_KEY_ID=...
-AWS_SECRET_ACCESS_KEY=...
 ```
+
+**Note:** forge does NOT require AWS credentials. It uses presigned URLs from smithd for S3 uploads.
 
 ## Commands
 
