@@ -1,6 +1,8 @@
 package api
 
 import (
+	"archive/tar"
+	"compress/gzip"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -331,43 +333,99 @@ func (s *Server) handlePublishVersion(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Validate all YAML files
+	// Check if we have a tarball that needs to be extracted
 	manifestFiles := []string{}
+	var tarballFiles map[string][]byte
+
+	// Look for manifests.tar.gz
+	hasTarball := false
 	for _, file := range files {
-		log.Printf("Processing file: %s", file)
-		if strings.HasSuffix(file, ".yaml") || strings.HasSuffix(file, ".yml") {
-			log.Printf("File %s is a YAML file, validating...", file)
-			// Get file content
+		if file == "manifests.tar.gz" {
+			hasTarball = true
+			log.Printf("Found tarball, extracting files...")
+
+			// Get and extract tarball
 			reader, err := s.storage.GetFile(app.Name, versionID, file, false)
 			if err != nil {
-				log.Printf("Failed to get file %s: %v", file, err)
+				log.Printf("Failed to get tarball %s: %v", file, err)
 				writeError(w, http.StatusInternalServerError, "internal_error", "Failed to read manifest files")
 				return
 			}
 			defer reader.Close()
 
-			// Read content
-			content, err := io.ReadAll(reader)
+			tarballFiles, err = s.extractTarball(reader)
 			if err != nil {
-				log.Printf("Failed to read file %s: %v", file, err)
-				writeError(w, http.StatusInternalServerError, "internal_error", "Failed to read manifest files")
+				log.Printf("Failed to extract tarball: %v", err)
+				writeError(w, http.StatusInternalServerError, "internal_error", "Failed to extract manifest files")
 				return
 			}
 
-			log.Printf("Read %d bytes from file %s", len(content), file)
+			log.Printf("Extracted %d files from tarball: %v", len(tarballFiles), getKeys(tarballFiles))
+			break
+		}
+	}
 
-			// Validate YAML syntax
-			var yamlContent interface{}
-			if err := yaml.Unmarshal(content, &yamlContent); err != nil {
-				log.Printf("YAML validation failed for file %s: %v", file, err)
-				writeError(w, http.StatusBadRequest, "validation_failed", fmt.Sprintf("Invalid YAML in %s: %v", file, err))
-				return
+	// Process files (either from tarball or individual uploads)
+	if hasTarball {
+		// Validate files from tarball
+		for filename, content := range tarballFiles {
+			log.Printf("Processing extracted file: %s", filename)
+			if strings.HasSuffix(filename, ".yaml") || strings.HasSuffix(filename, ".yml") {
+				log.Printf("File %s is a YAML file, validating...", filename)
+				log.Printf("Read %d bytes from file %s", len(content), filename)
+
+				// Validate YAML syntax
+				var yamlContent interface{}
+				if err := yaml.Unmarshal(content, &yamlContent); err != nil {
+					log.Printf("YAML validation failed for file %s: %v", filename, err)
+					writeError(w, http.StatusBadRequest, "validation_failed", fmt.Sprintf("Invalid YAML in %s: %v", filename, err))
+					return
+				}
+
+				log.Printf("File %s validated successfully", filename)
+				manifestFiles = append(manifestFiles, filename)
+			} else {
+				log.Printf("Skipping non-YAML file: %s", filename)
 			}
+		}
+	} else {
+		// Validate individual files
+		for _, file := range files {
+			log.Printf("Processing file: %s", file)
+			if strings.HasSuffix(file, ".yaml") || strings.HasSuffix(file, ".yml") {
+				log.Printf("File %s is a YAML file, validating...", file)
+				// Get file content
+				reader, err := s.storage.GetFile(app.Name, versionID, file, false)
+				if err != nil {
+					log.Printf("Failed to get file %s: %v", file, err)
+					writeError(w, http.StatusInternalServerError, "internal_error", "Failed to read manifest files")
+					return
+				}
+				defer reader.Close()
 
-			log.Printf("File %s validated successfully", file)
-			manifestFiles = append(manifestFiles, file)
-		} else {
-			log.Printf("Skipping non-YAML file: %s", file)
+				// Read content
+				content, err := io.ReadAll(reader)
+				if err != nil {
+					log.Printf("Failed to read file %s: %v", file, err)
+					writeError(w, http.StatusInternalServerError, "internal_error", "Failed to read manifest files")
+					return
+				}
+
+				log.Printf("Read %d bytes from file %s", len(content), file)
+
+				// Validate YAML syntax
+				var yamlContent interface{}
+				if err := yaml.Unmarshal(content, &yamlContent); err != nil {
+					log.Printf("YAML validation failed for file %s: %v", file, err)
+					writeError(w, http.StatusBadRequest, "validation_failed", fmt.Sprintf("Invalid YAML in %s: %v", file, err))
+					return
+				}
+
+				log.Printf("File %s validated successfully", file)
+				manifestFiles = append(manifestFiles, file)
+			} else {
+				log.Printf("Skipping non-YAML file: %s", file)
+			}
 		}
 	}
 
@@ -858,6 +916,48 @@ func (s *Server) autoDeployVersion(appName, appID string, version *models.Versio
 	}
 
 	log.Printf("Auto-deploy succeeded: %s version %s to %s (deployment: %s, commit: %s)", appName, version.VersionID, policy.TargetEnvironment, deployment.ID, commitSHA)
+}
+
+// extractTarball extracts files from a gzipped tarball
+func (s *Server) extractTarball(reader io.ReadCloser) (map[string][]byte, error) {
+	gzReader, err := gzip.NewReader(reader)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create gzip reader: %w", err)
+	}
+	defer gzReader.Close()
+
+	tarReader := tar.NewReader(gzReader)
+	files := make(map[string][]byte)
+
+	for {
+		header, err := tarReader.Next()
+		if err == io.EOF {
+			break
+		}
+		if err != nil {
+			return nil, fmt.Errorf("failed to read tar header: %w", err)
+		}
+
+		// Only process regular files
+		if header.Typeflag == tar.TypeReg {
+			content, err := io.ReadAll(tarReader)
+			if err != nil {
+				return nil, fmt.Errorf("failed to read file %s: %w", header.Name, err)
+			}
+			files[header.Name] = content
+		}
+	}
+
+	return files, nil
+}
+
+// getKeys returns the keys of a map as a slice
+func getKeys(m map[string][]byte) []string {
+	keys := make([]string, 0, len(m))
+	for k := range m {
+		keys = append(keys, k)
+	}
+	return keys
 }
 
 // Helper to decode JSON request
