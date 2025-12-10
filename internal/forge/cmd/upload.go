@@ -1,10 +1,11 @@
 package cmd
 
 import (
+	"archive/tar"
 	"bytes"
+	"compress/gzip"
 	"fmt"
 	"io"
-	"mime/multipart"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -116,7 +117,7 @@ func runUpload(cmd *cobra.Command, args []string) error {
 		}
 	}
 
-	fmt.Println("Uploading manifests...")
+	fmt.Println("Creating manifest archive...")
 
 	// Validate all files are valid YAML
 	for _, file := range files {
@@ -125,31 +126,49 @@ func runUpload(cmd *cobra.Command, args []string) error {
 		}
 	}
 
-	// Upload files
+	// Create tar.gz archive
+	var buf bytes.Buffer
+	gzWriter := gzip.NewWriter(&buf)
+	tarWriter := tar.NewWriter(gzWriter)
+
 	totalSize := int64(0)
 	startTime := time.Now()
 
+	// Add all files to archive
 	for _, file := range files {
+		if err := addFileToArchive(tarWriter, file); err != nil {
+			return fmt.Errorf("failed to add %s to archive: %w", file, err)
+		}
+
 		info, err := os.Stat(file)
 		if err != nil {
 			return fmt.Errorf("failed to stat %s: %w", file, err)
 		}
-
-		if err := uploadFile(uploadURL, file); err != nil {
-			return fmt.Errorf("failed to upload %s: %w", file, err)
-		}
-
 		totalSize += info.Size()
 		fmt.Printf("  ✓ %s (%.1f KB)\n", filepath.Base(file), float64(info.Size())/1024)
 	}
 
-	// Upload auto-generated version.yml if needed
+	// Add auto-generated version.yml if needed
 	if !hasVersionYML && versionYMLContent != nil {
-		if err := uploadContent(uploadURL, "version.yml", versionYMLContent); err != nil {
-			return fmt.Errorf("failed to upload version.yml: %w", err)
+		if err := addContentToArchive(tarWriter, "version.yml", versionYMLContent); err != nil {
+			return fmt.Errorf("failed to add version.yml to archive: %w", err)
 		}
 		totalSize += int64(len(versionYMLContent))
 		fmt.Printf("  ✓ version.yml (%.1f KB)\n", float64(len(versionYMLContent))/1024)
+	}
+
+	// Close archive
+	if err := tarWriter.Close(); err != nil {
+		return fmt.Errorf("failed to close tar writer: %w", err)
+	}
+	if err := gzWriter.Close(); err != nil {
+		return fmt.Errorf("failed to close gzip writer: %w", err)
+	}
+
+	// Upload archive
+	fmt.Println("Uploading manifest archive...")
+	if err := uploadContent(uploadURL, "manifests.tar.gz", buf.Bytes()); err != nil {
+		return fmt.Errorf("failed to upload archive: %w", err)
 	}
 
 	duration := time.Since(startTime)
@@ -157,8 +176,9 @@ func runUpload(cmd *cobra.Command, args []string) error {
 	if !hasVersionYML {
 		fileCount++
 	}
+	archiveSize := len(buf.Bytes())
 
-	fmt.Printf("\nUploaded %d files (%.1f KB) in %.1fs\n", fileCount, float64(totalSize)/1024, duration.Seconds())
+	fmt.Printf("\nUploaded %d files (%.1f KB) as archive (%.1f KB) in %.1fs\n", fileCount, float64(totalSize)/1024, float64(archiveSize)/1024, duration.Seconds())
 	return nil
 }
 
@@ -190,40 +210,63 @@ func validateYAML(filePath string) error {
 	return nil
 }
 
-func uploadFile(presignedURL, filePath string) error {
+func addFileToArchive(tarWriter *tar.Writer, filePath string) error {
 	data, err := os.ReadFile(filePath)
 	if err != nil {
 		return err
 	}
 
-	return uploadContent(presignedURL, filepath.Base(filePath), data)
+	info, err := os.Stat(filePath)
+	if err != nil {
+		return err
+	}
+
+	header := &tar.Header{
+		Name:    filepath.Base(filePath),
+		Mode:    int64(info.Mode()),
+		Size:    int64(len(data)),
+		ModTime: info.ModTime(),
+	}
+
+	if err := tarWriter.WriteHeader(header); err != nil {
+		return err
+	}
+
+	_, err = tarWriter.Write(data)
+	return err
+}
+
+func addContentToArchive(tarWriter *tar.Writer, filename string, content []byte) error {
+	header := &tar.Header{
+		Name:    filename,
+		Mode:    0644,
+		Size:    int64(len(content)),
+		ModTime: time.Now(),
+	}
+
+	if err := tarWriter.WriteHeader(header); err != nil {
+		return err
+	}
+
+	_, err := tarWriter.Write(content)
+	return err
 }
 
 func uploadContent(presignedURL, filename string, content []byte) error {
-	// Create multipart form
-	var buf bytes.Buffer
-	writer := multipart.NewWriter(&buf)
-
-	part, err := writer.CreateFormFile("file", filename)
+	// For S3 presigned URLs, send the content directly as PUT request body
+	req, err := http.NewRequest("PUT", presignedURL, bytes.NewReader(content))
 	if err != nil {
 		return err
 	}
 
-	if _, err := part.Write(content); err != nil {
-		return err
+	// Set appropriate content type based on file extension
+	contentType := "application/octet-stream"
+	if strings.HasSuffix(filename, ".yaml") || strings.HasSuffix(filename, ".yml") {
+		contentType = "application/x-yaml"
+	} else if strings.HasSuffix(filename, ".tar.gz") {
+		contentType = "application/gzip"
 	}
-
-	if err := writer.Close(); err != nil {
-		return err
-	}
-
-	// Send request
-	req, err := http.NewRequest("POST", presignedURL, &buf)
-	if err != nil {
-		return err
-	}
-
-	req.Header.Set("Content-Type", writer.FormDataContentType())
+	req.Header.Set("Content-Type", contentType)
 
 	client := &http.Client{Timeout: 30 * time.Second}
 	resp, err := client.Do(req)

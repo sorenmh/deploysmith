@@ -33,13 +33,19 @@ func (c *Client) joinURL(path string) string {
 	return c.baseURL + "/" + strings.TrimLeft(path, "/")
 }
 
+// VersionMetadata represents version metadata
+type VersionMetadata struct {
+	GitSHA       string `json:"gitSha"`
+	GitBranch    string `json:"gitBranch"`
+	GitCommitter string `json:"gitCommitter"`
+	BuildNumber  string `json:"buildNumber"`
+	Timestamp    string `json:"timestamp"`
+}
+
 // DraftVersionRequest is the request body for creating a draft version
 type DraftVersionRequest struct {
-	Version      string  `json:"version"`
-	GitSHA       *string `json:"gitSha,omitempty"`
-	GitBranch    *string `json:"gitBranch,omitempty"`
-	GitCommitter *string `json:"gitCommitter,omitempty"`
-	BuildNumber  *int    `json:"buildNumber,omitempty"`
+	VersionID string          `json:"versionId"`
+	Metadata  VersionMetadata `json:"metadata"`
 }
 
 // DraftVersionResponse is the response from creating a draft version
@@ -50,8 +56,8 @@ type DraftVersionResponse struct {
 }
 
 // CreateDraftVersion creates a new draft version
-func (c *Client) CreateDraftVersion(appName string, req DraftVersionRequest) (*DraftVersionResponse, error) {
-	url := c.joinURL(fmt.Sprintf("api/v1/apps/%s/versions/draft", appName))
+func (c *Client) CreateDraftVersion(appID string, req DraftVersionRequest) (*DraftVersionResponse, error) {
+	url := c.joinURL(fmt.Sprintf("api/v1/apps/%s/versions/draft", appID))
 
 	body, err := json.Marshal(req)
 	if err != nil {
@@ -95,6 +101,63 @@ type PublishVersionResponse struct {
 	VersionID        string   `json:"versionId"`
 	Status           string   `json:"status"`
 	AutoDeployments  []string `json:"autoDeployments,omitempty"`
+}
+
+// AppInfo represents basic app information
+type AppInfo struct {
+	ID   string `json:"id"`
+	Name string `json:"name"`
+}
+
+// ListAppsResponse represents the response from listing apps
+type ListAppsResponse struct {
+	Apps []AppInfo `json:"apps"`
+}
+
+// GetAppIDByName looks up an app ID by name
+func (c *Client) GetAppIDByName(appName string) (string, error) {
+	url := c.joinURL("api/v1/apps")
+
+	httpReq, err := http.NewRequest("GET", url, nil)
+	if err != nil {
+		return "", fmt.Errorf("failed to create request: %w", err)
+	}
+
+	httpReq.Header.Set("X-API-Key", c.apiKey)
+
+	resp, err := c.client.Do(httpReq)
+	if err != nil {
+		return "", fmt.Errorf("failed to send request: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(resp.Body)
+		return "", fmt.Errorf("API returned status %d: %s", resp.StatusCode, string(body))
+	}
+
+	var listResp ListAppsResponse
+	if err := json.NewDecoder(resp.Body).Decode(&listResp); err != nil {
+		return "", fmt.Errorf("failed to decode response: %w", err)
+	}
+
+	// Find app by name
+	for _, app := range listResp.Apps {
+		if app.Name == appName {
+			return app.ID, nil
+		}
+	}
+
+	return "", fmt.Errorf("application '%s' not found", appName)
+}
+
+// CreateDraftVersionByName creates a new draft version using app name
+func (c *Client) CreateDraftVersionByName(appName string, req DraftVersionRequest) (*DraftVersionResponse, error) {
+	appID, err := c.GetAppIDByName(appName)
+	if err != nil {
+		return nil, fmt.Errorf("failed to resolve app name '%s': %w", appName, err)
+	}
+	return c.CreateDraftVersion(appID, req)
 }
 
 // PublishVersion publishes a draft version

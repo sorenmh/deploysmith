@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strconv"
+	"time"
 
 	"github.com/deploysmith/deploysmith/internal/forge/client"
 	"github.com/spf13/cobra"
@@ -34,14 +36,13 @@ Example:
 func init() {
 	rootCmd.AddCommand(initCmd)
 
-	initCmd.Flags().StringVar(&initApp, "app", "", "Application name (required)")
+	initCmd.Flags().StringVar(&initApp, "app", "", "Application name (optional if .deploysmith/app.yaml exists)")
 	initCmd.Flags().StringVar(&initVersion, "version", "", "Version identifier (required)")
 	initCmd.Flags().StringVar(&initGitSHA, "git-sha", "", "Git commit SHA")
 	initCmd.Flags().StringVar(&initGitBranch, "git-branch", "", "Git branch name")
 	initCmd.Flags().StringVar(&initGitCommitter, "git-committer", "", "Git committer email")
 	initCmd.Flags().IntVar(&initBuildNumber, "build-number", 0, "CI build number")
 
-	initCmd.MarkFlagRequired("app")
 	initCmd.MarkFlagRequired("version")
 }
 
@@ -51,27 +52,43 @@ func runInit(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
-	// Build request
-	req := client.DraftVersionRequest{
-		Version: initVersion,
+	// Resolve app ID
+	appID, appName, err := ResolveAppID(initApp)
+	if err != nil {
+		return err
 	}
 
-	if initGitSHA != "" {
-		req.GitSHA = &initGitSHA
+	// Set defaults for required fields if not provided
+	gitSHA := initGitSHA
+	if gitSHA == "" {
+		gitSHA = "unknown"
 	}
-	if initGitBranch != "" {
-		req.GitBranch = &initGitBranch
+
+	gitBranch := initGitBranch
+	if gitBranch == "" {
+		gitBranch = "unknown"
 	}
-	if initGitCommitter != "" {
-		req.GitCommitter = &initGitCommitter
+
+	// Build request
+	metadata := client.VersionMetadata{
+		GitSHA:       gitSHA,
+		GitBranch:    gitBranch,
+		GitCommitter: initGitCommitter,
+		Timestamp:    time.Now().UTC().Format("2006-01-02T15:04:05Z07:00"),
 	}
+
 	if initBuildNumber > 0 {
-		req.BuildNumber = &initBuildNumber
+		metadata.BuildNumber = strconv.Itoa(initBuildNumber)
+	}
+
+	req := client.DraftVersionRequest{
+		VersionID: initVersion,
+		Metadata:  metadata,
 	}
 
 	// Call smithd API
 	c := client.NewClient(GetSmithdURL(), GetSmithdAPIKey())
-	resp, err := c.CreateDraftVersion(initApp, req)
+	resp, err := c.CreateDraftVersion(appID, req)
 	if err != nil {
 		return fmt.Errorf("failed to create draft version: %w", err)
 	}
@@ -91,7 +108,8 @@ func runInit(cmd *cobra.Command, args []string) error {
 	// Save version info for later commands
 	versionFile := filepath.Join(forgeDir, "version-info")
 	versionInfo := map[string]string{
-		"app":     initApp,
+		"app":     appName,
+		"appId":   appID,
 		"version": initVersion,
 	}
 	versionJSON, _ := json.Marshal(versionInfo)
