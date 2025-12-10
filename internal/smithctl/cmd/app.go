@@ -3,8 +3,8 @@ package cmd
 import (
 	"fmt"
 
-	"github.com/deploysmith/deploysmith/internal/smithctl/client"
-	"github.com/deploysmith/deploysmith/internal/smithctl/output"
+	"github.com/sorenmh/deploysmith/internal/smithctl/client"
+	"github.com/sorenmh/deploysmith/internal/smithctl/output"
 	"github.com/spf13/cobra"
 )
 

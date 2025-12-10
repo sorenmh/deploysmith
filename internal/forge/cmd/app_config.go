@@ -5,7 +5,7 @@ import (
 	"os"
 	"path/filepath"
 
-	"github.com/deploysmith/deploysmith/internal/forge/client"
+	"github.com/sorenmh/deploysmith/internal/forge/client"
 	"gopkg.in/yaml.v3"
 )
 

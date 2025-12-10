@@ -5,9 +5,9 @@ import (
 	"os"
 	"path/filepath"
 
-	"github.com/deploysmith/deploysmith/internal/smithd/api"
-	"github.com/deploysmith/deploysmith/internal/smithd/config"
-	"github.com/deploysmith/deploysmith/internal/smithd/db"
+	"github.com/sorenmh/deploysmith/internal/smithd/api"
+	"github.com/sorenmh/deploysmith/internal/smithd/config"
+	"github.com/sorenmh/deploysmith/internal/smithd/db"
 )
 
 var (

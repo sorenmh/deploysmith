@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/deploysmith/deploysmith/internal/smithctl/cmd"
+	"github.com/sorenmh/deploysmith/internal/smithctl/cmd"
 )
 
 func main() {

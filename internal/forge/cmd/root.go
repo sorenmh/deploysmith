@@ -1,7 +1,7 @@
 package cmd
 
 import (
-	"github.com/deploysmith/deploysmith/internal/shared/config"
+	"github.com/sorenmh/deploysmith/internal/shared/config"
 	"github.com/spf13/cobra"
 )
 

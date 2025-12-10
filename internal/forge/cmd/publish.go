@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/deploysmith/deploysmith/internal/forge/client"
+	"github.com/sorenmh/deploysmith/internal/forge/client"
 	"github.com/spf13/cobra"
 )
 

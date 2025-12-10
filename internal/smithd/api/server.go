@@ -9,12 +9,12 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/deploysmith/deploysmith/internal/smithd/config"
-	"github.com/deploysmith/deploysmith/internal/smithd/db"
-	"github.com/deploysmith/deploysmith/internal/smithd/gitops"
-	"github.com/deploysmith/deploysmith/internal/smithd/models"
-	"github.com/deploysmith/deploysmith/internal/smithd/storage"
-	"github.com/deploysmith/deploysmith/internal/smithd/store"
+	"github.com/sorenmh/deploysmith/internal/smithd/config"
+	"github.com/sorenmh/deploysmith/internal/smithd/db"
+	"github.com/sorenmh/deploysmith/internal/smithd/gitops"
+	"github.com/sorenmh/deploysmith/internal/smithd/models"
+	"github.com/sorenmh/deploysmith/internal/smithd/storage"
+	"github.com/sorenmh/deploysmith/internal/smithd/store"
 	"github.com/go-chi/chi/v5"
 	"gopkg.in/yaml.v3"
 )

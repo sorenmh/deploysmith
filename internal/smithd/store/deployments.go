@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/deploysmith/deploysmith/internal/smithd/models"
+	"github.com/sorenmh/deploysmith/internal/smithd/models"
 	"github.com/google/uuid"
 )
 

@@ -3,7 +3,7 @@ package cmd
 import (
 	"fmt"
 
-	"github.com/deploysmith/deploysmith/internal/forge/client"
+	"github.com/sorenmh/deploysmith/internal/forge/client"
 	"github.com/spf13/cobra"
 )
 
