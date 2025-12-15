@@ -9,6 +9,7 @@ import (
 	"github.com/go-git/go-git/v5"
 	"github.com/go-git/go-git/v5/plumbing/object"
 	"github.com/go-git/go-git/v5/plumbing/transport/ssh"
+	cryptossh "golang.org/x/crypto/ssh"
 )
 
 // Service handles gitops repository operations
@@ -177,6 +178,9 @@ func (s *Service) getAuth() (*ssh.PublicKeys, error) {
 	if err != nil {
 		return nil, fmt.Errorf("failed to create SSH auth: %w", err)
 	}
+
+	// Disable host key verification to avoid known_hosts issues
+	auth.HostKeyCallback = cryptossh.InsecureIgnoreHostKey()
 
 	return auth, nil
 }

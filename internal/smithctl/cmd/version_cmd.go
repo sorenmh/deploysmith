@@ -16,30 +16,46 @@ var versionCmd = &cobra.Command{
 }
 
 var versionListCmd = &cobra.Command{
-	Use:   "list [app-name]",
+	Use:   "list [app-name-or-id]",
 	Short: "List versions for an application",
 	Long: `List all versions for an application.
 
-Example:
-  smithctl version list my-api-service
-  smithctl version list my-api-service --status published
-  smithctl version list my-api-service --limit 10`,
-	Args: cobra.ExactArgs(1),
+You can specify the app by name or ID as an argument, or omit it if you've run 'forge app-bind' in this directory.
+
+Examples:
+  smithctl version list                              # Uses app from binding
+  smithctl version list my-api-service               # Uses app name
+  smithctl version list --app my-api-service         # Uses --app flag
+  smithctl version list --status published --limit 10`,
+	Args: cobra.MaximumNArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		// Validate configuration
 		if err := ValidateConfig(); err != nil {
 			return err
 		}
 
-		appName := args[0]
+		// Get app identifier from args or flag
+		var appIdentifier string
+		if len(args) > 0 {
+			appIdentifier = args[0]
+		} else {
+			appIdentifier, _ = cmd.Flags().GetString("app")
+		}
+
+		// Resolve app ID using new resolver
+		appID, _, err := ResolveAppID(appIdentifier)
+		if err != nil {
+			return err
+		}
+
 		status, _ := cmd.Flags().GetString("status")
 		limit, _ := cmd.Flags().GetInt("limit")
 
 		// Create API client
 		c := client.NewClient(GetSmithdURL(), GetSmithdAPIKey())
 
-		// List versions
-		resp, err := c.ListVersions(appName, status, limit, 0)
+		// List versions (use appID since client now resolves internally)
+		resp, err := c.ListVersions(appID, status, limit, 0)
 		if err != nil {
 			return err
 		}
@@ -82,24 +98,46 @@ Example:
 }
 
 var versionShowCmd = &cobra.Command{
-	Use:   "show [app-name] [version-id]",
+	Use:   "show [app-name-or-id] [version-id]",
 	Short: "Show version details",
-	Long:  `Show details for a specific version including manifest files and deployments.`,
-	Args:  cobra.ExactArgs(2),
+	Long: `Show details for a specific version including manifest files and deployments.
+
+You can specify the app by name or ID, or omit it if you've run 'forge app-bind' in this directory.
+
+Examples:
+  smithctl version show v1.0.0                      # Uses app from binding
+  smithctl version show my-api-service v1.0.0       # Uses app name
+  smithctl version show --app my-api-service v1.0.0 # Uses --app flag`,
+	Args: cobra.RangeArgs(1, 2),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		// Validate configuration
 		if err := ValidateConfig(); err != nil {
 			return err
 		}
 
-		appName := args[0]
-		versionID := args[1]
+		// Parse arguments - could be [version] or [app, version]
+		var appIdentifier, versionID string
+		if len(args) == 1 {
+			// Only version provided, get app from flag or binding
+			versionID = args[0]
+			appIdentifier, _ = cmd.Flags().GetString("app")
+		} else {
+			// Both app and version provided
+			appIdentifier = args[0]
+			versionID = args[1]
+		}
+
+		// Resolve app ID
+		appID, _, err := ResolveAppID(appIdentifier)
+		if err != nil {
+			return err
+		}
 
 		// Create API client
 		c := client.NewClient(GetSmithdURL(), GetSmithdAPIKey())
 
 		// Get version
-		ver, err := c.GetVersion(appName, versionID)
+		ver, err := c.GetVersion(appID, versionID)
 		if err != nil {
 			return err
 		}
@@ -124,7 +162,7 @@ var versionShowCmd = &cobra.Command{
 			fmt.Printf("  Committer: %s\n", *ver.GitCommitter)
 		}
 		if ver.BuildNumber != nil {
-			fmt.Printf("  Build:    #%d\n", *ver.BuildNumber)
+			fmt.Printf("  Build:    #%s\n", *ver.BuildNumber)
 		}
 
 		fmt.Printf("  Created:  %s\n", output.FormatTime(ver.CreatedAt))
@@ -156,6 +194,10 @@ func init() {
 	versionCmd.AddCommand(versionShowCmd)
 
 	// Flags for version list
+	versionListCmd.Flags().String("app", "", "Application name or ID (optional if app is bound)")
 	versionListCmd.Flags().String("status", "", "Filter by status (draft, published)")
 	versionListCmd.Flags().Int("limit", 20, "Maximum number of results")
+
+	// Flags for version show
+	versionShowCmd.Flags().String("app", "", "Application name or ID (optional if app is bound)")
 }

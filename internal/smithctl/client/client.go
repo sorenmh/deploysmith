@@ -56,16 +56,16 @@ type CurrentDeployment struct {
 type Version struct {
 	ID           string     `json:"id"`
 	AppID        string     `json:"appId"`
-	Version      string     `json:"version"`
+	Version      string     `json:"versionId"`
 	Status       string     `json:"status"`
 	GitSHA       *string    `json:"gitSha,omitempty"`
 	GitBranch    *string    `json:"gitBranch,omitempty"`
 	GitCommitter *string    `json:"gitCommitter,omitempty"`
-	BuildNumber  *int       `json:"buildNumber,omitempty"`
+	BuildNumber  *string    `json:"buildNumber,omitempty"`
 	Files        []string   `json:"files,omitempty"`
 	CreatedAt    time.Time  `json:"createdAt"`
 	PublishedAt  *time.Time `json:"publishedAt,omitempty"`
-	Deployments  []string   `json:"deployments,omitempty"`
+	Deployments  []string   `json:"deployedTo,omitempty"`
 }
 
 // Deployment represents a deployment
@@ -178,9 +178,45 @@ func (c *Client) ListApplications(limit, offset int) (*ListApplicationsResponse,
 	return &listResp, nil
 }
 
-// GetApplication gets an application by name
-func (c *Client) GetApplication(appName string) (*Application, error) {
-	url := c.joinURL(fmt.Sprintf("api/v1/apps/%s", appName))
+// GetAppIDByName resolves an app name to its app ID
+func (c *Client) GetAppIDByName(appName string) (string, error) {
+	// List all applications and find the one with matching name
+	resp, err := c.ListApplications(100, 0) // Get up to 100 apps
+	if err != nil {
+		return "", fmt.Errorf("failed to list applications: %w", err)
+	}
+
+	for _, app := range resp.Apps {
+		if app.Name == appName {
+			return app.ID, nil
+		}
+	}
+
+	return "", fmt.Errorf("application not found: %s", appName)
+}
+
+// resolveToAppID resolves an app name or ID to an app ID
+// If the input is already an app ID (UUID format), returns it directly
+// If the input is an app name, resolves it to the app ID
+func (c *Client) resolveToAppID(appNameOrID string) (string, error) {
+	// Simple heuristic: if it looks like a UUID (contains hyphens and is ~36 chars), treat as ID
+	if len(appNameOrID) > 30 && strings.Contains(appNameOrID, "-") {
+		return appNameOrID, nil
+	}
+
+	// Otherwise, treat as name and resolve to ID
+	return c.GetAppIDByName(appNameOrID)
+}
+
+// GetApplication gets an application by name or ID
+func (c *Client) GetApplication(appNameOrID string) (*Application, error) {
+	// Try to resolve name to ID if it's not already an ID
+	appID, err := c.resolveToAppID(appNameOrID)
+	if err != nil {
+		return nil, err
+	}
+
+	url := c.joinURL(fmt.Sprintf("api/v1/apps/%s", appID))
 
 	httpReq, err := http.NewRequest("GET", url, nil)
 	if err != nil {
@@ -215,8 +251,14 @@ type ListVersionsResponse struct {
 }
 
 // ListVersions lists all versions for an application
-func (c *Client) ListVersions(appName, status string, limit, offset int) (*ListVersionsResponse, error) {
-	u, err := url.Parse(c.joinURL(fmt.Sprintf("api/v1/apps/%s/versions", appName)))
+func (c *Client) ListVersions(appNameOrID, status string, limit, offset int) (*ListVersionsResponse, error) {
+	// Resolve app name to ID
+	appID, err := c.resolveToAppID(appNameOrID)
+	if err != nil {
+		return nil, err
+	}
+
+	u, err := url.Parse(c.joinURL(fmt.Sprintf("api/v1/apps/%s/versions", appID)))
 	if err != nil {
 		return nil, fmt.Errorf("failed to parse URL: %w", err)
 	}
@@ -260,8 +302,14 @@ func (c *Client) ListVersions(appName, status string, limit, offset int) (*ListV
 }
 
 // GetVersion gets a specific version
-func (c *Client) GetVersion(appName, versionID string) (*Version, error) {
-	url := c.joinURL(fmt.Sprintf("api/v1/apps/%s/versions/%s", appName, versionID))
+func (c *Client) GetVersion(appNameOrID, versionID string) (*Version, error) {
+	// Resolve app name to ID
+	appID, err := c.resolveToAppID(appNameOrID)
+	if err != nil {
+		return nil, err
+	}
+
+	url := c.joinURL(fmt.Sprintf("api/v1/apps/%s/versions/%s", appID, versionID))
 
 	httpReq, err := http.NewRequest("GET", url, nil)
 	if err != nil {
@@ -300,8 +348,14 @@ type DeployVersionResponse struct {
 }
 
 // DeployVersion deploys a version to an environment
-func (c *Client) DeployVersion(appName, versionID, environment string) (*DeployVersionResponse, error) {
-	url := c.joinURL(fmt.Sprintf("api/v1/apps/%s/versions/%s/deploy", appName, versionID))
+func (c *Client) DeployVersion(appNameOrID, versionID, environment string) (*DeployVersionResponse, error) {
+	// Resolve app name to ID
+	appID, err := c.resolveToAppID(appNameOrID)
+	if err != nil {
+		return nil, err
+	}
+
+	url := c.joinURL(fmt.Sprintf("api/v1/apps/%s/versions/%s/deploy", appID, versionID))
 
 	req := DeployVersionRequest{
 		Environment: environment,
@@ -348,8 +402,14 @@ type CreatePolicyRequest struct {
 }
 
 // CreatePolicy creates a new auto-deployment policy
-func (c *Client) CreatePolicy(appName string, req CreatePolicyRequest) (*Policy, error) {
-	url := c.joinURL(fmt.Sprintf("api/v1/apps/%s/policies", appName))
+func (c *Client) CreatePolicy(appNameOrID string, req CreatePolicyRequest) (*Policy, error) {
+	// Resolve app name to ID
+	appID, err := c.resolveToAppID(appNameOrID)
+	if err != nil {
+		return nil, err
+	}
+
+	url := c.joinURL(fmt.Sprintf("api/v1/apps/%s/policies", appID))
 
 	body, err := json.Marshal(req)
 	if err != nil {
@@ -389,8 +449,14 @@ type ListPoliciesResponse struct {
 }
 
 // ListPolicies lists all policies for an application
-func (c *Client) ListPolicies(appName string) (*ListPoliciesResponse, error) {
-	url := c.joinURL(fmt.Sprintf("api/v1/apps/%s/policies", appName))
+func (c *Client) ListPolicies(appNameOrID string) (*ListPoliciesResponse, error) {
+	// Resolve app name to ID
+	appID, err := c.resolveToAppID(appNameOrID)
+	if err != nil {
+		return nil, err
+	}
+
+	url := c.joinURL(fmt.Sprintf("api/v1/apps/%s/policies", appID))
 
 	httpReq, err := http.NewRequest("GET", url, nil)
 	if err != nil {
@@ -419,8 +485,14 @@ func (c *Client) ListPolicies(appName string) (*ListPoliciesResponse, error) {
 }
 
 // DeletePolicy deletes a policy
-func (c *Client) DeletePolicy(appName, policyID string) error {
-	url := c.joinURL(fmt.Sprintf("api/v1/apps/%s/policies/%s", appName, policyID))
+func (c *Client) DeletePolicy(appNameOrID, policyID string) error {
+	// Resolve app name to ID
+	appID, err := c.resolveToAppID(appNameOrID)
+	if err != nil {
+		return err
+	}
+
+	url := c.joinURL(fmt.Sprintf("api/v1/apps/%s/policies/%s", appID, policyID))
 
 	httpReq, err := http.NewRequest("DELETE", url, nil)
 	if err != nil {

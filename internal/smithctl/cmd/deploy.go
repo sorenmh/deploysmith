@@ -12,22 +12,41 @@ import (
 )
 
 var deployCmd = &cobra.Command{
-	Use:   "deploy [app-name] [version-id]",
+	Use:   "deploy [app-name-or-id] [version-id]",
 	Short: "Deploy a version to an environment",
 	Long: `Deploy a specific version to an environment.
 
-Example:
+You can specify the app by name or ID, or omit it if you've run 'forge app-bind' in this directory.
+
+Examples:
+  smithctl deploy v1.0.0 --env staging              # Uses app from binding
   smithctl deploy my-api-service v1.0.0 --env staging
-  smithctl deploy my-api-service 42540c4-123 --env production --confirm`,
-	Args: cobra.ExactArgs(2),
+  smithctl deploy --app my-api-service v1.0.0 --env production --confirm`,
+	Args: cobra.RangeArgs(1, 2),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		// Validate configuration
 		if err := ValidateConfig(); err != nil {
 			return err
 		}
 
-		appName := args[0]
-		versionID := args[1]
+		// Parse arguments - could be [version] or [app, version]
+		var appIdentifier, versionID string
+		if len(args) == 1 {
+			// Only version provided, get app from flag or binding
+			versionID = args[0]
+			appIdentifier, _ = cmd.Flags().GetString("app")
+		} else {
+			// Both app and version provided
+			appIdentifier = args[0]
+			versionID = args[1]
+		}
+
+		// Resolve app ID
+		appID, appName, err := ResolveAppID(appIdentifier)
+		if err != nil {
+			return err
+		}
+
 		environment, _ := cmd.Flags().GetString("env")
 		skipConfirm, _ := cmd.Flags().GetBool("confirm")
 
@@ -61,7 +80,7 @@ Example:
 		c := client.NewClient(GetSmithdURL(), GetSmithdAPIKey())
 
 		// Deploy version
-		resp, err := c.DeployVersion(appName, versionID, environment)
+		resp, err := c.DeployVersion(appID, versionID, environment)
 		if err != nil {
 			return err
 		}
@@ -75,23 +94,38 @@ Example:
 }
 
 var rollbackCmd = &cobra.Command{
-	Use:   "rollback [app-name]",
+	Use:   "rollback [app-name-or-id]",
 	Short: "Rollback to a previous version",
 	Long: `Rollback to a previous version in an environment.
 
 This command shows the current version and recent versions, allowing you to select
 which version to rollback to.
 
-Example:
-  smithctl rollback my-api-service --env staging`,
-	Args: cobra.ExactArgs(1),
+Examples:
+  smithctl rollback --env staging                   # Uses app from binding
+  smithctl rollback my-api-service --env staging
+  smithctl rollback --app my-api-service --env staging`,
+	Args: cobra.MaximumNArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		// Validate configuration
 		if err := ValidateConfig(); err != nil {
 			return err
 		}
 
-		appName := args[0]
+		// Get app identifier from args or flag
+		var appIdentifier string
+		if len(args) > 0 {
+			appIdentifier = args[0]
+		} else {
+			appIdentifier, _ = cmd.Flags().GetString("app")
+		}
+
+		// Resolve app ID
+		appID, _, err := ResolveAppID(appIdentifier)
+		if err != nil {
+			return err
+		}
+
 		environment, _ := cmd.Flags().GetString("env")
 
 		if environment == "" {
@@ -102,7 +136,7 @@ Example:
 		c := client.NewClient(GetSmithdURL(), GetSmithdAPIKey())
 
 		// Get application to find current version
-		app, err := c.GetApplication(appName)
+		app, err := c.GetApplication(appID)
 		if err != nil {
 			return err
 		}
@@ -115,7 +149,7 @@ Example:
 		fmt.Printf("Current version in %s: %s\n\n", environment, currentDeployment.VersionID)
 
 		// List recent versions
-		resp, err := c.ListVersions(appName, "published", 10, 0)
+		resp, err := c.ListVersions(appID, "published", 10, 0)
 		if err != nil {
 			return err
 		}
@@ -167,7 +201,7 @@ Example:
 		fmt.Printf("✓ Rolling back to version %s...\n", selectedVersion.Version)
 
 		// Deploy the selected version
-		deployResp, err := c.DeployVersion(appName, selectedVersion.Version, environment)
+		deployResp, err := c.DeployVersion(appID, selectedVersion.Version, environment)
 		if err != nil {
 			return err
 		}
@@ -184,9 +218,11 @@ func init() {
 	rootCmd.AddCommand(rollbackCmd)
 
 	// Flags for deploy
+	deployCmd.Flags().String("app", "", "Application name or ID (optional if app is bound)")
 	deployCmd.Flags().String("env", "", "Target environment (required)")
 	deployCmd.Flags().Bool("confirm", false, "Skip confirmation prompt")
 
 	// Flags for rollback
+	rollbackCmd.Flags().String("app", "", "Application name or ID (optional if app is bound)")
 	rollbackCmd.Flags().String("env", "", "Target environment (required)")
 }
