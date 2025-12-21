@@ -1,9 +1,14 @@
 package gitops
 
 import (
+	"archive/tar"
+	"bytes"
+	"compress/gzip"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/go-git/go-git/v5"
@@ -97,8 +102,32 @@ func (s *Service) WriteManifests(appName, environment, versionID string, manifes
 		return fmt.Errorf("failed to create app directory: %w", err)
 	}
 
-	// Write each manifest file
+	// Process manifest files, extracting tarballs if present
+	processedManifests := make(map[string][]byte)
+
 	for filename, content := range manifests {
+		if filename == "manifests.tar.gz" {
+			// Extract tarball contents
+			extractedFiles, err := s.extractTarball(content)
+			if err != nil {
+				return fmt.Errorf("failed to extract tarball %s: %w", filename, err)
+			}
+
+			// Add extracted files to processed manifests
+			for extractedFilename, extractedContent := range extractedFiles {
+				// Only include YAML files
+				if strings.HasSuffix(extractedFilename, ".yaml") || strings.HasSuffix(extractedFilename, ".yml") {
+					processedManifests[extractedFilename] = extractedContent
+				}
+			}
+		} else {
+			// Regular file, add as-is
+			processedManifests[filename] = content
+		}
+	}
+
+	// Write each processed manifest file
+	for filename, content := range processedManifests {
 		filePath := filepath.Join(appDir, filename)
 		if err := os.WriteFile(filePath, content, 0644); err != nil {
 			return fmt.Errorf("failed to write manifest %s: %w", filename, err)
@@ -191,4 +220,41 @@ func (s *Service) Cleanup() error {
 		return os.RemoveAll(s.workDir)
 	}
 	return nil
+}
+
+// extractTarball extracts files from a gzipped tarball
+func (s *Service) extractTarball(data []byte) (map[string][]byte, error) {
+	gzReader, err := gzip.NewReader(bytes.NewReader(data))
+	if err != nil {
+		return nil, fmt.Errorf("failed to create gzip reader: %w", err)
+	}
+	defer gzReader.Close()
+
+	tarReader := tar.NewReader(gzReader)
+	files := make(map[string][]byte)
+
+	for {
+		header, err := tarReader.Next()
+		if err == io.EOF {
+			break
+		}
+		if err != nil {
+			return nil, fmt.Errorf("failed to read tar header: %w", err)
+		}
+
+		// Skip directories
+		if header.Typeflag == tar.TypeDir {
+			continue
+		}
+
+		// Read file content
+		content, err := io.ReadAll(tarReader)
+		if err != nil {
+			return nil, fmt.Errorf("failed to read file %s: %w", header.Name, err)
+		}
+
+		files[header.Name] = content
+	}
+
+	return files, nil
 }
