@@ -88,6 +88,11 @@ Examples:
 		// Print success message
 		output.Success("Deployment initiated")
 		fmt.Printf("  Deployment ID: %s\n", resp.DeploymentID)
+		fmt.Printf("  Version:       %s\n", resp.VersionID)
+		fmt.Printf("  Environment:   %s\n", resp.Environment)
+		if resp.GitopsCommitSHA != "" {
+			fmt.Printf("  GitOps Commit: %s\n", resp.GitopsCommitSHA)
+		}
 
 		return nil
 	},
@@ -208,6 +213,11 @@ Examples:
 
 		output.Success("Deployment initiated")
 		fmt.Printf("  Deployment ID: %s\n", deployResp.DeploymentID)
+		fmt.Printf("  Version:       %s\n", deployResp.VersionID)
+		fmt.Printf("  Environment:   %s\n", deployResp.Environment)
+		if deployResp.GitopsCommitSHA != "" {
+			fmt.Printf("  GitOps Commit: %s\n", deployResp.GitopsCommitSHA)
+		}
 
 		return nil
 	},

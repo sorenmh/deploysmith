@@ -344,7 +344,12 @@ type DeployVersionRequest struct {
 
 // DeployVersionResponse is the response from deploying a version
 type DeployVersionResponse struct {
-	DeploymentID string `json:"deploymentId"`
+	DeploymentID    string    `json:"deploymentId"`
+	VersionID       string    `json:"versionId"`
+	Environment     string    `json:"environment"`
+	Status          string    `json:"status"`
+	GitopsCommitSHA string    `json:"gitopsCommitSha,omitempty"`
+	StartedAt       time.Time `json:"startedAt"`
 }
 
 // DeployVersion deploys a version to an environment
@@ -380,7 +385,7 @@ func (c *Client) DeployVersion(appNameOrID, versionID, environment string) (*Dep
 	}
 	defer resp.Body.Close()
 
-	if resp.StatusCode != http.StatusOK {
+	if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusAccepted {
 		body, _ := io.ReadAll(resp.Body)
 		return nil, fmt.Errorf("API returned status %d: %s", resp.StatusCode, string(body))
 	}
