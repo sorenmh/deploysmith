@@ -55,10 +55,10 @@ Example:
 		// Determine enabled state
 		enabled := !disabled
 		req := client.CreatePolicyRequest{
-			Name:        name,
-			BranchMatch: branch,
-			Environment: environment,
-			Enabled:     &enabled,
+			Name:              name,
+			GitBranchPattern:  branch,
+			TargetEnvironment: environment,
+			Enabled:           &enabled,
 		}
 
 		// Create policy
@@ -71,8 +71,8 @@ Example:
 		output.Success("Auto-deploy policy created")
 		fmt.Println()
 		fmt.Printf("  Name:        %s\n", policy.Name)
-		fmt.Printf("  Branch:      %s\n", policy.BranchMatch)
-		fmt.Printf("  Environment: %s\n", policy.Environment)
+		fmt.Printf("  Branch:      %s\n", policy.GitBranchPattern)
+		fmt.Printf("  Environment: %s\n", policy.TargetEnvironment)
 		status := "enabled"
 		if !policy.Enabled {
 			status = "disabled"
@@ -124,8 +124,8 @@ var policyListCmd = &cobra.Command{
 				}
 				rows = append(rows, []string{
 					policy.Name,
-					policy.BranchMatch,
-					policy.Environment,
+					policy.GitBranchPattern,
+					policy.TargetEnvironment,
 					status,
 				})
 			}

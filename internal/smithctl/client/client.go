@@ -80,13 +80,13 @@ type Deployment struct {
 
 // Policy represents an auto-deployment policy
 type Policy struct {
-	ID          string    `json:"id"`
-	AppID       string    `json:"appId"`
-	Name        string    `json:"name"`
-	BranchMatch string    `json:"branchMatch"`
-	Environment string    `json:"environment"`
-	Enabled     bool      `json:"enabled"`
-	CreatedAt   time.Time `json:"createdAt"`
+	ID                string    `json:"id"`
+	AppID             string    `json:"appId"`
+	Name              string    `json:"name"`
+	GitBranchPattern  string    `json:"gitBranchPattern"`
+	TargetEnvironment string    `json:"targetEnvironment"`
+	Enabled           bool      `json:"enabled"`
+	CreatedAt         time.Time `json:"createdAt"`
 }
 
 // RegisterApplicationRequest is the request body for registering an application
@@ -400,10 +400,10 @@ func (c *Client) DeployVersion(appNameOrID, versionID, environment string) (*Dep
 
 // CreatePolicyRequest is the request body for creating a policy
 type CreatePolicyRequest struct {
-	Name        string `json:"name"`
-	BranchMatch string `json:"branchMatch"`
-	Environment string `json:"environment"`
-	Enabled     *bool  `json:"enabled,omitempty"`
+	Name              string `json:"name"`
+	GitBranchPattern  string `json:"gitBranchPattern"`
+	TargetEnvironment string `json:"targetEnvironment"`
+	Enabled           *bool  `json:"enabled,omitempty"`
 }
 
 // CreatePolicy creates a new auto-deployment policy
