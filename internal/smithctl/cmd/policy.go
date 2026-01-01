@@ -23,17 +23,32 @@ var policyCreateCmd = &cobra.Command{
 	Long: `Create an auto-deployment policy that automatically deploys versions
 matching a branch pattern to a specified environment.
 
+You can specify the app by name or ID, or omit it if you've run 'forge app-bind' in this directory.
+
 Example:
+  smithctl policy create --name auto-deploy-main --branch main --env staging               # Uses app from binding
   smithctl policy create my-api-service --name auto-deploy-main --branch main --env staging
-  smithctl policy create my-api-service --name auto-deploy-release --branch "release/*" --env production`,
-	Args: cobra.ExactArgs(1),
+  smithctl policy create --app my-api-service --name auto-deploy-release --branch "release/*" --env production`,
+	Args: cobra.MaximumNArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		// Validate configuration
 		if err := ValidateConfig(); err != nil {
 			return err
 		}
 
-		appName := args[0]
+		// Get app identifier from args or flag
+		var appIdentifier string
+		if len(args) > 0 {
+			appIdentifier = args[0]
+		} else {
+			appIdentifier, _ = cmd.Flags().GetString("app")
+		}
+
+		// Resolve app ID
+		appID, _, err := ResolveAppID(appIdentifier)
+		if err != nil {
+			return err
+		}
 		name, _ := cmd.Flags().GetString("name")
 		branch, _ := cmd.Flags().GetString("branch")
 		environment, _ := cmd.Flags().GetString("env")
@@ -62,7 +77,7 @@ Example:
 		}
 
 		// Create policy
-		policy, err := c.CreatePolicy(appName, req)
+		policy, err := c.CreatePolicy(appID, req)
 		if err != nil {
 			return err
 		}
@@ -86,21 +101,40 @@ Example:
 var policyListCmd = &cobra.Command{
 	Use:   "list [app-name]",
 	Short: "List auto-deployment policies",
-	Long:  `List all auto-deployment policies for an application.`,
-	Args:  cobra.ExactArgs(1),
+	Long: `List all auto-deployment policies for an application.
+
+You can specify the app by name or ID, or omit it if you've run 'forge app-bind' in this directory.
+
+Example:
+  smithctl policy list                    # Uses app from binding
+  smithctl policy list my-api-service
+  smithctl policy list --app my-api-service`,
+	Args: cobra.MaximumNArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		// Validate configuration
 		if err := ValidateConfig(); err != nil {
 			return err
 		}
 
-		appName := args[0]
+		// Get app identifier from args or flag
+		var appIdentifier string
+		if len(args) > 0 {
+			appIdentifier = args[0]
+		} else {
+			appIdentifier, _ = cmd.Flags().GetString("app")
+		}
+
+		// Resolve app ID
+		appID, _, err := ResolveAppID(appIdentifier)
+		if err != nil {
+			return err
+		}
 
 		// Create API client
 		c := client.NewClient(GetSmithdURL(), GetSmithdAPIKey())
 
 		// List policies
-		resp, err := c.ListPolicies(appName)
+		resp, err := c.ListPolicies(appID)
 		if err != nil {
 			return err
 		}
@@ -138,16 +172,38 @@ var policyListCmd = &cobra.Command{
 var policyDeleteCmd = &cobra.Command{
 	Use:   "delete [app-name] [policy-name]",
 	Short: "Delete an auto-deployment policy",
-	Long:  `Delete an auto-deployment policy.`,
-	Args:  cobra.ExactArgs(2),
+	Long: `Delete an auto-deployment policy.
+
+You can specify the app by name or ID, or omit it if you've run 'forge app-bind' in this directory.
+
+Example:
+  smithctl policy delete my-policy-name                    # Uses app from binding
+  smithctl policy delete my-api-service my-policy-name
+  smithctl policy delete --app my-api-service my-policy-name`,
+	Args: cobra.RangeArgs(1, 2),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		// Validate configuration
 		if err := ValidateConfig(); err != nil {
 			return err
 		}
 
-		appName := args[0]
-		policyName := args[1]
+		// Parse arguments - could be [policy-name] or [app-name, policy-name]
+		var appIdentifier, policyName string
+		if len(args) == 1 {
+			// Only policy name provided, get app from flag or binding
+			policyName = args[0]
+			appIdentifier, _ = cmd.Flags().GetString("app")
+		} else {
+			// Both app and policy name provided
+			appIdentifier = args[0]
+			policyName = args[1]
+		}
+
+		// Resolve app ID
+		appID, _, err := ResolveAppID(appIdentifier)
+		if err != nil {
+			return err
+		}
 
 		skipConfirm, _ := cmd.Flags().GetBool("confirm")
 
@@ -169,7 +225,7 @@ var policyDeleteCmd = &cobra.Command{
 		c := client.NewClient(GetSmithdURL(), GetSmithdAPIKey())
 
 		// List policies to find the policy ID
-		resp, err := c.ListPolicies(appName)
+		resp, err := c.ListPolicies(appID)
 		if err != nil {
 			return err
 		}
@@ -187,7 +243,7 @@ var policyDeleteCmd = &cobra.Command{
 		}
 
 		// Delete policy
-		if err := c.DeletePolicy(appName, policyID); err != nil {
+		if err := c.DeletePolicy(appID, policyID); err != nil {
 			return err
 		}
 
@@ -205,11 +261,16 @@ func init() {
 	policyCmd.AddCommand(policyDeleteCmd)
 
 	// Flags for policy create
+	policyCreateCmd.Flags().String("app", "", "Application name or ID (optional if app is bound)")
 	policyCreateCmd.Flags().String("name", "", "Policy name (required)")
 	policyCreateCmd.Flags().String("branch", "", "Git branch pattern (required)")
 	policyCreateCmd.Flags().String("env", "", "Target environment (required)")
 	policyCreateCmd.Flags().Bool("disabled", false, "Create policy in disabled state")
 
+	// Flags for policy list
+	policyListCmd.Flags().String("app", "", "Application name or ID (optional if app is bound)")
+
 	// Flags for policy delete
+	policyDeleteCmd.Flags().String("app", "", "Application name or ID (optional if app is bound)")
 	policyDeleteCmd.Flags().Bool("confirm", false, "Skip confirmation prompt")
 }
