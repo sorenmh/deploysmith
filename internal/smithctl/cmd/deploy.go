@@ -17,24 +17,48 @@ var deployCmd = &cobra.Command{
 	Long: `Deploy a specific version to an environment.
 
 You can specify the app by name or ID, or omit it if you've run 'forge app-bind' in this directory.
+If no version is specified, shows a list of the 10 newest versions to select from.
 
 Examples:
+  smithctl deploy --env staging                     # Shows version list for selection
   smithctl deploy v1.0.0 --env staging              # Uses app from binding
   smithctl deploy my-api-service v1.0.0 --env staging
   smithctl deploy --app my-api-service v1.0.0 --env production --confirm`,
-	Args: cobra.RangeArgs(1, 2),
+	Args: cobra.RangeArgs(0, 2),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		// Validate configuration
 		if err := ValidateConfig(); err != nil {
 			return err
 		}
 
-		// Parse arguments - could be [version] or [app, version]
+		// Parse arguments - could be [], [version], [app], or [app, version]
 		var appIdentifier, versionID string
-		if len(args) == 1 {
-			// Only version provided, get app from flag or binding
-			versionID = args[0]
+		if len(args) == 0 {
+			// No arguments provided, get app from flag or binding
 			appIdentifier, _ = cmd.Flags().GetString("app")
+			// versionID will be selected interactively
+		} else if len(args) == 1 {
+			// Could be either version only or app only
+			// Check if there's an app flag to disambiguate
+			appFlag, _ := cmd.Flags().GetString("app")
+			if appFlag != "" {
+				// App specified via flag, so arg is version
+				versionID = args[0]
+				appIdentifier = appFlag
+			} else {
+				// Try to determine if arg looks like version or app
+				// For now, assume if it starts with 'v' or has dots, it's a version
+				arg := args[0]
+				if strings.HasPrefix(arg, "v") || strings.Contains(arg, ".") {
+					// Looks like a version
+					versionID = arg
+					// App will be resolved from binding
+				} else {
+					// Assume it's an app identifier
+					appIdentifier = arg
+					// versionID will be selected interactively
+				}
+			}
 		} else {
 			// Both app and version provided
 			appIdentifier = args[0]
@@ -52,6 +76,49 @@ Examples:
 
 		if environment == "" {
 			return fmt.Errorf("--env is required")
+		}
+
+		// Create API client
+		c := client.NewClient(GetSmithdURL(), GetSmithdAPIKey())
+
+		// If no version provided, show interactive version selection
+		if versionID == "" {
+			// List recent versions
+			resp, err := c.ListVersions(appID, "published", 10, 0)
+			if err != nil {
+				return err
+			}
+
+			if len(resp.Versions) == 0 {
+				return fmt.Errorf("no published versions found for app: %s", appName)
+			}
+
+			// Show recent versions
+			fmt.Printf("Recent versions for %s:\n", appName)
+			for i, ver := range resp.Versions {
+				deployInfo := ""
+				if ver.PublishedAt != nil {
+					deployInfo = fmt.Sprintf(" (published %s)", output.FormatTimeAgo(*ver.PublishedAt))
+				}
+				fmt.Printf("  %d. %s%s\n", i+1, ver.Version, deployInfo)
+			}
+
+			// Prompt user to select version
+			fmt.Println()
+			fmt.Printf("Select version to deploy (1-%d): ", len(resp.Versions))
+
+			reader := bufio.NewReader(os.Stdin)
+			response, _ := reader.ReadString('\n')
+			response = strings.TrimSpace(response)
+
+			var selection int
+			_, err = fmt.Sscanf(response, "%d", &selection)
+			if err != nil || selection < 1 || selection > len(resp.Versions) {
+				return fmt.Errorf("invalid selection")
+			}
+
+			selectedVersion := resp.Versions[selection-1]
+			versionID = selectedVersion.Version
 		}
 
 		// Show confirmation prompt unless --confirm is used
@@ -75,9 +142,6 @@ Examples:
 				os.Exit(2)
 			}
 		}
-
-		// Create API client
-		c := client.NewClient(GetSmithdURL(), GetSmithdAPIKey())
 
 		// Deploy version
 		resp, err := c.DeployVersion(appID, versionID, environment)
