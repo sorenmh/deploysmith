@@ -10,6 +10,25 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
+// SaveAppConfig writes app configuration to .deploysmith/app.yaml
+func SaveAppConfig(appID, appName string) error {
+	if err := os.MkdirAll(".deploysmith", 0755); err != nil {
+		return fmt.Errorf("failed to create .deploysmith directory: %w", err)
+	}
+
+	config := AppConfig{AppID: appID, AppName: appName}
+	data, err := yaml.Marshal(&config)
+	if err != nil {
+		return fmt.Errorf("failed to marshal app config: %w", err)
+	}
+
+	if err := os.WriteFile(filepath.Join(".deploysmith", "app.yaml"), data, 0644); err != nil {
+		return fmt.Errorf("failed to write app config: %w", err)
+	}
+
+	return nil
+}
+
 // AppConfig represents the app configuration stored in .deploysmith/app.yaml
 type AppConfig struct {
 	AppID   string `yaml:"appId"`

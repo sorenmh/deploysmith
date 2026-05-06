@@ -1,7 +1,10 @@
 package cmd
 
 import (
+	"bufio"
 	"fmt"
+	"os"
+	"strings"
 
 	"github.com/sorenmh/deploysmith/internal/smithctl/client"
 	"github.com/sorenmh/deploysmith/internal/smithctl/output"
@@ -58,6 +61,20 @@ Example:
 		fmt.Println()
 		fmt.Printf("  Name: %s\n", app.Name)
 		fmt.Printf("  ID:   %s\n", app.ID)
+
+		// If the current project is not already bound, offer to bind it
+		if _, err := LoadAppConfig(); err != nil {
+			fmt.Println()
+			fmt.Printf("Bind the current directory to this app? (y/n): ")
+			reader := bufio.NewReader(os.Stdin)
+			response, _ := reader.ReadString('\n')
+			if strings.TrimSpace(strings.ToLower(response)) == "y" {
+				if err := SaveAppConfig(app.ID, app.Name); err != nil {
+					return fmt.Errorf("failed to bind app: %w", err)
+				}
+				output.Success("Bound current directory to " + app.Name)
+			}
+		}
 
 		return nil
 	},
