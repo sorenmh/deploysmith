@@ -12,57 +12,32 @@ import (
 )
 
 var deployCmd = &cobra.Command{
-	Use:   "deploy [app-name-or-id] [version-id]",
+	Use:   "deploy [version-id]",
 	Short: "Deploy a version to an environment",
 	Long: `Deploy a specific version to an environment.
 
-You can specify the app by name or ID, or omit it if you've run 'forge app-bind' in this directory.
+The app is resolved from the --app flag, or from .deploysmith/app.yaml if bound.
 If no version is specified, shows a list of the 10 newest versions to select from.
+If no environment is specified, shows a list of available environments to select from.
 
 Examples:
-  smithctl deploy --env staging                     # Shows version list for selection
-  smithctl deploy v1.0.0 --env staging              # Uses app from binding
-  smithctl deploy my-api-service v1.0.0 --env staging
+  smithctl deploy                                   # Shows environment and version lists for selection
+  smithctl deploy --env staging                    # Shows version list for selection
+  smithctl deploy 6996908-12 --env staging         # Uses app from binding
+  smithctl deploy --app my-api-service --env staging
   smithctl deploy --app my-api-service v1.0.0 --env production --confirm`,
-	Args: cobra.RangeArgs(0, 2),
+	Args: cobra.MaximumNArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		// Validate configuration
 		if err := ValidateConfig(); err != nil {
 			return err
 		}
 
-		// Parse arguments - could be [], [version], [app], or [app, version]
-		var appIdentifier, versionID string
-		if len(args) == 0 {
-			// No arguments provided, get app from flag or binding
-			appIdentifier, _ = cmd.Flags().GetString("app")
-			// versionID will be selected interactively
-		} else if len(args) == 1 {
-			// Could be either version only or app only
-			// Check if there's an app flag to disambiguate
-			appFlag, _ := cmd.Flags().GetString("app")
-			if appFlag != "" {
-				// App specified via flag, so arg is version
-				versionID = args[0]
-				appIdentifier = appFlag
-			} else {
-				// Try to determine if arg looks like version or app
-				// For now, assume if it starts with 'v' or has dots, it's a version
-				arg := args[0]
-				if strings.HasPrefix(arg, "v") || strings.Contains(arg, ".") {
-					// Looks like a version
-					versionID = arg
-					// App will be resolved from binding
-				} else {
-					// Assume it's an app identifier
-					appIdentifier = arg
-					// versionID will be selected interactively
-				}
-			}
-		} else {
-			// Both app and version provided
-			appIdentifier = args[0]
-			versionID = args[1]
+		// App comes from --app flag or binding; version is the optional positional arg
+		appIdentifier, _ := cmd.Flags().GetString("app")
+		var versionID string
+		if len(args) == 1 {
+			versionID = args[0]
 		}
 
 		// Resolve app ID
@@ -74,12 +49,48 @@ Examples:
 		environment, _ := cmd.Flags().GetString("env")
 		skipConfirm, _ := cmd.Flags().GetBool("confirm")
 
-		if environment == "" {
-			return fmt.Errorf("--env is required")
-		}
-
 		// Create API client
 		c := client.NewClient(GetSmithdURL(), GetSmithdAPIKey())
+
+		// If no environment provided, show interactive environment selection
+		if environment == "" {
+			// List available environments
+			envResp, err := c.ListEnvironments()
+			if err != nil {
+				return err
+			}
+
+			if len(envResp.Environments) == 0 {
+				return fmt.Errorf("no environments found. Create an environment first with 'smithctl environment create <name>'")
+			}
+
+			// Show available environments
+			fmt.Println("Available environments:")
+			for i, env := range envResp.Environments {
+				description := ""
+				if env.Description != nil {
+					description = fmt.Sprintf(" (%s)", *env.Description)
+				}
+				fmt.Printf("  %d. %s%s\n", i+1, env.Name, description)
+			}
+
+			// Prompt user to select environment
+			fmt.Println()
+			fmt.Printf("Select environment to deploy to (1-%d): ", len(envResp.Environments))
+
+			reader := bufio.NewReader(os.Stdin)
+			response, _ := reader.ReadString('\n')
+			response = strings.TrimSpace(response)
+
+			var selection int
+			_, err = fmt.Sscanf(response, "%d", &selection)
+			if err != nil || selection < 1 || selection > len(envResp.Environments) {
+				return fmt.Errorf("invalid selection")
+			}
+
+			selectedEnv := envResp.Environments[selection-1]
+			environment = selectedEnv.Name
+		}
 
 		// If no version provided, show interactive version selection
 		if versionID == "" {
@@ -293,7 +304,7 @@ func init() {
 
 	// Flags for deploy
 	deployCmd.Flags().String("app", "", "Application name or ID (optional if app is bound)")
-	deployCmd.Flags().String("env", "", "Target environment (required)")
+	deployCmd.Flags().String("env", "", "Target environment (optional, will prompt if not specified)")
 	deployCmd.Flags().Bool("confirm", false, "Skip confirmation prompt")
 
 	// Flags for rollback

@@ -3,6 +3,7 @@ package api
 import (
 	"archive/tar"
 	"compress/gzip"
+	"database/sql"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -30,6 +31,7 @@ type Server struct {
 	versionStore    *store.VersionStore
 	deploymentStore *store.DeploymentStore
 	policyStore     *store.PolicyStore
+	environmentStore *store.EnvironmentStore
 	storage         *storage.S3Storage
 	gitops          *gitops.Service
 }
@@ -51,6 +53,7 @@ func NewServer(cfg *config.Config, database *db.DB) *Server {
 		versionStore:    store.NewVersionStore(database.DB),
 		deploymentStore: store.NewDeploymentStore(database.DB),
 		policyStore:     store.NewPolicyStore(database.DB),
+		environmentStore: store.NewEnvironmentStore(database.DB),
 		storage:         s3Storage,
 		gitops:          gitopsService,
 	}
@@ -86,6 +89,13 @@ func (s *Server) setupRoutes() {
 
 		// Deployment routes
 		r.Post("/apps/{appId}/versions/{versionId}/deploy", s.handleDeployVersion)
+
+		// Environment routes
+		r.Post("/environments", s.handleCreateEnvironment)
+		r.Get("/environments", s.handleListEnvironments)
+		r.Get("/environments/{environmentId}", s.handleGetEnvironment)
+		r.Put("/environments/{environmentId}", s.handleUpdateEnvironment)
+		r.Delete("/environments/{environmentId}", s.handleDeleteEnvironment)
 
 		// Policy routes
 		r.Post("/apps/{appId}/policies", s.handleCreatePolicy)
@@ -624,6 +634,18 @@ func (s *Server) handleDeployVersion(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Verify environment exists
+	envExists, err := s.environmentStore.Exists(req.Environment)
+	if err != nil {
+		log.Printf("Failed to check if environment exists: %v", err)
+		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to validate environment")
+		return
+	}
+	if !envExists {
+		writeError(w, http.StatusBadRequest, "invalid_environment", fmt.Sprintf("Environment '%s' does not exist", req.Environment))
+		return
+	}
+
 	// Verify application exists
 	app, err := s.appStore.GetByID(appID)
 	if err != nil {
@@ -949,6 +971,121 @@ func (s *Server) extractTarball(reader io.ReadCloser) (map[string][]byte, error)
 	}
 
 	return files, nil
+}
+
+// Environment handlers
+
+// handleCreateEnvironment creates a new environment
+func (s *Server) handleCreateEnvironment(w http.ResponseWriter, r *http.Request) {
+	var req models.CreateEnvironmentRequest
+	if err := decodeJSON(r, &req); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid_request", "Invalid request body")
+		return
+	}
+
+	if req.Name == "" {
+		writeError(w, http.StatusBadRequest, "invalid_request", "Environment name is required")
+		return
+	}
+
+	// Check if environment already exists
+	exists, err := s.environmentStore.Exists(req.Name)
+	if err != nil {
+		log.Printf("Failed to check if environment exists: %v", err)
+		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to check environment")
+		return
+	}
+
+	if exists {
+		writeError(w, http.StatusConflict, "environment_exists", "Environment already exists")
+		return
+	}
+
+	env, err := s.environmentStore.Create(req)
+	if err != nil {
+		log.Printf("Failed to create environment: %v", err)
+		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to create environment")
+		return
+	}
+
+	writeJSON(w, http.StatusCreated, env)
+}
+
+// handleListEnvironments lists all environments
+func (s *Server) handleListEnvironments(w http.ResponseWriter, r *http.Request) {
+	environments, err := s.environmentStore.List()
+	if err != nil {
+		log.Printf("Failed to list environments: %v", err)
+		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to list environments")
+		return
+	}
+
+	response := map[string]interface{}{
+		"environments": environments,
+	}
+
+	writeJSON(w, http.StatusOK, response)
+}
+
+// handleGetEnvironment gets an environment by ID
+func (s *Server) handleGetEnvironment(w http.ResponseWriter, r *http.Request) {
+	environmentID := chi.URLParam(r, "environmentId")
+
+	env, err := s.environmentStore.GetByID(environmentID)
+	if err != nil {
+		log.Printf("Failed to get environment: %v", err)
+		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to get environment")
+		return
+	}
+
+	if env == nil {
+		writeError(w, http.StatusNotFound, "environment_not_found", "Environment not found")
+		return
+	}
+
+	writeJSON(w, http.StatusOK, env)
+}
+
+// handleUpdateEnvironment updates an environment
+func (s *Server) handleUpdateEnvironment(w http.ResponseWriter, r *http.Request) {
+	environmentID := chi.URLParam(r, "environmentId")
+
+	var req models.UpdateEnvironmentRequest
+	if err := decodeJSON(r, &req); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid_request", "Invalid request body")
+		return
+	}
+
+	env, err := s.environmentStore.Update(environmentID, req)
+	if err == sql.ErrNoRows {
+		writeError(w, http.StatusNotFound, "environment_not_found", "Environment not found")
+		return
+	}
+	if err != nil {
+		log.Printf("Failed to update environment: %v", err)
+		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to update environment")
+		return
+	}
+
+	writeJSON(w, http.StatusOK, env)
+}
+
+// handleDeleteEnvironment deletes an environment
+func (s *Server) handleDeleteEnvironment(w http.ResponseWriter, r *http.Request) {
+	environmentID := chi.URLParam(r, "environmentId")
+
+	err := s.environmentStore.Delete(environmentID)
+	if err == sql.ErrNoRows {
+		writeError(w, http.StatusNotFound, "environment_not_found", "Environment not found")
+		return
+	}
+	if err != nil {
+		log.Printf("Failed to delete environment: %v", err)
+		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to delete environment")
+		return
+	}
+
+	w.WriteHeader(http.StatusNoContent)
 }
 
 // getKeys returns the keys of a map as a slice

@@ -27,5 +27,6 @@ var cliVersionCmd = &cobra.Command{
 }
 
 func init() {
+	rootCmd.Version = GitCommit
 	rootCmd.AddCommand(cliVersionCmd)
 }

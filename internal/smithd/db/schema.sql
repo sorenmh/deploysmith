@@ -65,7 +65,8 @@ CREATE TABLE IF NOT EXISTS deployments (
 
     FOREIGN KEY (app_id) REFERENCES applications(id) ON DELETE CASCADE,
     FOREIGN KEY (version_id) REFERENCES versions(id) ON DELETE CASCADE,
-    FOREIGN KEY (policy_id) REFERENCES policies(id) ON DELETE SET NULL
+    FOREIGN KEY (policy_id) REFERENCES policies(id) ON DELETE SET NULL,
+    FOREIGN KEY (environment) REFERENCES environments(name) ON DELETE RESTRICT
 );
 
 CREATE INDEX IF NOT EXISTS idx_deployments_app_id ON deployments(app_id);
@@ -83,11 +84,23 @@ CREATE TABLE IF NOT EXISTS policies (
     created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
 
     FOREIGN KEY (app_id) REFERENCES applications(id) ON DELETE CASCADE,
+    FOREIGN KEY (target_environment) REFERENCES environments(name) ON DELETE RESTRICT,
     UNIQUE(app_id, name)
 );
 
 CREATE INDEX IF NOT EXISTS idx_policies_app_id ON policies(app_id);
 CREATE INDEX IF NOT EXISTS idx_policies_enabled ON policies(enabled);
 
+-- Environments table
+CREATE TABLE IF NOT EXISTS environments (
+    id TEXT PRIMARY KEY,
+    name TEXT UNIQUE NOT NULL,
+    description TEXT,
+    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE INDEX IF NOT EXISTS idx_environments_name ON environments(name);
+
 -- Record schema version
-INSERT OR IGNORE INTO schema_version (version) VALUES (1);
+INSERT OR IGNORE INTO schema_version (version) VALUES (2);

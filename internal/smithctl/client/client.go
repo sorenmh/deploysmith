@@ -89,6 +89,31 @@ type Policy struct {
 	CreatedAt         time.Time `json:"createdAt"`
 }
 
+// Environment represents an environment
+type Environment struct {
+	ID          string     `json:"id"`
+	Name        string     `json:"name"`
+	Description *string    `json:"description,omitempty"`
+	CreatedAt   time.Time  `json:"createdAt"`
+	UpdatedAt   time.Time  `json:"updatedAt"`
+}
+
+// CreateEnvironmentRequest is the request to create a new environment
+type CreateEnvironmentRequest struct {
+	Name        string  `json:"name"`
+	Description *string `json:"description,omitempty"`
+}
+
+// UpdateEnvironmentRequest is the request to update an environment
+type UpdateEnvironmentRequest struct {
+	Description *string `json:"description,omitempty"`
+}
+
+// ListEnvironmentsResponse is the response from listing environments
+type ListEnvironmentsResponse struct {
+	Environments []*Environment `json:"environments"`
+}
+
 // RegisterApplicationRequest is the request body for registering an application
 type RegisterApplicationRequest struct {
 	Name string `json:"name"`
@@ -498,6 +523,165 @@ func (c *Client) DeletePolicy(appNameOrID, policyID string) error {
 	}
 
 	url := c.joinURL(fmt.Sprintf("api/v1/apps/%s/policies/%s", appID, policyID))
+
+	httpReq, err := http.NewRequest("DELETE", url, nil)
+	if err != nil {
+		return fmt.Errorf("failed to create request: %w", err)
+	}
+
+	httpReq.Header.Set("X-API-Key", c.apiKey)
+
+	resp, err := c.client.Do(httpReq)
+	if err != nil {
+		return fmt.Errorf("failed to send request: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusNoContent {
+		body, _ := io.ReadAll(resp.Body)
+		return fmt.Errorf("API returned status %d: %s", resp.StatusCode, string(body))
+	}
+
+	return nil
+}
+
+// Environment methods
+
+// CreateEnvironment creates a new environment
+func (c *Client) CreateEnvironment(req CreateEnvironmentRequest) (*Environment, error) {
+	url := c.joinURL("api/v1/environments")
+
+	body, err := json.Marshal(req)
+	if err != nil {
+		return nil, fmt.Errorf("failed to marshal request: %w", err)
+	}
+
+	httpReq, err := http.NewRequest("POST", url, bytes.NewReader(body))
+	if err != nil {
+		return nil, fmt.Errorf("failed to create request: %w", err)
+	}
+
+	httpReq.Header.Set("Content-Type", "application/json")
+	httpReq.Header.Set("X-API-Key", c.apiKey)
+
+	resp, err := c.client.Do(httpReq)
+	if err != nil {
+		return nil, fmt.Errorf("failed to send request: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusCreated {
+		body, _ := io.ReadAll(resp.Body)
+		return nil, fmt.Errorf("API returned status %d: %s", resp.StatusCode, string(body))
+	}
+
+	var env Environment
+	if err := json.NewDecoder(resp.Body).Decode(&env); err != nil {
+		return nil, fmt.Errorf("failed to decode response: %w", err)
+	}
+
+	return &env, nil
+}
+
+// ListEnvironments lists all environments
+func (c *Client) ListEnvironments() (*ListEnvironmentsResponse, error) {
+	url := c.joinURL("api/v1/environments")
+
+	httpReq, err := http.NewRequest("GET", url, nil)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create request: %w", err)
+	}
+
+	httpReq.Header.Set("X-API-Key", c.apiKey)
+
+	resp, err := c.client.Do(httpReq)
+	if err != nil {
+		return nil, fmt.Errorf("failed to send request: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(resp.Body)
+		return nil, fmt.Errorf("API returned status %d: %s", resp.StatusCode, string(body))
+	}
+
+	var listResp ListEnvironmentsResponse
+	if err := json.NewDecoder(resp.Body).Decode(&listResp); err != nil {
+		return nil, fmt.Errorf("failed to decode response: %w", err)
+	}
+
+	return &listResp, nil
+}
+
+// GetEnvironment gets an environment by ID
+func (c *Client) GetEnvironment(environmentID string) (*Environment, error) {
+	url := c.joinURL(fmt.Sprintf("api/v1/environments/%s", environmentID))
+
+	httpReq, err := http.NewRequest("GET", url, nil)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create request: %w", err)
+	}
+
+	httpReq.Header.Set("X-API-Key", c.apiKey)
+
+	resp, err := c.client.Do(httpReq)
+	if err != nil {
+		return nil, fmt.Errorf("failed to send request: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(resp.Body)
+		return nil, fmt.Errorf("API returned status %d: %s", resp.StatusCode, string(body))
+	}
+
+	var env Environment
+	if err := json.NewDecoder(resp.Body).Decode(&env); err != nil {
+		return nil, fmt.Errorf("failed to decode response: %w", err)
+	}
+
+	return &env, nil
+}
+
+// UpdateEnvironment updates an environment
+func (c *Client) UpdateEnvironment(environmentID string, req UpdateEnvironmentRequest) (*Environment, error) {
+	url := c.joinURL(fmt.Sprintf("api/v1/environments/%s", environmentID))
+
+	body, err := json.Marshal(req)
+	if err != nil {
+		return nil, fmt.Errorf("failed to marshal request: %w", err)
+	}
+
+	httpReq, err := http.NewRequest("PUT", url, bytes.NewReader(body))
+	if err != nil {
+		return nil, fmt.Errorf("failed to create request: %w", err)
+	}
+
+	httpReq.Header.Set("Content-Type", "application/json")
+	httpReq.Header.Set("X-API-Key", c.apiKey)
+
+	resp, err := c.client.Do(httpReq)
+	if err != nil {
+		return nil, fmt.Errorf("failed to send request: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(resp.Body)
+		return nil, fmt.Errorf("API returned status %d: %s", resp.StatusCode, string(body))
+	}
+
+	var env Environment
+	if err := json.NewDecoder(resp.Body).Decode(&env); err != nil {
+		return nil, fmt.Errorf("failed to decode response: %w", err)
+	}
+
+	return &env, nil
+}
+
+// DeleteEnvironment deletes an environment
+func (c *Client) DeleteEnvironment(environmentID string) error {
+	url := c.joinURL(fmt.Sprintf("api/v1/environments/%s", environmentID))
 
 	httpReq, err := http.NewRequest("DELETE", url, nil)
 	if err != nil {
