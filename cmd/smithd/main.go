@@ -25,20 +25,22 @@ func main() {
 		log.Fatalf("Failed to load config: %v", err)
 	}
 
-	// Ensure database directory exists
-	dbDir := filepath.Dir(cfg.DBPath)
-	if err := os.MkdirAll(dbDir, 0755); err != nil {
-		log.Fatalf("Failed to create database directory: %v", err)
+	// Ensure database directory exists (for SQLite)
+	if cfg.DBDriver == "sqlite" || cfg.DBDriver == "sqlite3" || cfg.DBDriver == "" {
+		dbDir := filepath.Dir(cfg.DBDSN)
+		if err := os.MkdirAll(dbDir, 0755); err != nil {
+			log.Fatalf("Failed to create database directory: %v", err)
+		}
 	}
 
 	// Open database
-	database, err := db.Open(cfg.DBType, cfg.DBPath)
+	database, err := db.Open(cfg.DBDriver, cfg.DBDSN)
 	if err != nil {
 		log.Fatalf("Failed to open database: %v", err)
 	}
 	defer database.Close()
 
-	log.Printf("Database initialized: %s", cfg.DBPath)
+	log.Printf("Database initialized: %s", cfg.DBDSN)
 
 	// Create HTTP server
 	server := api.NewServer(cfg, database)

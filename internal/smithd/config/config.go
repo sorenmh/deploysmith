@@ -13,8 +13,8 @@ type Config struct {
 	APIKeys []string
 
 	// Database
-	DBType string
-	DBPath string
+	DBDriver string
+	DBDSN    string
 
 	// S3
 	S3Bucket           string
@@ -35,8 +35,8 @@ func Load() (*Config, error) {
 	cfg := &Config{
 		Port:              getEnv("PORT", "8080"),
 		APIKeys:           strings.Split(getEnv("API_KEYS", ""), ","),
-		DBType:            getEnv("DB_TYPE", "sqlite"),
-		DBPath:            getEnv("DB_PATH", "./data/smithd.db"),
+		DBDriver:          getEnv("DB_DRIVER", "sqlite"),
+		DBDSN:             getEnv("DB_DSN", "./data/smithd.db"),
 		S3Bucket:           getEnv("S3_BUCKET", ""),
 		S3Region:           getEnv("S3_REGION", "us-east-1"),
 		AWSEndpoint:        getEnv("AWS_ENDPOINT", ""),

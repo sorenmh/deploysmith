@@ -5,17 +5,18 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/sorenmh/deploysmith/internal/smithd/models"
 	"github.com/google/uuid"
+	"github.com/sorenmh/deploysmith/internal/smithd/db"
+	"github.com/sorenmh/deploysmith/internal/smithd/models"
 )
 
 // VersionStore handles version database operations
 type VersionStore struct {
-	db *sql.DB
+	db *db.DB
 }
 
 // NewVersionStore creates a new version store
-func NewVersionStore(db *sql.DB) *VersionStore {
+func NewVersionStore(db *db.DB) *VersionStore {
 	return &VersionStore{db: db}
 }
 

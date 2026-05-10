@@ -5,16 +5,17 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/sorenmh/deploysmith/internal/smithd/db"
 	"github.com/sorenmh/deploysmith/internal/smithd/models"
 )
 
 // EnvironmentStore handles environment data operations
 type EnvironmentStore struct {
-	db *sql.DB
+	db *db.DB
 }
 
 // NewEnvironmentStore creates a new environment store
-func NewEnvironmentStore(db *sql.DB) *EnvironmentStore {
+func NewEnvironmentStore(db *db.DB) *EnvironmentStore {
 	return &EnvironmentStore{db: db}
 }
 

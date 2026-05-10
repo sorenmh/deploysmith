@@ -5,17 +5,18 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/sorenmh/deploysmith/internal/smithd/models"
 	"github.com/google/uuid"
+	"github.com/sorenmh/deploysmith/internal/smithd/db"
+	"github.com/sorenmh/deploysmith/internal/smithd/models"
 )
 
 // DeploymentStore handles deployment database operations
 type DeploymentStore struct {
-	db *sql.DB
+	db *db.DB
 }
 
 // NewDeploymentStore creates a new deployment store
-func NewDeploymentStore(db *sql.DB) *DeploymentStore {
+func NewDeploymentStore(db *db.DB) *DeploymentStore {
 	return &DeploymentStore{db: db}
 }
 

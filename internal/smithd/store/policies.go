@@ -5,17 +5,18 @@ import (
 	"fmt"
 	"path/filepath"
 
-	"github.com/sorenmh/deploysmith/internal/smithd/models"
 	"github.com/google/uuid"
+	"github.com/sorenmh/deploysmith/internal/smithd/db"
+	"github.com/sorenmh/deploysmith/internal/smithd/models"
 )
 
 // PolicyStore handles policy database operations
 type PolicyStore struct {
-	db *sql.DB
+	db *db.DB
 }
 
 // NewPolicyStore creates a new policy store
-func NewPolicyStore(db *sql.DB) *PolicyStore {
+func NewPolicyStore(db *db.DB) *PolicyStore {
 	return &PolicyStore{db: db}
 }
 

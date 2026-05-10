@@ -5,17 +5,18 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/sorenmh/deploysmith/internal/smithd/models"
 	"github.com/google/uuid"
+	"github.com/sorenmh/deploysmith/internal/smithd/db"
+	"github.com/sorenmh/deploysmith/internal/smithd/models"
 )
 
 // ApplicationStore handles application database operations
 type ApplicationStore struct {
-	db *sql.DB
+	db *db.DB
 }
 
 // NewApplicationStore creates a new application store
-func NewApplicationStore(db *sql.DB) *ApplicationStore {
+func NewApplicationStore(db *db.DB) *ApplicationStore {
 	return &ApplicationStore{db: db}
 }
 

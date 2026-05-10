@@ -1,0 +1,6 @@
+DROP TABLE IF EXISTS deployments;
+DROP TABLE IF EXISTS versions;
+DROP TABLE IF EXISTS policies;
+DROP TABLE IF EXISTS environments;
+DROP TABLE IF EXISTS applications;
+DROP TABLE IF EXISTS schema_version;
