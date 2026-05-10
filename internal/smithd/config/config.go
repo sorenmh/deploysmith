@@ -28,6 +28,9 @@ type Config struct {
 	GitopsSSHKeyPath  string
 	GitopsUserName    string
 	GitopsUserEmail   string
+
+	// Events
+	NATSUrl string
 }
 
 // Load loads configuration from environment variables
@@ -46,6 +49,7 @@ func Load() (*Config, error) {
 		GitopsSSHKeyPath:  getEnv("GITOPS_SSH_KEY_PATH", ""),
 		GitopsUserName:    getEnv("GITOPS_USER_NAME", "smithd"),
 		GitopsUserEmail:   getEnv("GITOPS_USER_EMAIL", "smithd@deploysmith.io"),
+		NATSUrl:           getEnv("NATS_URL", ""),
 	}
 
 	// Validate required fields

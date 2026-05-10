@@ -12,11 +12,13 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/sorenmh/deploysmith/internal/shared/logging"
 	"github.com/sorenmh/deploysmith/internal/smithd/config"
 	"github.com/sorenmh/deploysmith/internal/smithd/db"
+	"github.com/sorenmh/deploysmith/internal/smithd/events"
 	"github.com/sorenmh/deploysmith/internal/smithd/gitops"
 	"github.com/sorenmh/deploysmith/internal/smithd/models"
 	"github.com/sorenmh/deploysmith/internal/smithd/storage"
@@ -36,6 +38,7 @@ type Server struct {
 	environmentStore *store.EnvironmentStore
 	storage          *storage.S3Storage
 	gitops           *gitops.Service
+	publisher        events.Publisher
 }
 
 // NewServer creates a new HTTP server
@@ -46,6 +49,8 @@ func NewServer(cfg *config.Config, database *db.DB) *Server {
 	}
 
 	gitopsService := gitops.NewService(cfg.GitopsRepo, cfg.GitopsSSHKeyPath)
+
+	publisher := events.New(cfg.NATSUrl)
 
 	s := &Server{
 		cfg:              cfg,
@@ -58,6 +63,7 @@ func NewServer(cfg *config.Config, database *db.DB) *Server {
 		environmentStore: store.NewEnvironmentStore(database),
 		storage:          s3Storage,
 		gitops:           gitopsService,
+		publisher:        publisher,
 	}
 
 	s.setupRoutes()
@@ -459,6 +465,14 @@ func (s *Server) handlePublishVersion(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to update version status")
 		return
 	}
+
+	s.publisher.Publish(events.Event{
+		Type:      events.EventVersionPublished,
+		AppName:   app.Name,
+		AppID:     appID,
+		VersionID: version.VersionID,
+		Timestamp: time.Now(),
+	})
 
 	// Refresh version to get updated fields
 	version, _ = s.versionStore.GetByVersionID(appID, versionID)
@@ -916,12 +930,39 @@ func (s *Server) autoDeployVersion(ctx context.Context, appName, appID string, v
 		return
 	}
 
+	// fail publishes a failure event and updates the deployment status.
+	fail := func(errMsg string) {
+		s.publisher.Publish(events.Event{
+			Type:         events.EventDeploymentFailed,
+			AppName:      appName,
+			AppID:        appID,
+			VersionID:    version.VersionID,
+			Environment:  policy.TargetEnvironment,
+			PolicyName:   policy.Name,
+			DeploymentID: deployment.ID,
+			Error:        errMsg,
+			Timestamp:    time.Now(),
+		})
+	}
+
+	s.publisher.Publish(events.Event{
+		Type:         events.EventDeploymentStarted,
+		AppName:      appName,
+		AppID:        appID,
+		VersionID:    version.VersionID,
+		Environment:  policy.TargetEnvironment,
+		PolicyName:   policy.Name,
+		DeploymentID: deployment.ID,
+		Timestamp:    time.Now(),
+	})
+
 	// Fetch manifests from S3
 	logging.LogDebugCtx(ctx, "Fetching manifests from storage")
 	manifests, err := s.storage.GetAllFiles(appName, version.VersionID, true)
 	if err != nil {
 		logging.LogErrorCtx(ctx, "Auto-deploy failed to fetch manifests: "+err.Error(), err)
 		s.deploymentStore.UpdateStatus(deployment.ID, "failed", "", fmt.Sprintf("Failed to fetch manifests: %v", err))
+		fail(err.Error())
 		return
 	}
 
@@ -930,6 +971,7 @@ func (s *Server) autoDeployVersion(ctx context.Context, appName, appID string, v
 	if err := s.gitops.Clone(); err != nil {
 		logging.LogErrorCtx(ctx, "Auto-deploy failed to clone gitops repo: "+err.Error(), err)
 		s.deploymentStore.UpdateStatus(deployment.ID, "failed", "", fmt.Sprintf("Failed to clone gitops repo: %v", err))
+		fail(err.Error())
 		return
 	}
 
@@ -938,6 +980,7 @@ func (s *Server) autoDeployVersion(ctx context.Context, appName, appID string, v
 	if err := s.gitops.WriteManifests(appName, policy.TargetEnvironment, version.VersionID, manifests); err != nil {
 		logging.LogErrorCtx(ctx, "Auto-deploy failed to write manifests: "+err.Error(), err)
 		s.deploymentStore.UpdateStatus(deployment.ID, "failed", "", fmt.Sprintf("Failed to write manifests: %v", err))
+		fail(err.Error())
 		return
 	}
 
@@ -948,6 +991,7 @@ func (s *Server) autoDeployVersion(ctx context.Context, appName, appID string, v
 	if err != nil {
 		logging.LogErrorCtx(ctx, "Auto-deploy failed to commit: "+err.Error(), err)
 		s.deploymentStore.UpdateStatus(deployment.ID, "failed", "", fmt.Sprintf("Failed to commit: %v", err))
+		fail(err.Error())
 		return
 	}
 
@@ -956,6 +1000,7 @@ func (s *Server) autoDeployVersion(ctx context.Context, appName, appID string, v
 	if err := s.gitops.Push(); err != nil {
 		logging.LogErrorCtx(ctx, "Auto-deploy failed to push: "+err.Error(), err)
 		s.deploymentStore.UpdateStatus(deployment.ID, "failed", commitSHA, fmt.Sprintf("Failed to push: %v", err))
+		fail(err.Error())
 		return
 	}
 
@@ -964,6 +1009,18 @@ func (s *Server) autoDeployVersion(ctx context.Context, appName, appID string, v
 		logging.LogErrorCtx(ctx, "Auto-deploy failed to update deployment status: "+err.Error(), err)
 		return
 	}
+
+	s.publisher.Publish(events.Event{
+		Type:         events.EventDeploymentSucceeded,
+		AppName:      appName,
+		AppID:        appID,
+		VersionID:    version.VersionID,
+		Environment:  policy.TargetEnvironment,
+		PolicyName:   policy.Name,
+		DeploymentID: deployment.ID,
+		CommitSHA:    commitSHA,
+		Timestamp:    time.Now(),
+	})
 
 	logging.LogInfoCtx(ctx, "Auto-deploy succeeded",
 		logging.Field("deployment_id", deployment.ID),
