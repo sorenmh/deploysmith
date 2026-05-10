@@ -12,28 +12,29 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/go-chi/chi/v5"
+	"github.com/sorenmh/deploysmith/internal/shared/logging"
 	"github.com/sorenmh/deploysmith/internal/smithd/config"
 	"github.com/sorenmh/deploysmith/internal/smithd/db"
 	"github.com/sorenmh/deploysmith/internal/smithd/gitops"
 	"github.com/sorenmh/deploysmith/internal/smithd/models"
 	"github.com/sorenmh/deploysmith/internal/smithd/storage"
 	"github.com/sorenmh/deploysmith/internal/smithd/store"
-	"github.com/go-chi/chi/v5"
 	"gopkg.in/yaml.v3"
 )
 
 // Server represents the HTTP server
 type Server struct {
-	cfg             *config.Config
-	db              *db.DB
-	router          *chi.Mux
-	appStore        *store.ApplicationStore
-	versionStore    *store.VersionStore
-	deploymentStore *store.DeploymentStore
-	policyStore     *store.PolicyStore
+	cfg              *config.Config
+	db               *db.DB
+	router           *chi.Mux
+	appStore         *store.ApplicationStore
+	versionStore     *store.VersionStore
+	deploymentStore  *store.DeploymentStore
+	policyStore      *store.PolicyStore
 	environmentStore *store.EnvironmentStore
-	storage         *storage.S3Storage
-	gitops          *gitops.Service
+	storage          *storage.S3Storage
+	gitops           *gitops.Service
 }
 
 // NewServer creates a new HTTP server
@@ -46,16 +47,16 @@ func NewServer(cfg *config.Config, database *db.DB) *Server {
 	gitopsService := gitops.NewService(cfg.GitopsRepo, cfg.GitopsSSHKeyPath)
 
 	s := &Server{
-		cfg:             cfg,
-		db:              database,
-		router:          chi.NewRouter(),
-		appStore:        store.NewApplicationStore(database.DB),
-		versionStore:    store.NewVersionStore(database.DB),
-		deploymentStore: store.NewDeploymentStore(database.DB),
-		policyStore:     store.NewPolicyStore(database.DB),
+		cfg:              cfg,
+		db:               database,
+		router:           chi.NewRouter(),
+		appStore:         store.NewApplicationStore(database.DB),
+		versionStore:     store.NewVersionStore(database.DB),
+		deploymentStore:  store.NewDeploymentStore(database.DB),
+		policyStore:      store.NewPolicyStore(database.DB),
 		environmentStore: store.NewEnvironmentStore(database.DB),
-		storage:         s3Storage,
-		gitops:          gitopsService,
+		storage:          s3Storage,
+		gitops:           gitopsService,
 	}
 
 	s.setupRoutes()
@@ -305,7 +306,7 @@ func (s *Server) handlePublishVersion(w http.ResponseWriter, r *http.Request) {
 			writeError(w, http.StatusNotFound, "not_found", "Application not found")
 			return
 		}
-		log.Printf("Failed to get application: %v", err)
+		logging.LogErrorCtx(r.Context(), "Failed to get application: "+err.Error(), err)
 		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to get application")
 		return
 	}
@@ -317,7 +318,7 @@ func (s *Server) handlePublishVersion(w http.ResponseWriter, r *http.Request) {
 			writeError(w, http.StatusNotFound, "not_found", "Version not found")
 			return
 		}
-		log.Printf("Failed to get version: %v", err)
+		logging.LogErrorCtx(r.Context(), "Failed to get version: "+err.Error(), err)
 		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to get version")
 		return
 	}
@@ -331,12 +332,12 @@ func (s *Server) handlePublishVersion(w http.ResponseWriter, r *http.Request) {
 	// List files in draft location
 	files, err := s.storage.ListFiles(app.Name, versionID, false)
 	if err != nil {
-		log.Printf("Failed to list draft files: %v", err)
+		logging.LogErrorCtx(r.Context(), "Failed to list draft files: "+err.Error(), err)
 		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to access draft files")
 		return
 	}
 
-	log.Printf("Found %d files in draft location for version %s: %v", len(files), versionID, files)
+	logging.LogInfoCtx(r.Context(), fmt.Sprintf("Found %d files in draft location for version %s: %v", len(files), versionID, files))
 
 	if len(files) == 0 {
 		writeError(w, http.StatusBadRequest, "invalid_request", "No manifest files uploaded")
@@ -352,12 +353,12 @@ func (s *Server) handlePublishVersion(w http.ResponseWriter, r *http.Request) {
 	for _, file := range files {
 		if file == "manifests.tar.gz" {
 			hasTarball = true
-			log.Printf("Found tarball, extracting files...")
+			logging.LogInfoCtx(r.Context(), "Found tarball, extracting files...")
 
 			// Get and extract tarball
 			reader, err := s.storage.GetFile(app.Name, versionID, file, false)
 			if err != nil {
-				log.Printf("Failed to get tarball %s: %v", file, err)
+				logging.LogErrorCtx(r.Context(), "Failed to get tarball "+file+": "+err.Error(), err)
 				writeError(w, http.StatusInternalServerError, "internal_error", "Failed to read manifest files")
 				return
 			}
@@ -365,12 +366,12 @@ func (s *Server) handlePublishVersion(w http.ResponseWriter, r *http.Request) {
 
 			tarballFiles, err = s.extractTarball(reader)
 			if err != nil {
-				log.Printf("Failed to extract tarball: %v", err)
+				logging.LogErrorCtx(r.Context(), "Failed to extract tarball: "+err.Error(), err)
 				writeError(w, http.StatusInternalServerError, "internal_error", "Failed to extract manifest files")
 				return
 			}
 
-			log.Printf("Extracted %d files from tarball: %v", len(tarballFiles), getKeys(tarballFiles))
+			logging.LogInfoCtx(r.Context(), fmt.Sprintf("Extracted %d files from tarball: %v", len(tarballFiles), getKeys(tarballFiles)))
 			break
 		}
 	}
@@ -379,23 +380,23 @@ func (s *Server) handlePublishVersion(w http.ResponseWriter, r *http.Request) {
 	if hasTarball {
 		// Validate files from tarball
 		for filename, content := range tarballFiles {
-			log.Printf("Processing extracted file: %s", filename)
+			logging.LogDebugCtx(r.Context(), fmt.Sprintf("Processing extracted file: %s", filename))
 			if strings.HasSuffix(filename, ".yaml") || strings.HasSuffix(filename, ".yml") {
-				log.Printf("File %s is a YAML file, validating...", filename)
-				log.Printf("Read %d bytes from file %s", len(content), filename)
+				logging.LogInfoCtx(r.Context(), fmt.Sprintf("File %s is a YAML file, validating...", filename))
+				logging.LogInfoCtx(r.Context(), fmt.Sprintf("Read %d bytes from file %s", len(content), filename))
 
 				// Validate YAML syntax
 				var yamlContent interface{}
 				if err := yaml.Unmarshal(content, &yamlContent); err != nil {
-					log.Printf("YAML validation failed for file %s: %v", filename, err)
+					logging.LogErrorCtx(r.Context(), fmt.Sprintf("YAML validation failed for file %s: %v", filename, err), err)
 					writeError(w, http.StatusBadRequest, "validation_failed", fmt.Sprintf("Invalid YAML in %s: %v", filename, err))
 					return
 				}
 
-				log.Printf("File %s validated successfully", filename)
+				logging.LogDebugCtx(r.Context(), fmt.Sprintf("File %s validated successfully", filename))
 				manifestFiles = append(manifestFiles, filename)
 			} else {
-				log.Printf("Skipping non-YAML file: %s", filename)
+				logging.LogInfoCtx(r.Context(), fmt.Sprintf("Skipping non-YAML file: %s", filename))
 			}
 		}
 	} else {
