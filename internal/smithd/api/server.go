@@ -3,6 +3,7 @@ package api
 import (
 	"archive/tar"
 	"compress/gzip"
+	"context"
 	"database/sql"
 	"encoding/json"
 	"fmt"
@@ -297,7 +298,7 @@ func (s *Server) handlePublishVersion(w http.ResponseWriter, r *http.Request) {
 	appID := chi.URLParam(r, "appId")
 	versionID := chi.URLParam(r, "versionId")
 
-	log.Printf("Publishing version %s for app %s", versionID, appID)
+	logging.LogInfoCtx(r.Context(), fmt.Sprintf("Publishing version %s for app %s", versionID, appID))
 
 	// Verify application exists
 	app, err := s.appStore.GetByID(appID)
@@ -402,13 +403,13 @@ func (s *Server) handlePublishVersion(w http.ResponseWriter, r *http.Request) {
 	} else {
 		// Validate individual files
 		for _, file := range files {
-			log.Printf("Processing file: %s", file)
+			logging.LogDebugCtx(r.Context(), fmt.Sprintf("Processing file: %s", file))
 			if strings.HasSuffix(file, ".yaml") || strings.HasSuffix(file, ".yml") {
-				log.Printf("File %s is a YAML file, validating...", file)
+				logging.LogInfoCtx(r.Context(), fmt.Sprintf("File %s is a YAML file, validating...", file))
 				// Get file content
 				reader, err := s.storage.GetFile(app.Name, versionID, file, false)
 				if err != nil {
-					log.Printf("Failed to get file %s: %v", file, err)
+					logging.LogErrorCtx(r.Context(), fmt.Sprintf("Failed to get file %s: %v", file, err), err)
 					writeError(w, http.StatusInternalServerError, "internal_error", "Failed to read manifest files")
 					return
 				}
@@ -417,25 +418,25 @@ func (s *Server) handlePublishVersion(w http.ResponseWriter, r *http.Request) {
 				// Read content
 				content, err := io.ReadAll(reader)
 				if err != nil {
-					log.Printf("Failed to read file %s: %v", file, err)
+					logging.LogErrorCtx(r.Context(), fmt.Sprintf("Failed to read file %s: %v", file, err), err)
 					writeError(w, http.StatusInternalServerError, "internal_error", "Failed to read manifest files")
 					return
 				}
 
-				log.Printf("Read %d bytes from file %s", len(content), file)
+				logging.LogInfoCtx(r.Context(), fmt.Sprintf("Read %d bytes from file %s", len(content), file))
 
 				// Validate YAML syntax
 				var yamlContent interface{}
 				if err := yaml.Unmarshal(content, &yamlContent); err != nil {
-					log.Printf("YAML validation failed for file %s: %v", file, err)
+					logging.LogErrorCtx(r.Context(), fmt.Sprintf("YAML validation failed for file %s: %v", file, err), err)
 					writeError(w, http.StatusBadRequest, "validation_failed", fmt.Sprintf("Invalid YAML in %s: %v", file, err))
 					return
 				}
 
-				log.Printf("File %s validated successfully", file)
+				logging.LogDebugCtx(r.Context(), fmt.Sprintf("File %s validated successfully", file))
 				manifestFiles = append(manifestFiles, file)
 			} else {
-				log.Printf("Skipping non-YAML file: %s", file)
+				logging.LogInfoCtx(r.Context(), fmt.Sprintf("Skipping non-YAML file: %s", file))
 			}
 		}
 	}
@@ -447,14 +448,14 @@ func (s *Server) handlePublishVersion(w http.ResponseWriter, r *http.Request) {
 
 	// Move files from drafts to published
 	if err := s.storage.MoveVersion(app.Name, versionID); err != nil {
-		log.Printf("Failed to move version to published: %v", err)
+		logging.LogErrorCtx(r.Context(), "Failed to move version to published: "+err.Error(), err)
 		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to publish version")
 		return
 	}
 
 	// Update version status
 	if err := s.versionStore.UpdateStatus(version.ID, "published"); err != nil {
-		log.Printf("Failed to update version status: %v", err)
+		logging.LogErrorCtx(r.Context(), "Failed to update version status: "+err.Error(), err)
 		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to update version status")
 		return
 	}
@@ -463,17 +464,28 @@ func (s *Server) handlePublishVersion(w http.ResponseWriter, r *http.Request) {
 	version, _ = s.versionStore.GetByVersionID(appID, versionID)
 
 	// Check for matching auto-deploy policies
-	if version.GitBranch != "" {
+	if version.GitBranch == "" {
+		logging.LogInfoCtx(r.Context(), "Skipping auto-deploy: no git branch metadata on version")
+	} else {
 		matchingPolicies, err := s.policyStore.FindMatchingPolicies(appID, version.GitBranch)
 		if err != nil {
-			log.Printf("Failed to check auto-deploy policies: %v", err)
+			logging.LogErrorCtx(r.Context(), "Failed to check auto-deploy policies: "+err.Error(), err)
 			// Don't fail the publish, just log the error
 		} else {
+			logging.LogInfoCtx(r.Context(), fmt.Sprintf("Found %d matching auto-deploy policies for branch %s", len(matchingPolicies), version.GitBranch))
+			if len(matchingPolicies) == 0 {
+				logging.LogInfoCtx(r.Context(), "No matching auto-deploy policies found, skipping auto-deploy")
+			}
 			for _, policy := range matchingPolicies {
-				log.Printf("Auto-deploying version %s to %s via policy %s", versionID, policy.TargetEnvironment, policy.Name)
+				logging.LogInfoCtx(r.Context(), "Matched auto-deploy policy",
+					logging.Field("policy", policy.Name),
+					logging.Field("branch_pattern", policy.GitBranchPattern),
+					logging.Field("target_environment", policy.TargetEnvironment),
+				)
+				logging.LogInfoCtx(r.Context(), fmt.Sprintf("Auto-deploying version %s to %s via policy %s", versionID, policy.TargetEnvironment, policy.Name))
 
 				// Trigger deployment asynchronously to avoid blocking the response
-				go s.autoDeployVersion(app.Name, appID, version, policy)
+				go s.autoDeployVersion(context.Background(), app.Name, appID, version, policy)
 			}
 		}
 	}
@@ -885,60 +897,78 @@ func (s *Server) handleDeletePolicy(w http.ResponseWriter, r *http.Request) {
 
 // autoDeployVersion automatically deploys a version based on a policy
 // This runs asynchronously in a goroutine
-func (s *Server) autoDeployVersion(appName, appID string, version *models.Version, policy models.Policy) {
+func (s *Server) autoDeployVersion(ctx context.Context, appName, appID string, version *models.Version, policy models.Policy) {
+	ctx = logging.AppendLogAttrs(ctx,
+		logging.Field("app", appName),
+		logging.Field("version", version.VersionID),
+		logging.Field("environment", policy.TargetEnvironment),
+		logging.Field("policy", policy.Name),
+	)
+
+	logging.LogInfoCtx(ctx, "Auto-deploy started")
+
 	// Create deployment record
+	logging.LogDebugCtx(ctx, "Creating deployment record")
 	policyID := policy.ID
 	deployment, err := s.deploymentStore.Create(appID, version.ID, policy.TargetEnvironment, "auto-deploy", &policyID)
 	if err != nil {
-		log.Printf("Auto-deploy failed to create deployment record: %v", err)
+		logging.LogErrorCtx(ctx, "Auto-deploy failed to create deployment record: "+err.Error(), err)
 		return
 	}
 
 	// Fetch manifests from S3
+	logging.LogDebugCtx(ctx, "Fetching manifests from storage")
 	manifests, err := s.storage.GetAllFiles(appName, version.VersionID, true)
 	if err != nil {
-		log.Printf("Auto-deploy failed to fetch manifests: %v", err)
+		logging.LogErrorCtx(ctx, "Auto-deploy failed to fetch manifests: "+err.Error(), err)
 		s.deploymentStore.UpdateStatus(deployment.ID, "failed", "", fmt.Sprintf("Failed to fetch manifests: %v", err))
 		return
 	}
 
 	// Clone gitops repo
+	logging.LogDebugCtx(ctx, "Cloning gitops repo")
 	if err := s.gitops.Clone(); err != nil {
-		log.Printf("Auto-deploy failed to clone gitops repo: %v", err)
+		logging.LogErrorCtx(ctx, "Auto-deploy failed to clone gitops repo: "+err.Error(), err)
 		s.deploymentStore.UpdateStatus(deployment.ID, "failed", "", fmt.Sprintf("Failed to clone gitops repo: %v", err))
 		return
 	}
 
 	// Write manifests to gitops repo
+	logging.LogDebugCtx(ctx, "Writing manifests to gitops repo")
 	if err := s.gitops.WriteManifests(appName, policy.TargetEnvironment, version.VersionID, manifests); err != nil {
-		log.Printf("Auto-deploy failed to write manifests: %v", err)
+		logging.LogErrorCtx(ctx, "Auto-deploy failed to write manifests: "+err.Error(), err)
 		s.deploymentStore.UpdateStatus(deployment.ID, "failed", "", fmt.Sprintf("Failed to write manifests: %v", err))
 		return
 	}
 
 	// Commit changes
+	logging.LogDebugCtx(ctx, "Committing changes")
 	commitMsg := fmt.Sprintf("Auto-deploy %s version %s to %s (policy: %s)", appName, version.VersionID, policy.TargetEnvironment, policy.Name)
 	commitSHA, err := s.gitops.Commit(commitMsg)
 	if err != nil {
-		log.Printf("Auto-deploy failed to commit: %v", err)
+		logging.LogErrorCtx(ctx, "Auto-deploy failed to commit: "+err.Error(), err)
 		s.deploymentStore.UpdateStatus(deployment.ID, "failed", "", fmt.Sprintf("Failed to commit: %v", err))
 		return
 	}
 
 	// Push to remote
+	logging.LogDebugCtx(ctx, "Pushing to remote")
 	if err := s.gitops.Push(); err != nil {
-		log.Printf("Auto-deploy failed to push: %v", err)
+		logging.LogErrorCtx(ctx, "Auto-deploy failed to push: "+err.Error(), err)
 		s.deploymentStore.UpdateStatus(deployment.ID, "failed", commitSHA, fmt.Sprintf("Failed to push: %v", err))
 		return
 	}
 
 	// Update deployment status
 	if err := s.deploymentStore.UpdateStatus(deployment.ID, "success", commitSHA, ""); err != nil {
-		log.Printf("Auto-deploy failed to update deployment status: %v", err)
+		logging.LogErrorCtx(ctx, "Auto-deploy failed to update deployment status: "+err.Error(), err)
 		return
 	}
 
-	log.Printf("Auto-deploy succeeded: %s version %s to %s (deployment: %s, commit: %s)", appName, version.VersionID, policy.TargetEnvironment, deployment.ID, commitSHA)
+	logging.LogInfoCtx(ctx, "Auto-deploy succeeded",
+		logging.Field("deployment_id", deployment.ID),
+		logging.Field("commit_sha", commitSHA),
+	)
 }
 
 // extractTarball extracts files from a gzipped tarball
