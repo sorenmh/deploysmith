@@ -14,6 +14,7 @@ build-smithd:
     FROM +deps
     COPY cmd/smithd ./cmd/smithd
     COPY internal/smithd ./internal/smithd
+    COPY internal/shared ./internal/shared
     RUN apk add --no-cache git gcc musl-dev
     RUN CGO_ENABLED=1 go build -o bin/smithd \
         -ldflags "-X main.version=dev -X main.commit=$(git rev-parse --short HEAD 2>/dev/null || echo 'unknown') -X main.date=$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
