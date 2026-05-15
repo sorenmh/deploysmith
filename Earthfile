@@ -1,6 +1,6 @@
 VERSION 0.8
 
-FROM golang:1.23-alpine
+FROM golang:1.26-alpine
 WORKDIR /workspace
 
 deps:
