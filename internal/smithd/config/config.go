@@ -31,6 +31,10 @@ type Config struct {
 
 	// Events
 	NATSUrl string
+
+	// Flux
+	FluxWebhookURL   string
+	FluxWebhookToken string
 }
 
 // Load loads configuration from environment variables
@@ -50,6 +54,8 @@ func Load() (*Config, error) {
 		GitopsUserName:    getEnv("GITOPS_USER_NAME", "smithd"),
 		GitopsUserEmail:   getEnv("GITOPS_USER_EMAIL", "smithd@deploysmith.io"),
 		NATSUrl:           getEnv("NATS_URL", ""),
+		FluxWebhookURL:   getEnv("FLUX_WEBHOOK_URL", ""),
+		FluxWebhookToken: getEnv("FLUX_WEBHOOK_TOKEN", ""),
 	}
 
 	// Validate required fields

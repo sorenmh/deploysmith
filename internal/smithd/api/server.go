@@ -19,6 +19,7 @@ import (
 	"github.com/sorenmh/deploysmith/internal/smithd/config"
 	"github.com/sorenmh/deploysmith/internal/smithd/db"
 	"github.com/sorenmh/deploysmith/internal/smithd/events"
+	"github.com/sorenmh/deploysmith/internal/smithd/flux"
 	"github.com/sorenmh/deploysmith/internal/smithd/gitops"
 	"github.com/sorenmh/deploysmith/internal/smithd/models"
 	"github.com/sorenmh/deploysmith/internal/smithd/storage"
@@ -39,6 +40,7 @@ type Server struct {
 	storage          *storage.S3Storage
 	gitops           *gitops.Service
 	publisher        events.Publisher
+	fluxReconciler   *flux.Reconciler
 }
 
 // NewServer creates a new HTTP server
@@ -52,6 +54,8 @@ func NewServer(cfg *config.Config, database *db.DB) *Server {
 
 	publisher := events.New(cfg.NATSUrl)
 
+	fluxReconciler := flux.NewReconciler(cfg.FluxWebhookURL, cfg.FluxWebhookToken)
+
 	s := &Server{
 		cfg:              cfg,
 		db:               database,
@@ -64,6 +68,7 @@ func NewServer(cfg *config.Config, database *db.DB) *Server {
 		storage:          s3Storage,
 		gitops:           gitopsService,
 		publisher:        publisher,
+		fluxReconciler:   fluxReconciler,
 	}
 
 	s.setupRoutes()
@@ -753,6 +758,8 @@ func (s *Server) handleDeployVersion(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	s.fluxReconciler.Trigger(r.Context())
+
 	// Update deployment status
 	if err := s.deploymentStore.UpdateStatus(deployment.ID, "success", commitSHA, ""); err != nil {
 		log.Printf("Failed to update deployment status: %v", err)
@@ -1003,6 +1010,8 @@ func (s *Server) autoDeployVersion(ctx context.Context, appName, appID string, v
 		fail(err.Error())
 		return
 	}
+
+	s.fluxReconciler.Trigger(ctx)
 
 	// Update deployment status
 	if err := s.deploymentStore.UpdateStatus(deployment.ID, "success", commitSHA, ""); err != nil {
