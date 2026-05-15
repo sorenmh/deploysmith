@@ -6,8 +6,8 @@ metadata:
     {{- include "smithd.labels" . | nindent 4 }}
 data:
   PORT: {{ .Values.config.port | quote }}
-  DB_TYPE: {{ .Values.config.database.type | quote }}
-  DB_PATH: {{ .Values.config.database.path | quote }}
+  DB_DRIVER: {{ .Values.config.database.driver | quote }}
+  DB_DSN: {{ .Values.config.database.dsn | quote }}
   S3_BUCKET: {{ .Values.config.s3.bucket | quote }}
   S3_REGION: {{ .Values.config.s3.region | quote }}
   {{- if .Values.config.s3.endpoint }}
@@ -19,3 +19,7 @@ data:
   GITOPS_SSH_KEY_PATH: {{ .Values.config.gitops.sshKeyPath | quote }}
   GITOPS_USER_NAME: {{ .Values.config.gitops.userName | quote }}
   GITOPS_USER_EMAIL: {{ .Values.config.gitops.userEmail | quote }}
+  FLUX_NAMESPACE: {{ .Values.config.flux.namespace | quote }}
+  {{- if .Values.config.flux.kustomizationName }}
+  FLUX_KUSTOMIZATION_NAME: {{ .Values.config.flux.kustomizationName | quote }}
+  {{- end }}

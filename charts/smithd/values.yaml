@@ -136,8 +136,10 @@ config:
 
   # Database configuration
   database:
-    type: sqlite
-    path: /data/smithd.db
+    # driver: sqlite or postgres
+    driver: sqlite
+    # dsn: file path for sqlite, connection string for postgres
+    dsn: /data/smithd.db
 
   # S3 Storage configuration
   s3:
@@ -155,6 +157,14 @@ config:
     # Git user configuration for commits
     userName: smithd
     userEmail: smithd@deploysmith.io
+
+  # Flux integration (optional)
+  flux:
+    # Namespace where Flux Kustomization CRDs live
+    namespace: flux-system
+    # Name of the Kustomization CR to poll for reconciliation status after deploy.
+    # Leave empty to disable Flux status polling.
+    kustomizationName: ""
 
 # Secrets configuration
 secrets:
@@ -174,6 +184,19 @@ secrets:
     # Add your SSH private key here
     -----END OPENSSH PRIVATE KEY-----
 
+  # Slack notifications (optional)
+  slack:
+    webhookUrl: ""
+
+  # Flux webhook receiver (optional)
+  flux:
+    webhookUrl: ""
+    webhookToken: ""
+
+  # NATS event publishing (optional)
+  nats:
+    url: ""
+
   # Alternatively, use existing secrets
   # If set, the above values will be ignored
   existingSecret: ""
@@ -182,3 +205,7 @@ secrets:
   #   - aws-access-key-id
   #   - aws-secret-access-key
   #   - gitops-ssh-key
+  #   - slack-webhook-url      (optional)
+  #   - flux-webhook-url       (optional)
+  #   - flux-webhook-token     (optional)
+  #   - nats-url               (optional)

@@ -61,6 +61,30 @@ spec:
             secretKeyRef:
               name: {{ include "smithd.secretName" . }}
               key: aws-secret-access-key
+        - name: SLACK_WEBHOOK_URL
+          valueFrom:
+            secretKeyRef:
+              name: {{ include "smithd.secretName" . }}
+              key: slack-webhook-url
+              optional: true
+        - name: FLUX_WEBHOOK_URL
+          valueFrom:
+            secretKeyRef:
+              name: {{ include "smithd.secretName" . }}
+              key: flux-webhook-url
+              optional: true
+        - name: FLUX_WEBHOOK_TOKEN
+          valueFrom:
+            secretKeyRef:
+              name: {{ include "smithd.secretName" . }}
+              key: flux-webhook-token
+              optional: true
+        - name: NATS_URL
+          valueFrom:
+            secretKeyRef:
+              name: {{ include "smithd.secretName" . }}
+              key: nats-url
+              optional: true
         livenessProbe:
           {{- toYaml .Values.livenessProbe | nindent 12 }}
         readinessProbe:
