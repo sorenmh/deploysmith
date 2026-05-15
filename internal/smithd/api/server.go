@@ -22,6 +22,7 @@ import (
 	"github.com/sorenmh/deploysmith/internal/smithd/flux"
 	"github.com/sorenmh/deploysmith/internal/smithd/gitops"
 	"github.com/sorenmh/deploysmith/internal/smithd/models"
+	"github.com/sorenmh/deploysmith/internal/smithd/slack"
 	"github.com/sorenmh/deploysmith/internal/smithd/storage"
 	"github.com/sorenmh/deploysmith/internal/smithd/store"
 	"gopkg.in/yaml.v3"
@@ -41,6 +42,8 @@ type Server struct {
 	gitops           *gitops.Service
 	publisher        events.Publisher
 	fluxReconciler   *flux.Reconciler
+	slackNotifier    *slack.Notifier
+	fluxPoller       *flux.KustomizationPoller
 }
 
 // NewServer creates a new HTTP server
@@ -56,6 +59,9 @@ func NewServer(cfg *config.Config, database *db.DB) *Server {
 
 	fluxReconciler := flux.NewReconciler(cfg.FluxWebhookURL, cfg.FluxWebhookToken)
 
+	slackNotifier := slack.NewNotifier(cfg.SlackWebhookURL)
+	fluxPoller := flux.NewKustomizationPoller(cfg.FluxNamespace)
+
 	s := &Server{
 		cfg:              cfg,
 		db:               database,
@@ -69,6 +75,8 @@ func NewServer(cfg *config.Config, database *db.DB) *Server {
 		gitops:           gitopsService,
 		publisher:        publisher,
 		fluxReconciler:   fluxReconciler,
+		slackNotifier:    slackNotifier,
+		fluxPoller:       fluxPoller,
 	}
 
 	s.setupRoutes()
@@ -715,11 +723,14 @@ func (s *Server) handleDeployVersion(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	s.slackNotifier.DeployStarted(r.Context(), app.Name, versionID, req.Environment, "manual")
+
 	// Fetch manifests from S3
 	manifests, err := s.storage.GetAllFiles(app.Name, versionID, true)
 	if err != nil {
 		log.Printf("Failed to fetch manifests from S3: %v", err)
 		s.deploymentStore.UpdateStatus(deployment.ID, "failed", "", fmt.Sprintf("Failed to fetch manifests: %v", err))
+		s.slackNotifier.DeployFailed(r.Context(), app.Name, versionID, req.Environment, fmt.Sprintf("Failed to fetch manifests: %v", err))
 		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to fetch manifests")
 		return
 	}
@@ -728,6 +739,7 @@ func (s *Server) handleDeployVersion(w http.ResponseWriter, r *http.Request) {
 	if err := s.gitops.Clone(); err != nil {
 		log.Printf("Failed to clone gitops repo: %v", err)
 		s.deploymentStore.UpdateStatus(deployment.ID, "failed", "", fmt.Sprintf("Failed to clone gitops repo: %v", err))
+		s.slackNotifier.DeployFailed(r.Context(), app.Name, versionID, req.Environment, fmt.Sprintf("Failed to clone gitops repo: %v", err))
 		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to clone gitops repository")
 		return
 	}
@@ -736,6 +748,7 @@ func (s *Server) handleDeployVersion(w http.ResponseWriter, r *http.Request) {
 	if err := s.gitops.WriteManifests(app.Name, req.Environment, versionID, manifests); err != nil {
 		log.Printf("Failed to write manifests: %v", err)
 		s.deploymentStore.UpdateStatus(deployment.ID, "failed", "", fmt.Sprintf("Failed to write manifests: %v", err))
+		s.slackNotifier.DeployFailed(r.Context(), app.Name, versionID, req.Environment, fmt.Sprintf("Failed to write manifests: %v", err))
 		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to write manifests")
 		return
 	}
@@ -746,6 +759,7 @@ func (s *Server) handleDeployVersion(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		log.Printf("Failed to commit: %v", err)
 		s.deploymentStore.UpdateStatus(deployment.ID, "failed", "", fmt.Sprintf("Failed to commit: %v", err))
+		s.slackNotifier.DeployFailed(r.Context(), app.Name, versionID, req.Environment, fmt.Sprintf("Failed to commit: %v", err))
 		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to commit changes")
 		return
 	}
@@ -754,6 +768,7 @@ func (s *Server) handleDeployVersion(w http.ResponseWriter, r *http.Request) {
 	if err := s.gitops.Push(); err != nil {
 		log.Printf("Failed to push: %v", err)
 		s.deploymentStore.UpdateStatus(deployment.ID, "failed", commitSHA, fmt.Sprintf("Failed to push: %v", err))
+		s.slackNotifier.DeployFailed(r.Context(), app.Name, versionID, req.Environment, fmt.Sprintf("Failed to push: %v", err))
 		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to push to gitops repository")
 		return
 	}
@@ -765,6 +780,8 @@ func (s *Server) handleDeployVersion(w http.ResponseWriter, r *http.Request) {
 		log.Printf("Failed to update deployment status: %v", err)
 		// Don't return error, deployment was successful
 	}
+
+	s.slackNotifier.DeploySucceeded(r.Context(), app.Name, versionID, req.Environment, commitSHA)
 
 	// Return response
 	resp := models.DeployVersionResponse{
@@ -927,6 +944,7 @@ func (s *Server) autoDeployVersion(ctx context.Context, appName, appID string, v
 	)
 
 	logging.LogInfoCtx(ctx, "Auto-deploy started")
+	s.slackNotifier.DeployStarted(ctx, appName, version.VersionID, policy.TargetEnvironment, policy.Name)
 
 	// Create deployment record
 	logging.LogDebugCtx(ctx, "Creating deployment record")
@@ -939,6 +957,7 @@ func (s *Server) autoDeployVersion(ctx context.Context, appName, appID string, v
 
 	// fail publishes a failure event and updates the deployment status.
 	fail := func(errMsg string) {
+		s.slackNotifier.DeployFailed(ctx, appName, version.VersionID, policy.TargetEnvironment, errMsg)
 		s.publisher.Publish(events.Event{
 			Type:         events.EventDeploymentFailed,
 			AppName:      appName,
@@ -1030,6 +1049,16 @@ func (s *Server) autoDeployVersion(ctx context.Context, appName, appID string, v
 		CommitSHA:    commitSHA,
 		Timestamp:    time.Now(),
 	})
+
+	s.slackNotifier.DeploySucceeded(ctx, appName, version.VersionID, policy.TargetEnvironment, commitSHA)
+
+	// Poll Flux for reconciliation errors if configured
+	if s.cfg.FluxKustomizationName != "" {
+		result := s.fluxPoller.Poll(ctx, s.cfg.FluxKustomizationName, 2*time.Minute, 10*time.Second)
+		if !result.Ready {
+			s.slackNotifier.FluxError(ctx, appName, policy.TargetEnvironment, s.cfg.FluxKustomizationName, result.Message)
+		}
+	}
 
 	logging.LogInfoCtx(ctx, "Auto-deploy succeeded",
 		logging.Field("deployment_id", deployment.ID),

@@ -35,6 +35,13 @@ type Config struct {
 	// Flux
 	FluxWebhookURL   string
 	FluxWebhookToken string
+
+	// Slack
+	SlackWebhookURL string
+
+	// Flux Kustomization polling
+	FluxNamespace         string
+	FluxKustomizationName string
 }
 
 // Load loads configuration from environment variables
@@ -53,9 +60,12 @@ func Load() (*Config, error) {
 		GitopsSSHKeyPath:  getEnv("GITOPS_SSH_KEY_PATH", ""),
 		GitopsUserName:    getEnv("GITOPS_USER_NAME", "smithd"),
 		GitopsUserEmail:   getEnv("GITOPS_USER_EMAIL", "smithd@deploysmith.io"),
-		NATSUrl:           getEnv("NATS_URL", ""),
-		FluxWebhookURL:   getEnv("FLUX_WEBHOOK_URL", ""),
-		FluxWebhookToken: getEnv("FLUX_WEBHOOK_TOKEN", ""),
+		NATSUrl:               getEnv("NATS_URL", ""),
+		FluxWebhookURL:        getEnv("FLUX_WEBHOOK_URL", ""),
+		FluxWebhookToken:      getEnv("FLUX_WEBHOOK_TOKEN", ""),
+		SlackWebhookURL:       getEnv("SLACK_WEBHOOK_URL", ""),
+		FluxNamespace:         getEnv("FLUX_NAMESPACE", "flux-system"),
+		FluxKustomizationName: getEnv("FLUX_KUSTOMIZATION_NAME", ""),
 	}
 
 	// Validate required fields

@@ -1,0 +1,27 @@
+{{- if .Values.rbac.create -}}
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: {{ include "smithd.fullname" . }}-flux-reader
+  labels:
+    {{- include "smithd.labels" . | nindent 4 }}
+rules:
+  - apiGroups: ["kustomize.toolkit.fluxcd.io"]
+    resources: ["kustomizations"]
+    verbs: ["get", "list"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: {{ include "smithd.fullname" . }}-flux-reader
+  labels:
+    {{- include "smithd.labels" . | nindent 4 }}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: {{ include "smithd.fullname" . }}-flux-reader
+subjects:
+  - kind: ServiceAccount
+    name: {{ include "smithd.serviceAccountName" . }}
+    namespace: {{ .Release.Namespace }}
+{{- end }}

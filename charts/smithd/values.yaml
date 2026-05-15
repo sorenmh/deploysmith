@@ -117,6 +117,9 @@ tolerations: []
 
 affinity: {}
 
+rbac:
+  create: false
+
 # Persistence for SQLite database
 persistence:
   enabled: true
