@@ -122,6 +122,10 @@ func (s *Server) setupRoutes() {
 		r.Post("/apps/{appId}/policies", s.handleCreatePolicy)
 		r.Get("/apps/{appId}/policies", s.handleListPolicies)
 		r.Delete("/apps/{appId}/policies/{policyId}", s.handleDeletePolicy)
+
+		// Admin routes (DB migration between drivers)
+		r.Get("/admin/db-export", s.handleDBExport)
+		r.Post("/admin/db-import", s.handleDBImport)
 	})
 }
 
@@ -1212,6 +1216,43 @@ func (s *Server) handleDeleteEnvironment(w http.ResponseWriter, r *http.Request)
 	}
 
 	w.WriteHeader(http.StatusNoContent)
+}
+
+// Admin handlers (DB migration between drivers)
+
+// handleDBExport exports all rows from the database as JSON.
+func (s *Server) handleDBExport(w http.ResponseWriter, r *http.Request) {
+	dumps, err := s.db.Dump()
+	if err != nil {
+		log.Printf("Failed to export database: %v", err)
+		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to export database")
+		return
+	}
+
+	writeJSON(w, http.StatusOK, dumps)
+}
+
+// handleDBImport imports a database dump previously produced by handleDBExport.
+// The target database must be freshly migrated and empty.
+func (s *Server) handleDBImport(w http.ResponseWriter, r *http.Request) {
+	var dumps []db.TableDump
+	if err := decodeJSON(r, &dumps); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid_request", "Invalid request body")
+		return
+	}
+
+	if err := s.db.EnsureEmpty(); err != nil {
+		writeError(w, http.StatusBadRequest, "not_empty", err.Error())
+		return
+	}
+
+	if err := s.db.Load(dumps); err != nil {
+		log.Printf("Failed to import database: %v", err)
+		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to import database")
+		return
+	}
+
+	writeJSON(w, http.StatusOK, map[string]any{"imported": true})
 }
 
 // getKeys returns the keys of a map as a slice
