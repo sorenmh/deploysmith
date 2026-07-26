@@ -679,6 +679,64 @@ func (c *Client) UpdateEnvironment(environmentID string, req UpdateEnvironmentRe
 	return &env, nil
 }
 
+// ExportDB exports the full database dump as raw JSON bytes.
+// The payload is opaque to the CLI (it is not unmarshalled into a Go
+// struct) so smithctl stays decoupled from the server's TableDump shape.
+func (c *Client) ExportDB() ([]byte, error) {
+	url := c.joinURL("api/v1/admin/db-export")
+
+	httpReq, err := http.NewRequest("GET", url, nil)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create request: %w", err)
+	}
+
+	httpReq.Header.Set("X-API-Key", c.apiKey)
+
+	resp, err := c.client.Do(httpReq)
+	if err != nil {
+		return nil, fmt.Errorf("failed to send request: %w", err)
+	}
+	defer resp.Body.Close()
+
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, fmt.Errorf("failed to read response: %w", err)
+	}
+
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("API returned status %d: %s", resp.StatusCode, string(body))
+	}
+
+	return body, nil
+}
+
+// ImportDB imports a database dump previously produced by ExportDB.
+// The target database must be empty.
+func (c *Client) ImportDB(data []byte) error {
+	url := c.joinURL("api/v1/admin/db-import")
+
+	httpReq, err := http.NewRequest("POST", url, bytes.NewReader(data))
+	if err != nil {
+		return fmt.Errorf("failed to create request: %w", err)
+	}
+
+	httpReq.Header.Set("Content-Type", "application/json")
+	httpReq.Header.Set("X-API-Key", c.apiKey)
+
+	resp, err := c.client.Do(httpReq)
+	if err != nil {
+		return fmt.Errorf("failed to send request: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(resp.Body)
+		return fmt.Errorf("API returned status %d: %s", resp.StatusCode, string(body))
+	}
+
+	return nil
+}
+
 // DeleteEnvironment deletes an environment
 func (c *Client) DeleteEnvironment(environmentID string) error {
 	url := c.joinURL(fmt.Sprintf("api/v1/environments/%s", environmentID))

@@ -8,7 +8,7 @@ This chart deploys smithd to your Kubernetes cluster with the following componen
 
 - **Deployment**: Runs the smithd server
 - **Service**: Exposes the smithd API
-- **PersistentVolumeClaim**: Stores the SQLite database
+- **PersistentVolumeClaim**: Stores the SQLite database (skipped if using PostgreSQL — see [Database](#database-sqlite-vs-postgresql))
 - **ConfigMap**: Non-sensitive configuration
 - **Secret**: API keys, AWS credentials, and SSH keys
 - **ServiceAccount**: For pod identity
@@ -132,6 +132,36 @@ persistence:
   # Or use existing PVC
   # existingClaim: my-pvc
 ```
+
+#### Database (SQLite vs PostgreSQL)
+
+```yaml
+config:
+  database:
+    driver: postgres
+    dsn: "postgres://user:pass@host:5432/smithd?sslmode=disable"
+
+# No local file needed with postgres — turn off the PVC
+persistence:
+  enabled: false
+```
+
+Schema migrations run automatically on startup for either driver. With SQLite (the default), leave `persistence.enabled: true` so `/data/smithd.db` survives pod restarts.
+
+**Migrating from SQLite to PostgreSQL:** use `smithctl db export`/`db import` to move data between instances — no external tool (e.g. pgloader) is needed.
+
+```bash
+# 1. Export from the running SQLite-backed smithd
+smithctl db export dump.json
+
+# 2. Point a fresh smithd instance at an empty PostgreSQL database
+#    (schema migrations run automatically on startup) — see driver/dsn above
+
+# 3. Import into the new instance
+smithctl db import dump.json
+```
+
+Import requires an empty target database (a freshly-migrated schema with no rows) — it refuses with a clear error otherwise, and does not partially write on failure.
 
 #### Ingress with TLS
 
