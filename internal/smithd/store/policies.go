@@ -91,6 +91,28 @@ func (s *PolicyStore) List(appID string) ([]models.Policy, error) {
 	return policies, nil
 }
 
+// Update updates a policy's fields
+func (s *PolicyStore) Update(policy *models.Policy) (*models.Policy, error) {
+	result, err := s.db.Exec(`
+		UPDATE policies
+		SET name = ?, git_branch_pattern = ?, target_environment = ?, enabled = ?
+		WHERE id = ?
+	`, policy.Name, policy.GitBranchPattern, policy.TargetEnvironment, policy.Enabled, policy.ID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to update policy: %w", err)
+	}
+
+	rows, err := result.RowsAffected()
+	if err != nil {
+		return nil, fmt.Errorf("failed to check rows affected: %w", err)
+	}
+	if rows == 0 {
+		return nil, fmt.Errorf("policy not found")
+	}
+
+	return s.GetByID(policy.ID)
+}
+
 // Delete deletes a policy
 func (s *PolicyStore) Delete(id string) error {
 	result, err := s.db.Exec("DELETE FROM policies WHERE id = ?", id)

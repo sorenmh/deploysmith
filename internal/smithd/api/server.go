@@ -123,6 +123,7 @@ func (s *Server) setupRoutes() {
 		// Policy routes
 		r.Post("/apps/{appId}/policies", s.handleCreatePolicy)
 		r.Get("/apps/{appId}/policies", s.handleListPolicies)
+		r.Patch("/apps/{appId}/policies/{policyId}", s.handleUpdatePolicy)
 		r.Delete("/apps/{appId}/policies/{policyId}", s.handleDeletePolicy)
 
 		// Admin routes (DB migration between drivers)

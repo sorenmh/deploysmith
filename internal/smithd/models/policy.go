@@ -21,6 +21,15 @@ type CreatePolicyRequest struct {
 	Enabled           *bool  `json:"enabled,omitempty"` // Optional, defaults to true
 }
 
+// UpdatePolicyRequest is the request to update a policy; omitted fields are
+// left unchanged
+type UpdatePolicyRequest struct {
+	Name              *string `json:"name,omitempty"`
+	GitBranchPattern  *string `json:"gitBranchPattern,omitempty"`
+	TargetEnvironment *string `json:"targetEnvironment,omitempty"`
+	Enabled           *bool   `json:"enabled,omitempty"`
+}
+
 // PolicyResponse is the response for a single policy
 type PolicyResponse struct {
 	ID                string    `json:"id"`

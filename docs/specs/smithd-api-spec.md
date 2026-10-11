@@ -441,6 +441,29 @@ List all auto-deployment policies for an application.
 
 ---
 
+### 10a. Update Auto-Deploy Policy
+
+Update a policy, e.g. to enable or disable it. Omitted fields are left unchanged.
+
+**Endpoint:** `PATCH /apps/{appId}/policies/{policyId}`
+
+**Request Body:**
+```json
+{
+  "enabled": false
+}
+```
+
+Accepted fields: `name`, `gitBranchPattern`, `targetEnvironment`, `enabled`.
+
+**Response:** `200 OK` with the updated policy.
+
+Returns `404` if the policy doesn't exist or belongs to another app, `400` for an
+empty name, an invalid branch pattern or an unknown environment, and `409` if the
+new name is already used by another policy of the app.
+
+---
+
 ### 11. Delete Auto-Deploy Policy
 
 Delete an auto-deployment policy.
