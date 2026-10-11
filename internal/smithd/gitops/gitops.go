@@ -91,14 +91,25 @@ func (s *Service) Clone() error {
 	return nil
 }
 
+// appsPath returns the repo-relative directory holding an environment's apps
+// kustomization: environments/{environment}/apps
+func appsPath(environment string) string {
+	return filepath.Join("environments", environment, "apps")
+}
+
+// appPath returns the repo-relative directory for an app's manifests:
+// environments/{environment}/apps/{app_name}
+func appPath(environment, appName string) string {
+	return filepath.Join(appsPath(environment), appName)
+}
+
 // WriteManifests writes manifest files to the gitops repo
 func (s *Service) WriteManifests(appName, environment, versionID string, manifests map[string][]byte) error {
 	if s.repo == nil {
 		return fmt.Errorf("repository not initialized, call Clone() first")
 	}
 
-	// Create directory structure: environments/{environment}/apps/{app_name}/
-	appDir := filepath.Join(s.workDir, "environments", environment, "apps", appName)
+	appDir := filepath.Join(s.workDir, appPath(environment, appName))
 	if err := os.MkdirAll(appDir, 0755); err != nil {
 		return fmt.Errorf("failed to create app directory: %w", err)
 	}
@@ -142,19 +153,17 @@ func (s *Service) WriteManifests(appName, environment, versionID string, manifes
 	}
 
 	// Add the entire app directory
-	relativePath := filepath.Join("environments", environment, "apps", appName)
-	if err := worktree.AddGlob(relativePath + "/*"); err != nil {
+	if err := worktree.AddGlob(appPath(environment, appName) + "/*"); err != nil {
 		return fmt.Errorf("failed to add files to git: %w", err)
 	}
 
 	// Make sure the app is referenced from the environment's apps kustomization
-	appsDir := filepath.Join(s.workDir, "environments", environment, "apps")
-	kustomizationFile, changed, err := ensureKustomizationResource(appsDir, appName)
+	kustomizationFile, changed, err := ensureKustomizationResource(filepath.Join(s.workDir, appsPath(environment)), appName)
 	if err != nil {
 		return fmt.Errorf("failed to update apps kustomization: %w", err)
 	}
 	if changed {
-		relativeKustomization := filepath.Join("environments", environment, "apps", kustomizationFile)
+		relativeKustomization := filepath.Join(appsPath(environment), kustomizationFile)
 		if _, err := worktree.Add(relativeKustomization); err != nil {
 			return fmt.Errorf("failed to add %s to git: %w", relativeKustomization, err)
 		}
