@@ -141,7 +141,7 @@ func TestAllPagesParse(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, name := range []string{"apps", "app", "deployments", "deployment", "error"} {
+	for _, name := range []string{"apps", "app", "deployments", "deployment", "environments", "error"} {
 		if _, ok := pages[name]; !ok {
 			t.Errorf("page %q not parsed", name)
 		}

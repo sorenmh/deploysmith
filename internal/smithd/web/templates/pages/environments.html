@@ -1,0 +1,61 @@
+{{define "content"}}
+<h1 class="page-title">Environments</h1>
+<p class="lede">Each environment is a directory in the gitops repository that Flux deploys from. Apps are deployed to environments by name.</p>
+{{with .Data}}
+{{with .Error}}<div class="error" role="alert"><p>{{.}}</p></div>{{end}}
+{{if .Environments}}
+<div class="table-scroll">
+<table class="table table--middle">
+  <thead>
+    <tr>
+      <th scope="col">Name</th>
+      <th scope="col">Description</th>
+      <th scope="col">Created</th>
+      <th scope="col"><span class="visually-hidden">Actions</span></th>
+    </tr>
+  </thead>
+  <tbody>
+    {{range .Environments}}
+    <tr>
+      <td>{{.Name}}</td>
+      <td>
+        <form class="inline-edit" method="post" action="/ui/environments/{{.ID}}">
+          <label class="visually-hidden" for="description-{{.ID}}">Description of {{.Name}}</label>
+          <input id="description-{{.ID}}" name="description" value="{{with .Description}}{{.}}{{end}}" placeholder="Add a description">
+          <button type="submit" class="button button--quiet">Save</button>
+        </form>
+      </td>
+      <td>{{template "time" .CreatedAt}}</td>
+      <td class="actions">
+        <form method="post" action="/ui/environments/{{.ID}}/delete" hx-confirm="Delete environment {{.Name}}?">
+          <button type="submit" class="button button--quiet button--danger">Delete</button>
+        </form>
+      </td>
+    </tr>
+    {{end}}
+  </tbody>
+</table>
+</div>
+{{else}}
+<div class="empty">
+  <p>No environments yet.</p>
+  <p class="muted">Add one below, for example staging or production, before deploying apps.</p>
+</div>
+{{end}}
+
+<form class="policy-form" id="add-environment" method="post" action="/ui/environments">
+  <h2 class="form-title">Add an environment</h2>
+  {{with .FormError}}<p class="form-error" role="alert">{{.}}</p>{{end}}
+  <div class="fields">
+    <label>Name
+      <input name="name" required value="{{.Form.Name}}" placeholder="staging"{{if .FormError}} autofocus{{end}}>
+    </label>
+    <label>Description
+      <input name="description" value="{{with .Form.Description}}{{.}}{{end}}" placeholder="Optional">
+    </label>
+    <button type="submit" class="button button--quiet">Add environment</button>
+  </div>
+  <p class="help muted">Names may contain letters, digits, '.', '_' and '-'. The gitops directory environments/&lt;name&gt;/apps is created on the first deploy.</p>
+</form>
+{{end}}
+{{end}}

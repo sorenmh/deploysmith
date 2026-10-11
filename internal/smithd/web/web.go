@@ -79,6 +79,10 @@ func New(svc *service.Service, auth AuthConfig) (http.Handler, error) {
 		r.Post("/apps/{appId}/policies/{policyId}/enabled", ui.handleSetPolicyEnabled)
 		r.Post("/apps/{appId}/policies/{policyId}/delete", ui.handleDeletePolicy)
 		r.Get("/deployments", ui.handleDeployments)
+		r.Get("/environments", ui.handleEnvironments)
+		r.Post("/environments", ui.handleCreateEnvironment)
+		r.Post("/environments/{environmentId}", ui.handleUpdateEnvironment)
+		r.Post("/environments/{environmentId}/delete", ui.handleDeleteEnvironment)
 		r.Get("/deployments/{deploymentId}", ui.handleDeployment)
 	})
 

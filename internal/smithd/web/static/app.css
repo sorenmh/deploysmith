@@ -603,3 +603,47 @@ code {
   padding-left: var(--space-3);
   border-left: 4px solid var(--crack);
 }
+
+/* Environments */
+
+.inline-edit {
+  display: flex;
+  gap: var(--space-2);
+  margin: 0;
+}
+
+.table--middle td {
+  vertical-align: middle;
+}
+
+.inline-edit input {
+  flex: 1;
+  min-width: 10rem;
+  /* Pull the text back in line with the other columns; the padding only
+     shows once the field is hovered or focused */
+  margin-left: calc(-1 * var(--space-2));
+  padding: var(--space-1) var(--space-2);
+  border: 1px solid transparent;
+  background: transparent;
+  color: var(--ink);
+  font: inherit;
+}
+
+.inline-edit input:hover,
+.inline-edit input:focus {
+  border-color: var(--steel-300);
+  background: var(--panel);
+}
+
+.inline-edit .button {
+  visibility: hidden;
+}
+
+.inline-edit:focus-within .button {
+  visibility: visible;
+}
+
+.error + .table-scroll,
+.error + .empty {
+  margin-top: var(--space-4);
+}
