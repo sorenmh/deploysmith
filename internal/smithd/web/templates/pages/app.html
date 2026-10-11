@@ -132,14 +132,67 @@
 
 <section class="section" aria-labelledby="policies">
   <h2 class="section-title" id="policies">Auto-deploy policies</h2>
+  <p class="lede">When a version is published from a matching branch, it is deployed to the policy's environment automatically.</p>
+  {{$appID := .Detail.App.ID}}
   {{if .Detail.Policies}}
-  <ul class="policies">
-    {{range .Detail.Policies}}
-    <li>{{.Name}}: deploys branch <span class="id">{{.GitBranchPattern}}</span> to {{.TargetEnvironment}}{{if not .Enabled}} <span class="muted">(disabled)</span>{{end}}</li>
-    {{end}}
-  </ul>
+  <div class="table-scroll">
+  <table class="table">
+    <thead>
+      <tr>
+        <th scope="col">Policy</th>
+        <th scope="col">Branch</th>
+        <th scope="col">Deploys to</th>
+        <th scope="col">State</th>
+        <th scope="col"><span class="visually-hidden">Actions</span></th>
+      </tr>
+    </thead>
+    <tbody>
+      {{range .Detail.Policies}}
+      <tr{{if not .Enabled}} class="is-disabled"{{end}}>
+        <td>{{.Name}}</td>
+        <td><span class="id">{{.GitBranchPattern}}</span></td>
+        <td>{{.TargetEnvironment}}</td>
+        <td>{{if .Enabled}}On{{else}}Off{{end}}</td>
+        <td class="actions">
+          <div class="row-actions">
+            <form method="post" action="/ui/apps/{{$appID}}/policies/{{.ID}}/enabled">
+              <input type="hidden" name="enabled" value="{{if .Enabled}}false{{else}}true{{end}}">
+              <button type="submit" class="button button--quiet">{{if .Enabled}}Turn off{{else}}Turn on{{end}}</button>
+            </form>
+            <form method="post" action="/ui/apps/{{$appID}}/policies/{{.ID}}/delete" hx-confirm="Delete policy {{.Name}}?">
+              <button type="submit" class="button button--quiet button--danger">Delete</button>
+            </form>
+          </div>
+        </td>
+      </tr>
+      {{end}}
+    </tbody>
+  </table>
+  </div>
   {{else}}
-  <p class="muted">No policies. Versions are only deployed when someone deploys them.</p>
+  <p class="muted">No policies yet, so versions are only deployed when someone deploys them.</p>
+  {{end}}
+
+  {{if .Detail.Environments}}
+  <form class="policy-form" id="add-policy" method="post" action="/ui/apps/{{$appID}}/policies">
+    <h3 class="form-title">Add a policy</h3>
+    {{with .PolicyForm.Error}}<p class="form-error" role="alert">{{.}}</p>{{end}}
+    <div class="fields">
+      <label>Name
+        <input name="name" required value="{{.PolicyForm.Name}}" placeholder="main-to-staging"{{if .PolicyForm.Error}} autofocus{{end}}>
+      </label>
+      <label>Branch
+        <input name="gitBranchPattern" required value="{{.PolicyForm.GitBranchPattern}}" placeholder="main or release/*" aria-describedby="pattern-help">
+      </label>
+      <label>Deploys to
+        <select name="targetEnvironment">
+          {{range .Detail.Environments}}<option{{if eq . $.Data.PolicyForm.TargetEnvironment}} selected{{end}}>{{.}}</option>{{end}}
+        </select>
+      </label>
+      <button type="submit" class="button button--quiet">Add policy</button>
+    </div>
+    <p class="help muted" id="pattern-help">Use * to match any part of a branch name, e.g. release/* matches release/1.2.</p>
+  </form>
   {{end}}
 </section>
 {{end}}
