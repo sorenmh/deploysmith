@@ -42,6 +42,13 @@ type Config struct {
 	// Flux Kustomization polling
 	FluxNamespace         string
 	FluxKustomizationName string
+
+	// Web UI. The UI is only served when UIUserHeader is set; it must then
+	// only be reachable through an authenticating proxy (e.g. oauth2-proxy)
+	// that sets this header.
+	UIUserHeader     string
+	UIAllowedUsers   []string // emails, or "@domain" entries; empty allows all authenticated users
+	UITrustedOrigins []string // extra origins allowed to submit UI forms
 }
 
 // Load loads configuration from environment variables
@@ -66,6 +73,9 @@ func Load() (*Config, error) {
 		SlackWebhookURL:       getEnv("SLACK_WEBHOOK_URL", ""),
 		FluxNamespace:         getEnv("FLUX_NAMESPACE", "flux-system"),
 		FluxKustomizationName: getEnv("FLUX_KUSTOMIZATION_NAME", ""),
+		UIUserHeader:          getEnv("UI_USER_HEADER", ""),
+		UIAllowedUsers:        splitList(getEnv("UI_ALLOWED_USERS", "")),
+		UITrustedOrigins:      splitList(getEnv("UI_TRUSTED_ORIGINS", "")),
 	}
 
 	// Validate required fields
@@ -82,6 +92,17 @@ func Load() (*Config, error) {
 	}
 
 	return cfg, nil
+}
+
+// splitList splits a comma-separated list, dropping empty entries
+func splitList(value string) []string {
+	var items []string
+	for _, item := range strings.Split(value, ",") {
+		if item = strings.TrimSpace(item); item != "" {
+			items = append(items, item)
+		}
+	}
+	return items
 }
 
 func getEnv(key, defaultValue string) string {
