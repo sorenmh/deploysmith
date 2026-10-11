@@ -22,6 +22,7 @@ import (
 	"github.com/sorenmh/deploysmith/internal/smithd/flux"
 	"github.com/sorenmh/deploysmith/internal/smithd/gitops"
 	"github.com/sorenmh/deploysmith/internal/smithd/models"
+	"github.com/sorenmh/deploysmith/internal/smithd/service"
 	"github.com/sorenmh/deploysmith/internal/smithd/slack"
 	"github.com/sorenmh/deploysmith/internal/smithd/storage"
 	"github.com/sorenmh/deploysmith/internal/smithd/store"
@@ -39,11 +40,8 @@ type Server struct {
 	policyStore      *store.PolicyStore
 	environmentStore *store.EnvironmentStore
 	storage          *storage.S3Storage
-	gitops           *gitops.Service
 	publisher        events.Publisher
-	fluxReconciler   *flux.Reconciler
-	slackNotifier    *slack.Notifier
-	fluxPoller       *flux.KustomizationPoller
+	svc              *service.Service
 }
 
 // NewServer creates a new HTTP server
@@ -57,11 +55,6 @@ func NewServer(cfg *config.Config, database *db.DB) *Server {
 
 	publisher := events.New(cfg.NATSUrl)
 
-	fluxReconciler := flux.NewReconciler(cfg.FluxWebhookURL, cfg.FluxWebhookToken)
-
-	slackNotifier := slack.NewNotifier(cfg.SlackWebhookURL)
-	fluxPoller := flux.NewKustomizationPoller(cfg.FluxNamespace)
-
 	s := &Server{
 		cfg:              cfg,
 		db:               database,
@@ -72,12 +65,28 @@ func NewServer(cfg *config.Config, database *db.DB) *Server {
 		policyStore:      store.NewPolicyStore(database),
 		environmentStore: store.NewEnvironmentStore(database),
 		storage:          s3Storage,
-		gitops:           gitopsService,
 		publisher:        publisher,
-		fluxReconciler:   fluxReconciler,
-		slackNotifier:    slackNotifier,
-		fluxPoller:       fluxPoller,
 	}
+
+	deps := service.Deps{
+		Apps:                  s.appStore,
+		Versions:              s.versionStore,
+		Deployments:           s.deploymentStore,
+		Policies:              s.policyStore,
+		Environments:          s.environmentStore,
+		Storage:               s3Storage,
+		Gitops:                gitopsService,
+		Publisher:             publisher,
+		FluxReconciler:        flux.NewReconciler(cfg.FluxWebhookURL, cfg.FluxWebhookToken),
+		FluxKustomizationName: cfg.FluxKustomizationName,
+		Slack:                 slack.NewNotifier(cfg.SlackWebhookURL),
+	}
+	// Assign only when available, so the interface is nil rather than
+	// holding a nil pointer
+	if poller := flux.NewKustomizationPoller(cfg.FluxNamespace); poller != nil {
+		deps.FluxPoller = poller
+	}
+	s.svc = service.New(deps)
 
 	s.setupRoutes()
 	return s
@@ -134,7 +143,7 @@ func (s *Server) setupRoutes() {
 
 // Start starts the HTTP server
 func (s *Server) Start() error {
-	go s.watchStaleDeployments(context.Background())
+	go s.svc.WatchStaleDeployments(context.Background())
 
 	addr := fmt.Sprintf(":%s", s.cfg.Port)
 	log.Printf("Starting server on %s", addr)
@@ -499,34 +508,7 @@ func (s *Server) handlePublishVersion(w http.ResponseWriter, r *http.Request) {
 	// Refresh version to get updated fields
 	version, _ = s.versionStore.GetByVersionID(appID, versionID)
 
-	// Check for matching auto-deploy policies
-	if version.GitBranch == "" || version.GitBranch == "unknown" {
-		logging.LogInfoCtx(r.Context(), "Skipping auto-deploy: no git branch metadata on version")
-		s.warnIfPoliciesSkipped(r.Context(), appID, version.GitBranch)
-	} else {
-		matchingPolicies, err := s.policyStore.FindMatchingPolicies(appID, version.GitBranch)
-		if err != nil {
-			logging.LogErrorCtx(r.Context(), "Failed to check auto-deploy policies: "+err.Error(), err)
-			// Don't fail the publish, just log the error
-		} else {
-			logging.LogInfoCtx(r.Context(), fmt.Sprintf("Found %d matching auto-deploy policies for branch %s", len(matchingPolicies), version.GitBranch))
-			if len(matchingPolicies) == 0 {
-				logging.LogInfoCtx(r.Context(), "No matching auto-deploy policies found, skipping auto-deploy")
-				s.warnIfPoliciesSkipped(r.Context(), appID, version.GitBranch)
-			}
-			for _, policy := range matchingPolicies {
-				logging.LogInfoCtx(r.Context(), "Matched auto-deploy policy",
-					logging.Field("policy", policy.Name),
-					logging.Field("branch_pattern", policy.GitBranchPattern),
-					logging.Field("target_environment", policy.TargetEnvironment),
-				)
-				logging.LogInfoCtx(r.Context(), fmt.Sprintf("Auto-deploying version %s to %s via policy %s", versionID, policy.TargetEnvironment, policy.Name))
-
-				// Trigger deployment asynchronously to avoid blocking the response
-				go s.autoDeployVersion(context.Background(), app.Name, appID, version, policy)
-			}
-		}
-	}
+	s.svc.TriggerAutoDeploys(r.Context(), app, version)
 
 	resp := models.PublishVersionResponse{
 		VersionID:     version.VersionID,
@@ -672,392 +654,28 @@ func (s *Server) handleDeployVersion(w http.ResponseWriter, r *http.Request) {
 	appID := chi.URLParam(r, "appId")
 	versionID := chi.URLParam(r, "versionId")
 
-	// Decode request body
 	var req models.DeployVersionRequest
 	if err := decodeJSON(r, &req); err != nil {
 		writeError(w, http.StatusBadRequest, "invalid_request", "Invalid request body")
 		return
 	}
 
-	// Validate environment
-	if req.Environment == "" {
-		writeError(w, http.StatusBadRequest, "invalid_request", "Environment is required")
-		return
-	}
-
-	// Verify environment exists
-	envExists, err := s.environmentStore.Exists(req.Environment)
+	deployment, err := s.svc.DeployVersion(r.Context(), appID, versionID, req.Environment, req.TriggeredBy)
 	if err != nil {
-		log.Printf("Failed to check if environment exists: %v", err)
-		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to validate environment")
-		return
-	}
-	if !envExists {
-		writeError(w, http.StatusBadRequest, "invalid_environment", fmt.Sprintf("Environment '%s' does not exist", req.Environment))
+		writeServiceError(w, err, "Deployment failed")
 		return
 	}
 
-	// Verify application exists
-	app, err := s.appStore.GetByID(appID)
-	if err != nil {
-		if err.Error() == "application not found" {
-			writeError(w, http.StatusNotFound, "not_found", "Application not found")
-			return
-		}
-		log.Printf("Failed to get application: %v", err)
-		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to get application")
-		return
-	}
-
-	// Verify version exists and is published
-	version, err := s.versionStore.GetByVersionID(appID, versionID)
-	if err != nil {
-		if err.Error() == "version not found" {
-			writeError(w, http.StatusNotFound, "not_found", "Version not found")
-			return
-		}
-		log.Printf("Failed to get version: %v", err)
-		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to get version")
-		return
-	}
-
-	if version.Status != "published" {
-		writeError(w, http.StatusBadRequest, "invalid_status", "Version must be published before deployment")
-		return
-	}
-
-	// Create deployment record
-	deployment, err := s.deploymentStore.Create(appID, version.ID, req.Environment, req.TriggeredBy, nil)
-	if err != nil {
-		log.Printf("Failed to create deployment: %v", err)
-		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to create deployment")
-		return
-	}
-
-	s.slackNotifier.DeployStarted(r.Context(), app.Name, versionID, req.Environment, "manual")
-
-	// Fetch manifests from S3
-	manifests, err := s.storage.GetAllFiles(app.Name, versionID, true)
-	if err != nil {
-		log.Printf("Failed to fetch manifests from S3: %v", err)
-		s.deploymentStore.UpdateStatus(deployment.ID, "failed", "", fmt.Sprintf("Failed to fetch manifests: %v", err))
-		s.slackNotifier.DeployFailed(r.Context(), app.Name, versionID, req.Environment, fmt.Sprintf("Failed to fetch manifests: %v", err))
-		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to fetch manifests")
-		return
-	}
-
-	// Write, commit and push manifests to the gitops repo
-	commitMsg := fmt.Sprintf("Deploy %s version %s to %s", app.Name, versionID, req.Environment)
-	commitSHA, err := s.gitops.Deploy(app.Name, req.Environment, commitMsg, manifests)
-	if err != nil {
-		log.Printf("Failed to deploy to gitops repo: %v", err)
-		s.deploymentStore.UpdateStatus(deployment.ID, "failed", "", err.Error())
-		s.slackNotifier.DeployFailed(r.Context(), app.Name, versionID, req.Environment, err.Error())
-		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to update gitops repository")
-		return
-	}
-
-	s.fluxReconciler.Trigger(r.Context())
-
-	// Update deployment status
-	if err := s.deploymentStore.UpdateStatus(deployment.ID, "success", commitSHA, ""); err != nil {
-		log.Printf("Failed to update deployment status: %v", err)
-		// Don't return error, deployment was successful
-	}
-
-	s.slackNotifier.DeploySucceeded(r.Context(), app.Name, versionID, req.Environment, commitSHA)
-
-	// Return response
 	resp := models.DeployVersionResponse{
 		DeploymentID:    deployment.ID,
 		VersionID:       versionID,
-		Environment:     req.Environment,
-		Status:          "success",
-		GitopsCommitSHA: commitSHA,
+		Environment:     deployment.Environment,
+		Status:          deployment.Status,
+		GitopsCommitSHA: deployment.GitopsCommitSHA,
 		StartedAt:       deployment.StartedAt,
 	}
 
 	writeJSON(w, http.StatusAccepted, resp)
-}
-
-func (s *Server) handleCreatePolicy(w http.ResponseWriter, r *http.Request) {
-	appID := chi.URLParam(r, "appId")
-
-	// Verify application exists
-	_, err := s.appStore.GetByID(appID)
-	if err != nil {
-		if err.Error() == "application not found" {
-			writeError(w, http.StatusNotFound, "not_found", "Application not found")
-			return
-		}
-		log.Printf("Failed to get application: %v", err)
-		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to get application")
-		return
-	}
-
-	// Decode request body
-	var req models.CreatePolicyRequest
-	if err := decodeJSON(r, &req); err != nil {
-		writeError(w, http.StatusBadRequest, "invalid_request", "Invalid request body")
-		return
-	}
-
-	// Validate required fields
-	if req.Name == "" {
-		writeError(w, http.StatusBadRequest, "invalid_request", "Policy name is required")
-		return
-	}
-	if req.GitBranchPattern == "" {
-		writeError(w, http.StatusBadRequest, "invalid_request", "Git branch pattern is required")
-		return
-	}
-	if req.TargetEnvironment == "" {
-		writeError(w, http.StatusBadRequest, "invalid_request", "Target environment is required")
-		return
-	}
-
-	// Default enabled to true if not specified
-	enabled := true
-	if req.Enabled != nil {
-		enabled = *req.Enabled
-	}
-
-	// Create policy
-	policy, err := s.policyStore.Create(appID, req.Name, req.GitBranchPattern, req.TargetEnvironment, enabled)
-	if err != nil {
-		log.Printf("Failed to create policy: %v", err)
-		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to create policy")
-		return
-	}
-
-	resp := models.PolicyResponse{
-		ID:                policy.ID,
-		AppID:             policy.AppID,
-		Name:              policy.Name,
-		GitBranchPattern:  policy.GitBranchPattern,
-		TargetEnvironment: policy.TargetEnvironment,
-		Enabled:           policy.Enabled,
-		CreatedAt:         policy.CreatedAt,
-	}
-
-	writeJSON(w, http.StatusCreated, resp)
-}
-
-func (s *Server) handleListPolicies(w http.ResponseWriter, r *http.Request) {
-	appID := chi.URLParam(r, "appId")
-
-	// Verify application exists
-	_, err := s.appStore.GetByID(appID)
-	if err != nil {
-		if err.Error() == "application not found" {
-			writeError(w, http.StatusNotFound, "not_found", "Application not found")
-			return
-		}
-		log.Printf("Failed to get application: %v", err)
-		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to get application")
-		return
-	}
-
-	// List policies
-	policies, err := s.policyStore.List(appID)
-	if err != nil {
-		log.Printf("Failed to list policies: %v", err)
-		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to list policies")
-		return
-	}
-
-	resp := models.ListPoliciesResponse{
-		Policies: policies,
-		Total:    len(policies),
-	}
-
-	writeJSON(w, http.StatusOK, resp)
-}
-
-func (s *Server) handleDeletePolicy(w http.ResponseWriter, r *http.Request) {
-	appID := chi.URLParam(r, "appId")
-	policyID := chi.URLParam(r, "policyId")
-
-	// Verify application exists
-	_, err := s.appStore.GetByID(appID)
-	if err != nil {
-		if err.Error() == "application not found" {
-			writeError(w, http.StatusNotFound, "not_found", "Application not found")
-			return
-		}
-		log.Printf("Failed to get application: %v", err)
-		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to get application")
-		return
-	}
-
-	// Verify policy exists and belongs to this app
-	policy, err := s.policyStore.GetByID(policyID)
-	if err != nil {
-		if err.Error() == "policy not found" {
-			writeError(w, http.StatusNotFound, "not_found", "Policy not found")
-			return
-		}
-		log.Printf("Failed to get policy: %v", err)
-		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to get policy")
-		return
-	}
-
-	if policy.AppID != appID {
-		writeError(w, http.StatusNotFound, "not_found", "Policy not found")
-		return
-	}
-
-	// Delete policy
-	if err := s.policyStore.Delete(policyID); err != nil {
-		log.Printf("Failed to delete policy: %v", err)
-		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to delete policy")
-		return
-	}
-
-	w.WriteHeader(http.StatusNoContent)
-}
-
-// warnIfPoliciesSkipped logs a warning when an app has enabled auto-deploy
-// policies but a published version did not trigger any of them, which
-// usually means the build passed missing or unexpected branch metadata
-func (s *Server) warnIfPoliciesSkipped(ctx context.Context, appID, branch string) {
-	policies, err := s.policyStore.List(appID)
-	if err != nil {
-		logging.LogErrorCtx(ctx, "Failed to list policies: "+err.Error(), err)
-		return
-	}
-
-	var patterns []string
-	for _, policy := range policies {
-		if policy.Enabled {
-			patterns = append(patterns, policy.GitBranchPattern)
-		}
-	}
-	if len(patterns) == 0 {
-		return
-	}
-
-	logging.LogWarnCtx(ctx, "Published version did not trigger any auto-deploy policy",
-		logging.Field("git_branch", branch),
-		logging.Field("policy_patterns", strings.Join(patterns, ", ")),
-	)
-}
-
-// autoDeployVersion automatically deploys a version based on a policy
-// This runs asynchronously in a goroutine
-func (s *Server) autoDeployVersion(ctx context.Context, appName, appID string, version *models.Version, policy models.Policy) {
-	ctx = autoDeployCtx(ctx, appName, version, policy)
-
-	logging.LogInfoCtx(ctx, "Auto-deploy started")
-	s.slackNotifier.DeployStarted(ctx, appName, version.VersionID, policy.TargetEnvironment, policy.Name)
-
-	// Create deployment record
-	logging.LogDebugCtx(ctx, "Creating deployment record")
-	policyID := policy.ID
-	deployment, err := s.deploymentStore.Create(appID, version.ID, policy.TargetEnvironment, "auto-deploy", &policyID)
-	if err != nil {
-		logging.LogErrorCtx(ctx, "Auto-deploy failed to create deployment record: "+err.Error(), err)
-		return
-	}
-
-	s.runAutoDeploy(ctx, appName, appID, version, policy, deployment)
-}
-
-// autoDeployCtx adds the auto-deploy's identifying fields to the log context
-func autoDeployCtx(ctx context.Context, appName string, version *models.Version, policy models.Policy) context.Context {
-	return logging.AppendLogAttrs(ctx,
-		logging.Field("app", appName),
-		logging.Field("version", version.VersionID),
-		logging.Field("environment", policy.TargetEnvironment),
-		logging.Field("policy", policy.Name),
-	)
-}
-
-// runAutoDeploy carries out an auto-deploy for an existing pending deployment
-// record. It is safe to run again for a deployment that was interrupted.
-func (s *Server) runAutoDeploy(ctx context.Context, appName, appID string, version *models.Version, policy models.Policy, deployment *models.Deployment) {
-	// fail publishes a failure event and updates the deployment status.
-	fail := func(errMsg string) {
-		s.slackNotifier.DeployFailed(ctx, appName, version.VersionID, policy.TargetEnvironment, errMsg)
-		s.publisher.Publish(events.Event{
-			Type:         events.EventDeploymentFailed,
-			AppName:      appName,
-			AppID:        appID,
-			VersionID:    version.VersionID,
-			Environment:  policy.TargetEnvironment,
-			PolicyName:   policy.Name,
-			DeploymentID: deployment.ID,
-			Error:        errMsg,
-			Timestamp:    time.Now(),
-		})
-	}
-
-	s.publisher.Publish(events.Event{
-		Type:         events.EventDeploymentStarted,
-		AppName:      appName,
-		AppID:        appID,
-		VersionID:    version.VersionID,
-		Environment:  policy.TargetEnvironment,
-		PolicyName:   policy.Name,
-		DeploymentID: deployment.ID,
-		Timestamp:    time.Now(),
-	})
-
-	// Fetch manifests from S3
-	logging.LogDebugCtx(ctx, "Fetching manifests from storage")
-	manifests, err := s.storage.GetAllFiles(appName, version.VersionID, true)
-	if err != nil {
-		logging.LogErrorCtx(ctx, "Auto-deploy failed to fetch manifests: "+err.Error(), err)
-		s.deploymentStore.UpdateStatus(deployment.ID, "failed", "", fmt.Sprintf("Failed to fetch manifests: %v", err))
-		fail(err.Error())
-		return
-	}
-
-	// Write, commit and push manifests to the gitops repo
-	logging.LogDebugCtx(ctx, "Deploying to gitops repo")
-	commitMsg := fmt.Sprintf("Auto-deploy %s version %s to %s (policy: %s)", appName, version.VersionID, policy.TargetEnvironment, policy.Name)
-	commitSHA, err := s.gitops.Deploy(appName, policy.TargetEnvironment, commitMsg, manifests)
-	if err != nil {
-		logging.LogErrorCtx(ctx, "Auto-deploy failed to update gitops repo: "+err.Error(), err)
-		s.deploymentStore.UpdateStatus(deployment.ID, "failed", "", err.Error())
-		fail(err.Error())
-		return
-	}
-
-	s.fluxReconciler.Trigger(ctx)
-
-	// Update deployment status
-	if err := s.deploymentStore.UpdateStatus(deployment.ID, "success", commitSHA, ""); err != nil {
-		logging.LogErrorCtx(ctx, "Auto-deploy failed to update deployment status: "+err.Error(), err)
-		return
-	}
-
-	s.publisher.Publish(events.Event{
-		Type:         events.EventDeploymentSucceeded,
-		AppName:      appName,
-		AppID:        appID,
-		VersionID:    version.VersionID,
-		Environment:  policy.TargetEnvironment,
-		PolicyName:   policy.Name,
-		DeploymentID: deployment.ID,
-		CommitSHA:    commitSHA,
-		Timestamp:    time.Now(),
-	})
-
-	s.slackNotifier.DeploySucceeded(ctx, appName, version.VersionID, policy.TargetEnvironment, commitSHA)
-
-	// Poll Flux for reconciliation errors if configured
-	if s.cfg.FluxKustomizationName != "" {
-		result := s.fluxPoller.Poll(ctx, s.cfg.FluxKustomizationName, 2*time.Minute, 10*time.Second)
-		if !result.Ready {
-			s.slackNotifier.FluxError(ctx, appName, policy.TargetEnvironment, s.cfg.FluxKustomizationName, result.Message)
-		}
-	}
-
-	logging.LogInfoCtx(ctx, "Auto-deploy succeeded",
-		logging.Field("deployment_id", deployment.ID),
-		logging.Field("commit_sha", commitSHA),
-	)
 }
 
 // extractTarball extracts files from a gzipped tarball

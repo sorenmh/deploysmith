@@ -10,7 +10,9 @@ import (
 
 	"github.com/go-chi/chi/v5"
 	"github.com/sorenmh/deploysmith/internal/smithd/db"
+	"github.com/sorenmh/deploysmith/internal/smithd/events"
 	"github.com/sorenmh/deploysmith/internal/smithd/models"
+	"github.com/sorenmh/deploysmith/internal/smithd/service"
 	"github.com/sorenmh/deploysmith/internal/smithd/store"
 )
 
@@ -24,13 +26,23 @@ func newStoreTestServer(t *testing.T) *Server {
 	}
 	t.Cleanup(func() { database.Close() })
 
-	return &Server{
+	s := &Server{
 		appStore:         store.NewApplicationStore(database),
 		versionStore:     store.NewVersionStore(database),
 		deploymentStore:  store.NewDeploymentStore(database),
 		policyStore:      store.NewPolicyStore(database),
 		environmentStore: store.NewEnvironmentStore(database),
+		publisher:        events.NewMemoryPublisher(),
 	}
+	s.svc = service.New(service.Deps{
+		Apps:         s.appStore,
+		Versions:     s.versionStore,
+		Deployments:  s.deploymentStore,
+		Policies:     s.policyStore,
+		Environments: s.environmentStore,
+		Publisher:    s.publisher,
+	})
+	return s
 }
 
 func (s *Server) testRouter() http.Handler {

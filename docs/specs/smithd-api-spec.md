@@ -404,7 +404,9 @@ Create an auto-deployment policy for an application.
 - [ ] Returns 201 when policy is created
 - [ ] Policy is stored in database
 - [ ] Returns 400 if required fields are missing
+- [ ] Returns 400 if gitBranchPattern is invalid or targetEnvironment doesn't exist
 - [ ] Returns 404 if app doesn't exist
+- [ ] Returns 409 if the app already has a policy with the same name
 - [ ] gitBranchPattern supports wildcards (e.g., "release/*")
 - [ ] Returns 401 if API key is missing or invalid
 
