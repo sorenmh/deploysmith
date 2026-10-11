@@ -320,6 +320,58 @@ Deploy a specific version to an environment.
 
 ---
 
+### 8a. List Deployments
+
+List deployments, newest first, across all apps or filtered.
+
+**Endpoint:** `GET /deployments`
+
+**Query Parameters:**
+- `appId` (optional): Only deployments of this application
+- `environment` (optional): Only deployments to this environment
+- `status` (optional): `pending`, `success` or `failed`
+- `limit` (optional, default 50, max 100): Number of results
+- `offset` (optional, default 0): Pagination offset
+
+**Response:** `200 OK`
+```json
+{
+  "deployments": [
+    {
+      "id": "deploy-456",
+      "appId": "app-123",
+      "appName": "my-api-service",
+      "versionId": "42540c4-123",
+      "environment": "production",
+      "status": "success",
+      "triggeredBy": "auto-deploy",
+      "policyId": "policy-789",
+      "policyName": "main-to-production",
+      "gitopsCommitSha": "9f2c1e0",
+      "startedAt": "2025-01-15T10:40:00Z",
+      "completedAt": "2025-01-15T10:40:05Z"
+    }
+  ],
+  "total": 1,
+  "limit": 50,
+  "offset": 0
+}
+```
+
+`errorMessage` is included for failed deployments; `policyId`/`policyName` only for auto-deploys.
+
+---
+
+### 8b. Get Deployment
+
+**Endpoint:** `GET /deployments/{deploymentId}`
+
+**Response:** `200 OK` with a single deployment object as in List Deployments.
+
+Returns `404` if the deployment doesn't exist.
+
+---
+
 ### 9. Create Auto-Deploy Policy
 
 Create an auto-deployment policy for an application.

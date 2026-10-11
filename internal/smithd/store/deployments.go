@@ -140,6 +140,95 @@ func (s *DeploymentStore) List(appID, environment string, limit, offset int) ([]
 	return deployments, total, nil
 }
 
+// DeploymentFilter narrows down a deployment listing; empty fields match all
+type DeploymentFilter struct {
+	AppID       string
+	Environment string
+	Status      string
+}
+
+const deploymentDetailSelect = `
+	SELECT d.id, d.app_id, COALESCE(a.name, ''), COALESCE(v.version_id, ''), d.environment, d.status,
+		COALESCE(d.triggered_by, ''), COALESCE(d.policy_id, ''), COALESCE(p.name, ''),
+		COALESCE(d.gitops_commit_sha, ''), COALESCE(d.error_message, ''), d.started_at, d.completed_at
+	FROM deployments d
+	LEFT JOIN applications a ON a.id = d.app_id
+	LEFT JOIN versions v ON v.id = d.version_id
+	LEFT JOIN policies p ON p.id = d.policy_id`
+
+func scanDeploymentDetail(scanner interface{ Scan(...any) error }) (models.DeploymentDetail, error) {
+	var detail models.DeploymentDetail
+	var completedAt sql.NullTime
+
+	err := scanner.Scan(&detail.ID, &detail.AppID, &detail.AppName, &detail.VersionID, &detail.Environment, &detail.Status,
+		&detail.TriggeredBy, &detail.PolicyID, &detail.PolicyName,
+		&detail.GitopsCommitSHA, &detail.ErrorMessage, &detail.StartedAt, &completedAt)
+	if err != nil {
+		return detail, err
+	}
+
+	if completedAt.Valid {
+		detail.CompletedAt = &completedAt.Time
+	}
+	return detail, nil
+}
+
+// ListDetailed lists deployments, newest first, with app, version and policy names
+func (s *DeploymentStore) ListDetailed(filter DeploymentFilter, limit, offset int) ([]models.DeploymentDetail, int, error) {
+	where := " WHERE 1=1"
+	args := []interface{}{}
+
+	if filter.AppID != "" {
+		where += " AND d.app_id = ?"
+		args = append(args, filter.AppID)
+	}
+	if filter.Environment != "" {
+		where += " AND d.environment = ?"
+		args = append(args, filter.Environment)
+	}
+	if filter.Status != "" {
+		where += " AND d.status = ?"
+		args = append(args, filter.Status)
+	}
+
+	var total int
+	if err := s.db.QueryRow("SELECT COUNT(*) FROM deployments d"+where, args...).Scan(&total); err != nil {
+		return nil, 0, fmt.Errorf("failed to count deployments: %w", err)
+	}
+
+	rows, err := s.db.Query(deploymentDetailSelect+where+" ORDER BY d.started_at DESC LIMIT ? OFFSET ?", append(args, limit, offset)...)
+	if err != nil {
+		return nil, 0, fmt.Errorf("failed to list deployments: %w", err)
+	}
+	defer rows.Close()
+
+	deployments := []models.DeploymentDetail{}
+	for rows.Next() {
+		detail, err := scanDeploymentDetail(rows)
+		if err != nil {
+			return nil, 0, fmt.Errorf("failed to scan deployment: %w", err)
+		}
+		deployments = append(deployments, detail)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, 0, fmt.Errorf("failed to list deployments: %w", err)
+	}
+
+	return deployments, total, nil
+}
+
+// GetDetailed gets a deployment with app, version and policy names
+func (s *DeploymentStore) GetDetailed(id string) (*models.DeploymentDetail, error) {
+	detail, err := scanDeploymentDetail(s.db.QueryRow(deploymentDetailSelect+" WHERE d.id = ?", id))
+	if err == sql.ErrNoRows {
+		return nil, fmt.Errorf("deployment not found")
+	}
+	if err != nil {
+		return nil, fmt.Errorf("failed to get deployment: %w", err)
+	}
+	return &detail, nil
+}
+
 // ListStalePending returns deployments that are still pending but were
 // started before cutoff, i.e. deployments whose worker most likely died
 func (s *DeploymentStore) ListStalePending(cutoff time.Time) ([]models.Deployment, error) {
