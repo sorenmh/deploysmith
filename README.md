@@ -19,6 +19,12 @@ A GitOps-based deployment controller for Kubernetes applications.
   - Commands: init, upload, publish, version
   - Integration with smithd API
 
+- **Web UI** (served by smithd at `/ui`)
+  - Overview of what runs in each environment
+  - Deploy and roll back versions, with deployment history and live status
+  - Manage auto-deploy policies and environments
+  - Sign-in through oauth2-proxy (see [charts/smithd/README.md](charts/smithd/README.md#web-ui-with-oauth2-proxy))
+
 ### In Progress 🔨
 
 - Documentation and CI/CD examples
@@ -149,6 +155,11 @@ AWS_SECRET_ACCESS_KEY=your-secret
 # Gitops
 GITOPS_REPO=git@github.com:org/gitops.git
 GITOPS_SSH_KEY_PATH=/path/to/ssh/key
+
+# Web UI (optional). Enables /ui; must only be reachable through an
+# authenticating proxy that sets this header with the user's email.
+UI_USER_HEADER=X-Auth-Request-Email
+UI_ALLOWED_USERS=@example.com
 ```
 
 ### Running

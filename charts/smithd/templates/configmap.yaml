@@ -23,3 +23,14 @@ data:
   {{- if .Values.config.flux.kustomizationName }}
   FLUX_KUSTOMIZATION_NAME: {{ .Values.config.flux.kustomizationName | quote }}
   {{- end }}
+  {{- with .Values.config.ui }}
+  {{- if .userHeader }}
+  UI_USER_HEADER: {{ .userHeader | quote }}
+  {{- end }}
+  {{- if .allowedUsers }}
+  UI_ALLOWED_USERS: {{ .allowedUsers | quote }}
+  {{- end }}
+  {{- if .trustedOrigins }}
+  UI_TRUSTED_ORIGINS: {{ .trustedOrigins | quote }}
+  {{- end }}
+  {{- end }}

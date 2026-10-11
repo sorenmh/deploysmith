@@ -65,6 +65,19 @@ ingress:
   #    hosts:
   #      - smithd.example.com
 
+# Ingress for the web UI (config.ui), protected by oauth2-proxy through
+# ingress-nginx's external authentication. It routes /ui on the same hosts
+# as the main ingress, so /ui is never reachable there without signing in.
+# Deploy oauth2-proxy separately (see README).
+uiIngress:
+  enabled: false
+  # Defaults to ingress.className
+  className: ""
+  # URL of your oauth2-proxy, used to build the auth annotations
+  oauth2ProxyUrl: ""
+  # Extra annotations, merged with the generated auth annotations
+  annotations: {}
+
 resources:
   limits:
     cpu: 1000m
@@ -165,6 +178,25 @@ config:
     # Name of the Kustomization CR to poll for reconciliation status after deploy.
     # Leave empty to disable Flux status polling.
     kustomizationName: ""
+
+  # Web UI (optional), served at /ui
+  ui:
+    # Header carrying the signed-in user's email, set by an authenticating
+    # proxy such as oauth2-proxy. Setting it enables the UI. With
+    # ingress-nginx and oauth2-proxy (uiIngress below) use X-Auth-Request-Email.
+    # smithd trusts this header, so /ui must only be reachable through the proxy.
+    userHeader: ""
+    # Comma-separated emails or @domain entries allowed to use the UI.
+    # Empty allows everyone the proxy lets through.
+    allowedUsers: ""
+    # Comma-separated extra origins allowed to submit UI forms, only needed
+    # if the Host header smithd sees differs from the public URL.
+    trustedOrigins: ""
+    # Set to true only if /ui is protected by an authenticating proxy that
+    # this chart does not manage. Otherwise the chart refuses to expose the
+    # UI through the main ingress without uiIngress, since anyone could then
+    # forge the user header.
+    protectedExternally: false
 
 # Secrets configuration
 secrets:

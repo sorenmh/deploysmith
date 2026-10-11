@@ -182,6 +182,67 @@ ingress:
         - smithd.example.com
 ```
 
+#### Web UI with oauth2-proxy
+
+smithd can serve a web UI at `/ui` for viewing what runs where, deploying and
+rolling back versions, and managing auto-deploy policies and environments.
+smithd does not handle logins itself: it trusts a header with the user's email
+set by an authenticating proxy. The chart wires this up with
+[oauth2-proxy](https://oauth2-proxy.github.io/oauth2-proxy/) and ingress-nginx's
+external authentication.
+
+1. Deploy oauth2-proxy on the same host as smithd under `/oauth2`, for example
+   with its Helm chart (`oauth2-proxy/oauth2-proxy`). It must return the user's
+   email in a response header, which `--set-xauthrequest` enables:
+
+   ```yaml
+   # oauth2-proxy values
+   config:
+     clientID: <OAuth client ID>
+     clientSecret: <OAuth client secret>
+     cookieSecret: <openssl rand -base64 32 | head -c 32>
+   extraArgs:
+     provider: github            # or google, oidc, ...
+     email-domain: "*"           # narrow down with smithd's allowedUsers
+     set-xauthrequest: true
+     reverse-proxy: true
+     upstream: static://202
+   ingress:
+     enabled: true
+     className: nginx
+     path: /oauth2
+     hosts:
+       - smithd.example.com
+   ```
+
+2. Enable the UI and its protected ingress in smithd's values:
+
+   ```yaml
+   config:
+     ui:
+       userHeader: X-Auth-Request-Email
+       allowedUsers: "@example.com,contractor@example.org"   # optional
+
+   uiIngress:
+     enabled: true
+     oauth2ProxyUrl: https://smithd.example.com/oauth2
+   ```
+
+   `uiIngress` routes `/ui` on the main ingress hosts through oauth2-proxy.
+   nginx sets `X-Auth-Request-Email` from oauth2-proxy's answer, replacing any
+   value the browser sent, so the header cannot be forged.
+
+3. Open `https://smithd.example.com/ui`. Deployments started from the UI are
+   recorded with the signed-in user's email.
+
+The API under `/api/v1` keeps using API keys and is unaffected.
+
+Because smithd trusts the header, `/ui` must never be reachable without the
+proxy. The chart therefore refuses to enable the UI on the main ingress
+without `uiIngress`. If you protect `/ui` with a different proxy, set
+`config.ui.protectedExternally: true`. Consider a NetworkPolicy so that only
+the ingress controller can reach smithd's service.
+
 #### Using MinIO Instead of AWS S3
 
 ```yaml

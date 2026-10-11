@@ -1,0 +1,55 @@
+{{- if .Values.uiIngress.enabled -}}
+{{- if not .Values.ingress.enabled }}
+{{- fail "uiIngress requires ingress.enabled: /ui is served on the main ingress hosts" }}
+{{- end }}
+{{- if not .Values.config.ui.userHeader }}
+{{- fail "uiIngress requires config.ui.userHeader (e.g. X-Auth-Request-Email) to enable the UI" }}
+{{- end }}
+{{- if not .Values.uiIngress.oauth2ProxyUrl }}
+{{- fail "uiIngress requires uiIngress.oauth2ProxyUrl, e.g. https://smithd.example.com/oauth2" }}
+{{- end }}
+{{- $proxy := trimSuffix "/" .Values.uiIngress.oauth2ProxyUrl }}
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: {{ include "smithd.fullname" . }}-ui
+  labels:
+    {{- include "smithd.labels" . | nindent 4 }}
+  annotations:
+    # Every /ui request is checked by oauth2-proxy; nginx then sets the
+    # user header from oauth2-proxy's response, overwriting any value the
+    # client sent
+    nginx.ingress.kubernetes.io/auth-url: {{ printf "%s/auth" $proxy | quote }}
+    nginx.ingress.kubernetes.io/auth-signin: {{ printf "%s/start?rd=$scheme://$host$escaped_request_uri" $proxy | quote }}
+    nginx.ingress.kubernetes.io/auth-response-headers: {{ .Values.config.ui.userHeader | quote }}
+    {{- with .Values.uiIngress.annotations }}
+    {{- toYaml . | nindent 4 }}
+    {{- end }}
+spec:
+  {{- with (default .Values.ingress.className .Values.uiIngress.className) }}
+  ingressClassName: {{ . }}
+  {{- end }}
+  {{- with .Values.ingress.tls }}
+  tls:
+    {{- range . }}
+    - hosts:
+        {{- range .hosts }}
+        - {{ . | quote }}
+        {{- end }}
+      secretName: {{ .secretName }}
+    {{- end }}
+  {{- end }}
+  rules:
+    {{- range .Values.ingress.hosts }}
+    - host: {{ .host | quote }}
+      http:
+        paths:
+          - path: /ui
+            pathType: Prefix
+            backend:
+              service:
+                name: {{ include "smithd.fullname" $ }}
+                port:
+                  number: {{ $.Values.service.port }}
+    {{- end }}
+{{- end }}

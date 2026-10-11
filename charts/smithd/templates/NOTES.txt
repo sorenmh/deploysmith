@@ -25,6 +25,13 @@ Your DeploySmith server (smithd) has been deployed to your Kubernetes cluster.
   kubectl --namespace {{ .Release.Namespace }} port-forward $POD_NAME 8080:$CONTAINER_PORT
 {{- end }}
 
+{{- if .Values.config.ui.userHeader }}
+
+   The web UI is enabled at /ui
+   {{- if .Values.uiIngress.enabled }}{{ range .Values.ingress.hosts }}: http{{ if $.Values.ingress.tls }}s{{ end }}://{{ .host }}/ui{{ end }}{{ end }}
+   (users sign in through oauth2-proxy; identity header: {{ .Values.config.ui.userHeader }})
+{{- end }}
+
 2. Check the deployment status:
   kubectl --namespace {{ .Release.Namespace }} get pods -l "app.kubernetes.io/name={{ include "smithd.name" . }},app.kubernetes.io/instance={{ .Release.Name }}"
 

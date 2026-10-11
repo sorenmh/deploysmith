@@ -1,4 +1,7 @@
 {{- if .Values.ingress.enabled -}}
+{{- if and .Values.config.ui.userHeader (not .Values.uiIngress.enabled) (not .Values.config.ui.protectedExternally) }}
+{{- fail "config.ui.userHeader enables the web UI, but /ui would be reachable through this ingress without authentication. Enable uiIngress (oauth2-proxy), or set config.ui.protectedExternally: true if another proxy protects /ui." }}
+{{- end }}
 apiVersion: {{ include "smithd.ingress.apiVersion" . }}
 kind: Ingress
 metadata:
