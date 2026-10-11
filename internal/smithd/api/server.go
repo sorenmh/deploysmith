@@ -23,6 +23,7 @@ import (
 	"github.com/sorenmh/deploysmith/internal/smithd/gitops"
 	"github.com/sorenmh/deploysmith/internal/smithd/models"
 	"github.com/sorenmh/deploysmith/internal/smithd/service"
+	"github.com/sorenmh/deploysmith/internal/smithd/web"
 	"github.com/sorenmh/deploysmith/internal/smithd/slack"
 	"github.com/sorenmh/deploysmith/internal/smithd/storage"
 	"github.com/sorenmh/deploysmith/internal/smithd/store"
@@ -96,14 +97,14 @@ func NewServer(cfg *config.Config, database *db.DB) *Server {
 func (s *Server) setupRoutes() {
 	// Global middleware
 	s.router.Use(Logger)
-	s.router.Use(CORS)
-	s.router.Use(ContentType)
 
 	// Health check (no auth required)
 	s.router.Get("/health", s.handleHealth)
 
 	// API routes (auth required)
 	s.router.Route("/api/v1", func(r chi.Router) {
+		r.Use(CORS)
+		r.Use(ContentType)
 		r.Use(Auth(s.cfg.APIKeys))
 
 		// Application routes
@@ -139,6 +140,23 @@ func (s *Server) setupRoutes() {
 		r.Get("/admin/db-export", s.handleDBExport)
 		r.Post("/admin/db-import", s.handleDBImport)
 	})
+
+	// Web UI, only when an authenticating proxy is configured
+	if s.cfg.UIUserHeader != "" {
+		ui, err := web.New(s.svc, web.AuthConfig{
+			UserHeader:     s.cfg.UIUserHeader,
+			AllowedUsers:   s.cfg.UIAllowedUsers,
+			TrustedOrigins: s.cfg.UITrustedOrigins,
+		})
+		if err != nil {
+			log.Fatalf("Failed to set up web UI: %v", err)
+		}
+		s.router.Mount(web.Prefix, ui)
+		s.router.Get("/", func(w http.ResponseWriter, r *http.Request) {
+			http.Redirect(w, r, web.Prefix+"/", http.StatusFound)
+		})
+		log.Printf("Web UI enabled at %s (user header: %s)", web.Prefix, s.cfg.UIUserHeader)
+	}
 }
 
 // Start starts the HTTP server
