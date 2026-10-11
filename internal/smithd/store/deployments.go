@@ -52,7 +52,7 @@ func (s *DeploymentStore) GetByID(id string) (*models.Deployment, error) {
 	var policyID sql.NullString
 
 	err := s.db.QueryRow(`
-		SELECT id, app_id, version_id, environment, status, triggered_by, policy_id, gitops_commit_sha, error_message, started_at, completed_at
+		SELECT id, app_id, version_id, environment, status, triggered_by, policy_id, COALESCE(gitops_commit_sha, ''), COALESCE(error_message, ''), started_at, completed_at
 		FROM deployments
 		WHERE id = ?
 	`, id).Scan(&deployment.ID, &deployment.AppID, &deployment.VersionID, &deployment.Environment, &deployment.Status, &deployment.TriggeredBy, &policyID, &deployment.GitopsCommitSHA, &deployment.ErrorMessage, &deployment.StartedAt, &completedAt)
@@ -97,7 +97,7 @@ func (s *DeploymentStore) List(appID, environment string, limit, offset int) ([]
 	}
 
 	// Get deployments
-	query = `SELECT id, app_id, version_id, environment, status, triggered_by, policy_id, gitops_commit_sha, error_message, started_at, completed_at
+	query = `SELECT id, app_id, version_id, environment, status, triggered_by, policy_id, COALESCE(gitops_commit_sha, ''), COALESCE(error_message, ''), started_at, completed_at
 		FROM deployments WHERE 1=1`
 
 	if appID != "" {
@@ -138,6 +138,65 @@ func (s *DeploymentStore) List(appID, environment string, limit, offset int) ([]
 	}
 
 	return deployments, total, nil
+}
+
+// ListStalePending returns deployments that are still pending but were
+// started before cutoff, i.e. deployments whose worker most likely died
+func (s *DeploymentStore) ListStalePending(cutoff time.Time) ([]models.Deployment, error) {
+	rows, err := s.db.Query(`
+		SELECT id, app_id, version_id, environment, status, triggered_by, policy_id, COALESCE(gitops_commit_sha, ''), COALESCE(error_message, ''), started_at, completed_at
+		FROM deployments
+		WHERE status = 'pending' AND started_at < ?
+		ORDER BY started_at ASC
+	`, cutoff.UTC())
+	if err != nil {
+		return nil, fmt.Errorf("failed to list stale deployments: %w", err)
+	}
+	defer rows.Close()
+
+	deployments := []models.Deployment{}
+	for rows.Next() {
+		var deployment models.Deployment
+		var completedAt sql.NullTime
+		var policyID sql.NullString
+
+		err := rows.Scan(&deployment.ID, &deployment.AppID, &deployment.VersionID, &deployment.Environment, &deployment.Status, &deployment.TriggeredBy, &policyID, &deployment.GitopsCommitSHA, &deployment.ErrorMessage, &deployment.StartedAt, &completedAt)
+		if err != nil {
+			return nil, fmt.Errorf("failed to scan deployment: %w", err)
+		}
+
+		if completedAt.Valid {
+			deployment.CompletedAt = &completedAt.Time
+		}
+		if policyID.Valid {
+			deployment.PolicyID = &policyID.String
+		}
+
+		deployments = append(deployments, deployment)
+	}
+
+	return deployments, nil
+}
+
+// ClaimStale atomically takes over a stale pending deployment by resetting
+// its start time. It returns false if the deployment is no longer pending or
+// another instance claimed it first.
+func (s *DeploymentStore) ClaimStale(id string, cutoff time.Time) (bool, error) {
+	result, err := s.db.Exec(`
+		UPDATE deployments
+		SET started_at = ?
+		WHERE id = ? AND status = 'pending' AND started_at < ?
+	`, time.Now().UTC(), id, cutoff.UTC())
+	if err != nil {
+		return false, fmt.Errorf("failed to claim deployment: %w", err)
+	}
+
+	rows, err := result.RowsAffected()
+	if err != nil {
+		return false, fmt.Errorf("failed to check rows affected: %w", err)
+	}
+
+	return rows == 1, nil
 }
 
 // UpdateStatus updates the deployment status

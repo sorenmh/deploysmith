@@ -4,6 +4,7 @@ import (
 	"database/sql"
 	"fmt"
 	"path/filepath"
+	"strings"
 
 	"github.com/google/uuid"
 	"github.com/sorenmh/deploysmith/internal/smithd/db"
@@ -138,9 +139,18 @@ func (s *PolicyStore) FindMatchingPolicies(appID, branch string) ([]models.Polic
 	return matchingPolicies, nil
 }
 
+// NormalizeBranch turns a branch reference into a plain branch name, so that
+// "refs/heads/main" and " main" both become "main"
+func NormalizeBranch(branch string) string {
+	return strings.TrimPrefix(strings.TrimSpace(branch), "refs/heads/")
+}
+
 // matchesBranchPattern checks if a branch name matches a pattern
 // Supports wildcards: "main", "release/*", "feature/xyz"
 func matchesBranchPattern(branch, pattern string) bool {
+	branch = NormalizeBranch(branch)
+	pattern = NormalizeBranch(pattern)
+
 	// Exact match
 	if branch == pattern {
 		return true

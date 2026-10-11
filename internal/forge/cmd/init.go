@@ -39,7 +39,7 @@ func init() {
 	initCmd.Flags().StringVar(&initApp, "app", "", "Application name (optional if .deploysmith/app.yaml exists)")
 	initCmd.Flags().StringVar(&initVersion, "version", "", "Version identifier (required)")
 	initCmd.Flags().StringVar(&initGitSHA, "git-sha", "", "Git commit SHA")
-	initCmd.Flags().StringVar(&initGitBranch, "git-branch", "", "Git branch name")
+	initCmd.Flags().StringVar(&initGitBranch, "git-branch", "", "Git branch name (detected from CI environment or git if omitted)")
 	initCmd.Flags().StringVar(&initGitCommitter, "git-committer", "", "Git committer email")
 	initCmd.Flags().IntVar(&initBuildNumber, "build-number", 0, "CI build number")
 
@@ -66,6 +66,10 @@ func runInit(cmd *cobra.Command, args []string) error {
 
 	gitBranch := initGitBranch
 	if gitBranch == "" {
+		gitBranch = detectGitBranch()
+	}
+	if gitBranch == "" {
+		fmt.Fprintln(os.Stderr, "Warning: could not determine git branch; auto-deploy policies will not match this version (pass --git-branch)")
 		gitBranch = "unknown"
 	}
 

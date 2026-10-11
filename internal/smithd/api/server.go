@@ -131,6 +131,8 @@ func (s *Server) setupRoutes() {
 
 // Start starts the HTTP server
 func (s *Server) Start() error {
+	go s.watchStaleDeployments(context.Background())
+
 	addr := fmt.Sprintf(":%s", s.cfg.Port)
 	log.Printf("Starting server on %s", addr)
 	return http.ListenAndServe(addr, s.router)
@@ -495,8 +497,9 @@ func (s *Server) handlePublishVersion(w http.ResponseWriter, r *http.Request) {
 	version, _ = s.versionStore.GetByVersionID(appID, versionID)
 
 	// Check for matching auto-deploy policies
-	if version.GitBranch == "" {
+	if version.GitBranch == "" || version.GitBranch == "unknown" {
 		logging.LogInfoCtx(r.Context(), "Skipping auto-deploy: no git branch metadata on version")
+		s.warnIfPoliciesSkipped(r.Context(), appID, version.GitBranch)
 	} else {
 		matchingPolicies, err := s.policyStore.FindMatchingPolicies(appID, version.GitBranch)
 		if err != nil {
@@ -506,6 +509,7 @@ func (s *Server) handlePublishVersion(w http.ResponseWriter, r *http.Request) {
 			logging.LogInfoCtx(r.Context(), fmt.Sprintf("Found %d matching auto-deploy policies for branch %s", len(matchingPolicies), version.GitBranch))
 			if len(matchingPolicies) == 0 {
 				logging.LogInfoCtx(r.Context(), "No matching auto-deploy policies found, skipping auto-deploy")
+				s.warnIfPoliciesSkipped(r.Context(), appID, version.GitBranch)
 			}
 			for _, policy := range matchingPolicies {
 				logging.LogInfoCtx(r.Context(), "Matched auto-deploy policy",
@@ -739,41 +743,14 @@ func (s *Server) handleDeployVersion(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Clone gitops repo
-	if err := s.gitops.Clone(); err != nil {
-		log.Printf("Failed to clone gitops repo: %v", err)
-		s.deploymentStore.UpdateStatus(deployment.ID, "failed", "", fmt.Sprintf("Failed to clone gitops repo: %v", err))
-		s.slackNotifier.DeployFailed(r.Context(), app.Name, versionID, req.Environment, fmt.Sprintf("Failed to clone gitops repo: %v", err))
-		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to clone gitops repository")
-		return
-	}
-
-	// Write manifests to gitops repo
-	if err := s.gitops.WriteManifests(app.Name, req.Environment, versionID, manifests); err != nil {
-		log.Printf("Failed to write manifests: %v", err)
-		s.deploymentStore.UpdateStatus(deployment.ID, "failed", "", fmt.Sprintf("Failed to write manifests: %v", err))
-		s.slackNotifier.DeployFailed(r.Context(), app.Name, versionID, req.Environment, fmt.Sprintf("Failed to write manifests: %v", err))
-		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to write manifests")
-		return
-	}
-
-	// Commit changes
+	// Write, commit and push manifests to the gitops repo
 	commitMsg := fmt.Sprintf("Deploy %s version %s to %s", app.Name, versionID, req.Environment)
-	commitSHA, err := s.gitops.Commit(commitMsg)
+	commitSHA, err := s.gitops.Deploy(app.Name, req.Environment, commitMsg, manifests)
 	if err != nil {
-		log.Printf("Failed to commit: %v", err)
-		s.deploymentStore.UpdateStatus(deployment.ID, "failed", "", fmt.Sprintf("Failed to commit: %v", err))
-		s.slackNotifier.DeployFailed(r.Context(), app.Name, versionID, req.Environment, fmt.Sprintf("Failed to commit: %v", err))
-		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to commit changes")
-		return
-	}
-
-	// Push to remote
-	if err := s.gitops.Push(); err != nil {
-		log.Printf("Failed to push: %v", err)
-		s.deploymentStore.UpdateStatus(deployment.ID, "failed", commitSHA, fmt.Sprintf("Failed to push: %v", err))
-		s.slackNotifier.DeployFailed(r.Context(), app.Name, versionID, req.Environment, fmt.Sprintf("Failed to push: %v", err))
-		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to push to gitops repository")
+		log.Printf("Failed to deploy to gitops repo: %v", err)
+		s.deploymentStore.UpdateStatus(deployment.ID, "failed", "", err.Error())
+		s.slackNotifier.DeployFailed(r.Context(), app.Name, versionID, req.Environment, err.Error())
+		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to update gitops repository")
 		return
 	}
 
@@ -937,15 +914,36 @@ func (s *Server) handleDeletePolicy(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNoContent)
 }
 
+// warnIfPoliciesSkipped logs a warning when an app has enabled auto-deploy
+// policies but a published version did not trigger any of them, which
+// usually means the build passed missing or unexpected branch metadata
+func (s *Server) warnIfPoliciesSkipped(ctx context.Context, appID, branch string) {
+	policies, err := s.policyStore.List(appID)
+	if err != nil {
+		logging.LogErrorCtx(ctx, "Failed to list policies: "+err.Error(), err)
+		return
+	}
+
+	var patterns []string
+	for _, policy := range policies {
+		if policy.Enabled {
+			patterns = append(patterns, policy.GitBranchPattern)
+		}
+	}
+	if len(patterns) == 0 {
+		return
+	}
+
+	logging.LogWarnCtx(ctx, "Published version did not trigger any auto-deploy policy",
+		logging.Field("git_branch", branch),
+		logging.Field("policy_patterns", strings.Join(patterns, ", ")),
+	)
+}
+
 // autoDeployVersion automatically deploys a version based on a policy
 // This runs asynchronously in a goroutine
 func (s *Server) autoDeployVersion(ctx context.Context, appName, appID string, version *models.Version, policy models.Policy) {
-	ctx = logging.AppendLogAttrs(ctx,
-		logging.Field("app", appName),
-		logging.Field("version", version.VersionID),
-		logging.Field("environment", policy.TargetEnvironment),
-		logging.Field("policy", policy.Name),
-	)
+	ctx = autoDeployCtx(ctx, appName, version, policy)
 
 	logging.LogInfoCtx(ctx, "Auto-deploy started")
 	s.slackNotifier.DeployStarted(ctx, appName, version.VersionID, policy.TargetEnvironment, policy.Name)
@@ -959,6 +957,22 @@ func (s *Server) autoDeployVersion(ctx context.Context, appName, appID string, v
 		return
 	}
 
+	s.runAutoDeploy(ctx, appName, appID, version, policy, deployment)
+}
+
+// autoDeployCtx adds the auto-deploy's identifying fields to the log context
+func autoDeployCtx(ctx context.Context, appName string, version *models.Version, policy models.Policy) context.Context {
+	return logging.AppendLogAttrs(ctx,
+		logging.Field("app", appName),
+		logging.Field("version", version.VersionID),
+		logging.Field("environment", policy.TargetEnvironment),
+		logging.Field("policy", policy.Name),
+	)
+}
+
+// runAutoDeploy carries out an auto-deploy for an existing pending deployment
+// record. It is safe to run again for a deployment that was interrupted.
+func (s *Server) runAutoDeploy(ctx context.Context, appName, appID string, version *models.Version, policy models.Policy, deployment *models.Deployment) {
 	// fail publishes a failure event and updates the deployment status.
 	fail := func(errMsg string) {
 		s.slackNotifier.DeployFailed(ctx, appName, version.VersionID, policy.TargetEnvironment, errMsg)
@@ -996,40 +1010,13 @@ func (s *Server) autoDeployVersion(ctx context.Context, appName, appID string, v
 		return
 	}
 
-	// Clone gitops repo
-	logging.LogDebugCtx(ctx, "Cloning gitops repo")
-	if err := s.gitops.Clone(); err != nil {
-		logging.LogErrorCtx(ctx, "Auto-deploy failed to clone gitops repo: "+err.Error(), err)
-		s.deploymentStore.UpdateStatus(deployment.ID, "failed", "", fmt.Sprintf("Failed to clone gitops repo: %v", err))
-		fail(err.Error())
-		return
-	}
-
-	// Write manifests to gitops repo
-	logging.LogDebugCtx(ctx, "Writing manifests to gitops repo")
-	if err := s.gitops.WriteManifests(appName, policy.TargetEnvironment, version.VersionID, manifests); err != nil {
-		logging.LogErrorCtx(ctx, "Auto-deploy failed to write manifests: "+err.Error(), err)
-		s.deploymentStore.UpdateStatus(deployment.ID, "failed", "", fmt.Sprintf("Failed to write manifests: %v", err))
-		fail(err.Error())
-		return
-	}
-
-	// Commit changes
-	logging.LogDebugCtx(ctx, "Committing changes")
+	// Write, commit and push manifests to the gitops repo
+	logging.LogDebugCtx(ctx, "Deploying to gitops repo")
 	commitMsg := fmt.Sprintf("Auto-deploy %s version %s to %s (policy: %s)", appName, version.VersionID, policy.TargetEnvironment, policy.Name)
-	commitSHA, err := s.gitops.Commit(commitMsg)
+	commitSHA, err := s.gitops.Deploy(appName, policy.TargetEnvironment, commitMsg, manifests)
 	if err != nil {
-		logging.LogErrorCtx(ctx, "Auto-deploy failed to commit: "+err.Error(), err)
-		s.deploymentStore.UpdateStatus(deployment.ID, "failed", "", fmt.Sprintf("Failed to commit: %v", err))
-		fail(err.Error())
-		return
-	}
-
-	// Push to remote
-	logging.LogDebugCtx(ctx, "Pushing to remote")
-	if err := s.gitops.Push(); err != nil {
-		logging.LogErrorCtx(ctx, "Auto-deploy failed to push: "+err.Error(), err)
-		s.deploymentStore.UpdateStatus(deployment.ID, "failed", commitSHA, fmt.Sprintf("Failed to push: %v", err))
+		logging.LogErrorCtx(ctx, "Auto-deploy failed to update gitops repo: "+err.Error(), err)
+		s.deploymentStore.UpdateStatus(deployment.ID, "failed", "", err.Error())
 		fail(err.Error())
 		return
 	}

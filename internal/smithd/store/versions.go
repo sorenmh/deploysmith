@@ -34,7 +34,7 @@ func (s *VersionStore) Create(appID, versionID string, metadata models.VersionMe
 		VersionID:         versionID,
 		Status:            "draft",
 		GitSHA:            metadata.GitSHA,
-		GitBranch:         metadata.GitBranch,
+		GitBranch:         NormalizeBranch(metadata.GitBranch),
 		GitCommitter:      metadata.GitCommitter,
 		BuildNumber:       metadata.BuildNumber,
 		MetadataTimestamp: metadataTimestamp,
@@ -51,6 +51,31 @@ func (s *VersionStore) Create(appID, versionID string, metadata models.VersionMe
 	}
 
 	return version, nil
+}
+
+// GetByID gets a version by its internal ID
+func (s *VersionStore) GetByID(id string) (*models.Version, error) {
+	var version models.Version
+	var publishedAt sql.NullTime
+
+	err := s.db.QueryRow(`
+		SELECT id, app_id, version_id, status, git_sha, git_branch, git_committer, build_number, metadata_timestamp, created_at, published_at
+		FROM versions
+		WHERE id = ?
+	`, id).Scan(&version.ID, &version.AppID, &version.VersionID, &version.Status, &version.GitSHA, &version.GitBranch, &version.GitCommitter, &version.BuildNumber, &version.MetadataTimestamp, &version.CreatedAt, &publishedAt)
+
+	if err == sql.ErrNoRows {
+		return nil, fmt.Errorf("version not found")
+	}
+	if err != nil {
+		return nil, fmt.Errorf("failed to get version: %w", err)
+	}
+
+	if publishedAt.Valid {
+		version.PublishedAt = &publishedAt.Time
+	}
+
+	return &version, nil
 }
 
 // GetByVersionID gets a version by app ID and version ID

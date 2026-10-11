@@ -4,91 +4,53 @@ import (
 	"archive/tar"
 	"bytes"
 	"compress/gzip"
+	"errors"
 	"fmt"
 	"io"
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/go-git/go-git/v5"
+	"github.com/go-git/go-git/v5/plumbing"
 	"github.com/go-git/go-git/v5/plumbing/object"
+	"github.com/go-git/go-git/v5/plumbing/transport"
 	"github.com/go-git/go-git/v5/plumbing/transport/ssh"
 	cryptossh "golang.org/x/crypto/ssh"
 	"gopkg.in/yaml.v3"
 )
 
-// Service handles gitops repository operations
+// Service handles gitops repository operations.
+//
+// All operations go through Deploy, which serializes access to the local
+// working copy and resets it to the remote before every attempt, so a failed
+// or concurrent deploy can never leave state behind for the next one.
 type Service struct {
 	repoURL    string
 	sshKeyPath string
 	workDir    string
-	repo       *git.Repository
+
+	mu   sync.Mutex
+	repo *git.Repository
+
+	pushAttempts int
+	retryDelay   time.Duration
+
+	// beforePush is a test hook invoked right before each push attempt
+	beforePush func()
 }
 
 // NewService creates a new gitops service
 func NewService(repoURL, sshKeyPath string) *Service {
 	return &Service{
-		repoURL:    repoURL,
-		sshKeyPath: sshKeyPath,
-		workDir:    "/tmp/deploysmith-gitops", // Could be configurable
+		repoURL:      repoURL,
+		sshKeyPath:   sshKeyPath,
+		workDir:      "/tmp/deploysmith-gitops", // Could be configurable
+		pushAttempts: 3,
+		retryDelay:   time.Second,
 	}
-}
-
-// Clone clones the gitops repository or pulls if it already exists
-func (s *Service) Clone() error {
-	// Check if repo already exists
-	if _, err := os.Stat(filepath.Join(s.workDir, ".git")); err == nil {
-		// Repo exists, try to open and pull
-		repo, err := git.PlainOpen(s.workDir)
-		if err != nil {
-			return fmt.Errorf("failed to open existing repo: %w", err)
-		}
-		s.repo = repo
-
-		// Pull latest changes
-		worktree, err := repo.Worktree()
-		if err != nil {
-			return fmt.Errorf("failed to get worktree: %w", err)
-		}
-
-		auth, err := s.getAuth()
-		if err != nil {
-			return fmt.Errorf("failed to get auth: %w", err)
-		}
-
-		err = worktree.Pull(&git.PullOptions{
-			RemoteName: "origin",
-			Auth:       auth,
-		})
-		if err != nil && err != git.NoErrAlreadyUpToDate {
-			return fmt.Errorf("failed to pull: %w", err)
-		}
-
-		return nil
-	}
-
-	// Clone fresh
-	auth, err := s.getAuth()
-	if err != nil {
-		return fmt.Errorf("failed to get auth: %w", err)
-	}
-
-	// Remove work dir if it exists but isn't a git repo
-	os.RemoveAll(s.workDir)
-
-	// Clone the repository
-	repo, err := git.PlainClone(s.workDir, false, &git.CloneOptions{
-		URL:      s.repoURL,
-		Auth:     auth,
-		Progress: nil, // Could add progress tracking
-	})
-	if err != nil {
-		return fmt.Errorf("failed to clone repo: %w", err)
-	}
-
-	s.repo = repo
-	return nil
 }
 
 // appsPath returns the repo-relative directory holding an environment's apps
@@ -103,29 +65,133 @@ func appPath(environment, appName string) string {
 	return filepath.Join(appsPath(environment), appName)
 }
 
-// WriteManifests writes manifest files to the gitops repo
-func (s *Service) WriteManifests(appName, environment, versionID string, manifests map[string][]byte) error {
+// Deploy writes an app's manifests for an environment, commits and pushes
+// them, and returns the resulting commit SHA. If the manifests are already
+// up to date, nothing is committed and the current remote SHA is returned.
+//
+// When a push is rejected (e.g. because the remote moved), the working copy
+// is reset to the new remote state and the change is re-applied.
+func (s *Service) Deploy(appName, environment, message string, manifests map[string][]byte) (string, error) {
+	files, err := s.processManifests(manifests)
+	if err != nil {
+		return "", err
+	}
+
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	var lastErr error
+	for attempt := 1; attempt <= s.pushAttempts; attempt++ {
+		if attempt > 1 {
+			time.Sleep(s.retryDelay * time.Duration(attempt-1))
+		}
+
+		if err := s.sync(); err != nil {
+			lastErr = fmt.Errorf("failed to sync gitops repo: %w", err)
+			continue
+		}
+
+		if err := s.writeManifests(appName, environment, files); err != nil {
+			return "", fmt.Errorf("failed to write manifests: %w", err)
+		}
+
+		sha, changed, err := s.commit(message)
+		if err != nil {
+			return "", fmt.Errorf("failed to commit: %w", err)
+		}
+		if !changed {
+			return sha, nil
+		}
+
+		if s.beforePush != nil {
+			s.beforePush()
+		}
+		if err := s.push(); err != nil {
+			lastErr = fmt.Errorf("failed to push: %w", err)
+			continue
+		}
+
+		return sha, nil
+	}
+
+	return "", fmt.Errorf("gitops deploy failed after %d attempts: %w", s.pushAttempts, lastErr)
+}
+
+// sync makes the local working copy an exact copy of the remote branch,
+// cloning it if needed. Unpushed commits, staged changes and untracked files
+// from earlier attempts are discarded.
+func (s *Service) sync() error {
+	auth, err := s.getAuth()
+	if err != nil {
+		return fmt.Errorf("failed to get auth: %w", err)
+	}
+
 	if s.repo == nil {
-		return fmt.Errorf("repository not initialized, call Clone() first")
+		if repo, err := git.PlainOpen(s.workDir); err == nil {
+			s.repo = repo
+		} else {
+			// Remove work dir if it exists but isn't a usable git repo
+			os.RemoveAll(s.workDir)
+			repo, err := git.PlainClone(s.workDir, false, &git.CloneOptions{
+				URL:  s.repoURL,
+				Auth: auth,
+			})
+			if err != nil {
+				return fmt.Errorf("failed to clone repo: %w", err)
+			}
+			s.repo = repo
+			return nil
+		}
 	}
 
-	appDir := filepath.Join(s.workDir, appPath(environment, appName))
-	if err := os.MkdirAll(appDir, 0755); err != nil {
-		return fmt.Errorf("failed to create app directory: %w", err)
+	err = s.repo.Fetch(&git.FetchOptions{
+		RemoteName: "origin",
+		Auth:       auth,
+		Force:      true,
+	})
+	if err != nil && !errors.Is(err, git.NoErrAlreadyUpToDate) {
+		return fmt.Errorf("failed to fetch: %w", err)
 	}
 
-	// Process manifest files, extracting tarballs if present
+	head, err := s.repo.Reference(plumbing.HEAD, false)
+	if err != nil {
+		return fmt.Errorf("failed to read HEAD: %w", err)
+	}
+	branch := head.Target()
+	if !branch.IsBranch() {
+		return fmt.Errorf("HEAD is not on a branch")
+	}
+
+	remoteRef, err := s.repo.Reference(plumbing.NewRemoteReferenceName("origin", branch.Short()), true)
+	if err != nil {
+		return fmt.Errorf("failed to resolve origin/%s: %w", branch.Short(), err)
+	}
+
+	worktree, err := s.repo.Worktree()
+	if err != nil {
+		return fmt.Errorf("failed to get worktree: %w", err)
+	}
+	if err := worktree.Reset(&git.ResetOptions{Mode: git.HardReset, Commit: remoteRef.Hash()}); err != nil {
+		return fmt.Errorf("failed to reset to origin/%s: %w", branch.Short(), err)
+	}
+	if err := worktree.Clean(&git.CleanOptions{Dir: true}); err != nil {
+		return fmt.Errorf("failed to clean worktree: %w", err)
+	}
+
+	return nil
+}
+
+// processManifests flattens the uploaded files, extracting tarballs if present
+func (s *Service) processManifests(manifests map[string][]byte) (map[string][]byte, error) {
 	processedManifests := make(map[string][]byte)
 
 	for filename, content := range manifests {
 		if filename == "manifests.tar.gz" {
-			// Extract tarball contents
 			extractedFiles, err := s.extractTarball(content)
 			if err != nil {
-				return fmt.Errorf("failed to extract tarball %s: %w", filename, err)
+				return nil, fmt.Errorf("failed to extract tarball %s: %w", filename, err)
 			}
 
-			// Add extracted files to processed manifests
 			for extractedFilename, extractedContent := range extractedFiles {
 				// Only include YAML files
 				if strings.HasSuffix(extractedFilename, ".yaml") || strings.HasSuffix(extractedFilename, ".yml") {
@@ -133,26 +199,36 @@ func (s *Service) WriteManifests(appName, environment, versionID string, manifes
 				}
 			}
 		} else {
-			// Regular file, add as-is
 			processedManifests[filename] = content
 		}
 	}
 
-	// Write each processed manifest file
-	for filename, content := range processedManifests {
+	return processedManifests, nil
+}
+
+// writeManifests writes the app's files into the working copy, registers the
+// app in the environment's apps kustomization, and stages everything
+func (s *Service) writeManifests(appName, environment string, files map[string][]byte) error {
+	appDir := filepath.Join(s.workDir, appPath(environment, appName))
+	if err := os.MkdirAll(appDir, 0755); err != nil {
+		return fmt.Errorf("failed to create app directory: %w", err)
+	}
+
+	for filename, content := range files {
 		filePath := filepath.Join(appDir, filename)
+		if err := os.MkdirAll(filepath.Dir(filePath), 0755); err != nil {
+			return fmt.Errorf("failed to create directory for %s: %w", filename, err)
+		}
 		if err := os.WriteFile(filePath, content, 0644); err != nil {
 			return fmt.Errorf("failed to write manifest %s: %w", filename, err)
 		}
 	}
 
-	// Add files to git
 	worktree, err := s.repo.Worktree()
 	if err != nil {
 		return fmt.Errorf("failed to get worktree: %w", err)
 	}
 
-	// Add the entire app directory
 	if err := worktree.AddGlob(appPath(environment, appName) + "/*"); err != nil {
 		return fmt.Errorf("failed to add files to git: %w", err)
 	}
@@ -170,6 +246,71 @@ func (s *Service) WriteManifests(appName, environment, versionID string, manifes
 	}
 
 	return nil
+}
+
+// commit commits the staged changes. It returns the commit SHA and whether a
+// new commit was created; with nothing to commit it returns the HEAD SHA.
+func (s *Service) commit(message string) (string, bool, error) {
+	worktree, err := s.repo.Worktree()
+	if err != nil {
+		return "", false, fmt.Errorf("failed to get worktree: %w", err)
+	}
+
+	commitHash, err := worktree.Commit(message, &git.CommitOptions{
+		Author: &object.Signature{
+			Name:  "DeploySmith",
+			Email: "deploysmith@system.local",
+			When:  time.Now(),
+		},
+	})
+	if errors.Is(err, git.ErrEmptyCommit) {
+		head, err := s.repo.Head()
+		if err != nil {
+			return "", false, fmt.Errorf("failed to read HEAD: %w", err)
+		}
+		return head.Hash().String(), false, nil
+	}
+	if err != nil {
+		return "", false, err
+	}
+
+	return commitHash.String(), true, nil
+}
+
+// push pushes the current branch to the remote
+func (s *Service) push() error {
+	auth, err := s.getAuth()
+	if err != nil {
+		return fmt.Errorf("failed to get auth: %w", err)
+	}
+
+	err = s.repo.Push(&git.PushOptions{
+		RemoteName: "origin",
+		Auth:       auth,
+	})
+	if err != nil && !errors.Is(err, git.NoErrAlreadyUpToDate) {
+		return err
+	}
+
+	return nil
+}
+
+// getAuth returns SSH authentication, or nil when no SSH key is configured
+// (e.g. for HTTPS URLs with embedded credentials or local repositories)
+func (s *Service) getAuth() (transport.AuthMethod, error) {
+	if s.sshKeyPath == "" {
+		return nil, nil
+	}
+
+	auth, err := ssh.NewPublicKeysFromFile("git", s.sshKeyPath, "")
+	if err != nil {
+		return nil, fmt.Errorf("failed to create SSH auth: %w", err)
+	}
+
+	// Disable host key verification to avoid known_hosts issues
+	auth.HostKeyCallback = cryptossh.InsecureIgnoreHostKey()
+
+	return auth, nil
 }
 
 // ensureKustomizationResource makes sure the kustomization file in dir lists
@@ -299,23 +440,6 @@ func (s *Service) Push() error {
 	}
 
 	return nil
-}
-
-// getAuth returns SSH authentication
-func (s *Service) getAuth() (*ssh.PublicKeys, error) {
-	if s.sshKeyPath == "" {
-		return nil, fmt.Errorf("SSH key path not configured")
-	}
-
-	auth, err := ssh.NewPublicKeysFromFile("git", s.sshKeyPath, "")
-	if err != nil {
-		return nil, fmt.Errorf("failed to create SSH auth: %w", err)
-	}
-
-	// Disable host key verification to avoid known_hosts issues
-	auth.HostKeyCallback = cryptossh.InsecureIgnoreHostKey()
-
-	return auth, nil
 }
 
 // Cleanup removes the working directory
