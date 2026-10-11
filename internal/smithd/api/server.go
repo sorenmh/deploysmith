@@ -122,6 +122,7 @@ func (s *Server) setupRoutes() {
 		r.Post("/apps/{appId}/versions/{versionId}/deploy", s.handleDeployVersion)
 		r.Get("/deployments", s.handleListDeployments)
 		r.Get("/deployments/{deploymentId}", s.handleGetDeployment)
+		r.Get("/overview", s.handleOverview)
 
 		// Environment routes
 		r.Post("/environments", s.handleCreateEnvironment)

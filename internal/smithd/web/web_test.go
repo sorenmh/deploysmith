@@ -35,6 +35,8 @@ func newTestServer(t *testing.T) (*httptest.Server, *service.Service) {
 		Policies:     store.NewPolicyStore(database),
 		Environments: store.NewEnvironmentStore(database),
 		Publisher:    events.NewMemoryPublisher(),
+		Storage:      fakeStorage{},
+		Gitops:       &fakeGitops{},
 	})
 
 	ui, err := New(svc, AuthConfig{UserHeader: testUserHeader})
@@ -71,34 +73,49 @@ func get(t *testing.T, srv *httptest.Server, path, user string) (*http.Response,
 	return resp, string(body)
 }
 
-func TestHomePage(t *testing.T) {
+type fakeStorage struct{}
+
+func (fakeStorage) GetAllFiles(appName, versionID string, published bool) (map[string][]byte, error) {
+	return map[string][]byte{"deployment.yaml": []byte("name: " + appName)}, nil
+}
+
+type fakeGitops struct{ err error }
+
+func (f *fakeGitops) Deploy(appName, environment, message string, manifests map[string][]byte) (string, error) {
+	if f.err != nil {
+		return "", f.err
+	}
+	return "0123456789abcdef", nil
+}
+
+func TestLayout(t *testing.T) {
 	srv, _ := newTestServer(t)
 
-	resp, body := get(t, srv, "/ui/", "alice@example.com")
+	resp, body := get(t, srv, "/ui/apps", "alice@example.com")
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("status = %d: %s", resp.StatusCode, body)
 	}
 	if ct := resp.Header.Get("Content-Type"); ct != "text/html; charset=utf-8" {
 		t.Errorf("Content-Type = %q", ct)
 	}
-	for _, want := range []string{"<title>Home – deploysmith</title>", "Signed in as alice@example.com", `href="/ui/apps"`} {
+	for _, want := range []string{"<title>Apps – deploysmith</title>", "Signed in as alice@example.com", `href="/ui/apps" aria-current="page"`} {
 		if !strings.Contains(body, want) {
 			t.Errorf("page is missing %q", want)
 		}
 	}
 }
 
-func TestHomePageRequiresUser(t *testing.T) {
+func TestPagesRequireUser(t *testing.T) {
 	srv, _ := newTestServer(t)
 
-	if resp, _ := get(t, srv, "/ui/", ""); resp.StatusCode != http.StatusUnauthorized {
+	if resp, _ := get(t, srv, "/ui/apps", ""); resp.StatusCode != http.StatusUnauthorized {
 		t.Errorf("status = %d, want 401", resp.StatusCode)
 	}
 }
 
 func TestStaticAssets(t *testing.T) {
 	srv, _ := newTestServer(t)
-	_, page := get(t, srv, "/ui/", "alice@example.com")
+	_, page := get(t, srv, "/ui/apps", "alice@example.com")
 
 	// Every asset referenced by the layout is served, without authentication
 	refs := regexp.MustCompile(`(?:href|src)="(/ui/static/[^"]+)"`).FindAllStringSubmatch(page, -1)
@@ -124,7 +141,7 @@ func TestAllPagesParse(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, name := range []string{"home", "error"} {
+	for _, name := range []string{"apps", "app", "error"} {
 		if _, ok := pages[name]; !ok {
 			t.Errorf("page %q not parsed", name)
 		}

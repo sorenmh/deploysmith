@@ -9,6 +9,7 @@
 </head>
 <body hx-boost="true">
   <header class="masthead">
+    <div class="masthead__inner">
     <a class="wordmark" href="/ui/">deploysmith</a>
     <nav class="nav" aria-label="Main">
       <a href="/ui/apps"{{if eq .Section "apps"}} aria-current="page"{{end}}>Apps</a>
@@ -16,6 +17,7 @@
       <a href="/ui/environments"{{if eq .Section "environments"}} aria-current="page"{{end}}>Environments</a>
     </nav>
     <span class="whoami">Signed in as {{.User}}</span>
+    </div>
   </header>
   <main class="page">
     {{template "content" .}}

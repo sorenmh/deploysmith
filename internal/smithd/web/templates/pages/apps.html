@@ -1,0 +1,43 @@
+{{define "content"}}
+<h1 class="page-title">Apps</h1>
+{{with .Data}}
+{{if not .Apps}}
+<div class="empty">
+  <p>No apps yet.</p>
+  <p class="muted">Apps appear here once a build registers them, for example with <code>forge init</code> or <code>smithctl app register</code>.</p>
+</div>
+{{else if not .Environments}}
+<div class="empty">
+  <p>No environments yet.</p>
+  <p class="muted">Create an environment before deploying, for example with <code>smithctl environment create production</code>.</p>
+</div>
+{{else}}
+<div class="table-scroll">
+<table class="table board">
+  <thead>
+    <tr>
+      <th scope="col">App</th>
+      {{range .Environments}}<th scope="col">{{.}}</th>{{end}}
+    </tr>
+  </thead>
+  <tbody>
+    {{range $app := .Apps}}
+    <tr>
+      <th scope="row"><a class="app-name" href="/ui/apps/{{$app.ID}}">{{$app.Name}}</a></th>
+      {{range $env := $.Data.Environments}}
+      {{$target := index $app.Targets $env}}
+      <td>
+        {{if $target.CurrentVersion}}<span class="id">{{$target.CurrentVersion}}</span>{{else}}<span class="muted">Not deployed</span>{{end}}
+        {{with $target.LastDeployment}}{{if or (ne .Status "success") (ne .VersionID $target.CurrentVersion)}}
+        <div class="board-attempt">{{template "status" .}} <span class="id">{{.VersionID}}</span></div>
+        {{end}}{{end}}
+      </td>
+      {{end}}
+    </tr>
+    {{end}}
+  </tbody>
+</table>
+</div>
+{{end}}
+{{end}}
+{{end}}

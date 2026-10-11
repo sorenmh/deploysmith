@@ -1,0 +1,5 @@
+{{/* status renders a deployment status on the heat scale; dot is a DeploymentDetail */}}
+{{define "status"}}<span class="status status--{{.Status}}">{{if eq .Status "pending"}}Deploying{{else if eq .Status "success"}}Deployed{{else}}Failed{{end}}</span>{{end}}
+
+{{/* time renders a relative time with the exact time on hover */}}
+{{define "time"}}{{if .}}<time datetime="{{.Format "2006-01-02T15:04:05Z07:00"}}" title="{{.Format "2 Jan 2006 15:04:05 MST"}}">{{ago .}}</time>{{end}}{{end}}

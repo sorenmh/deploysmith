@@ -1,0 +1,145 @@
+{{define "content"}}
+{{with .Data}}
+<h1 class="page-title">{{.Detail.App.Name}}</h1>
+
+{{with .Notice}}
+<div class="notice notice--{{.Status}}" role="status">
+  {{if eq .Status "success"}}
+  <p>Deployed <span class="id">{{.VersionID}}</span> to {{.Environment}}. Flux will apply it on its next reconciliation.</p>
+  {{else if eq .Status "pending"}}
+  <p>Deploying <span class="id">{{.VersionID}}</span> to {{.Environment}}…</p>
+  {{else}}
+  <p>Deploying <span class="id">{{.VersionID}}</span> to {{.Environment}} failed: {{.ErrorMessage}}</p>
+  {{end}}
+</div>
+{{end}}
+
+<section class="section" aria-labelledby="running">
+  <h2 class="section-title" id="running">Running now</h2>
+  {{if .Detail.Environments}}
+  <dl class="targets">
+    {{range $env := .Detail.Environments}}
+    <div class="target">
+      <dt>{{$env}}</dt>
+      {{$current := index $.Data.Detail.CurrentVersions $env}}
+      <dd>{{with $current}}<span class="id">{{.}}</span>{{else}}<span class="muted">Not deployed</span>{{end}}</dd>
+      {{with index $.Data.Detail.LastDeployments $env}}{{if or (ne .Status "success") (ne .VersionID $current)}}
+      <dd class="board-attempt">{{template "status" .}} <span class="id">{{.VersionID}}</span> {{template "time" .StartedAt}}</dd>
+      {{end}}{{end}}
+    </div>
+    {{end}}
+  </dl>
+  {{else}}
+  <p class="muted">No environments exist yet, so there is nowhere to deploy.</p>
+  {{end}}
+</section>
+
+<section class="section" aria-labelledby="versions">
+  <h2 class="section-title" id="versions">Versions</h2>
+  {{if not .Detail.Versions}}
+  <div class="empty">
+    <p>No versions yet.</p>
+    <p class="muted">Versions appear here when a build publishes them with <code>forge publish</code>.</p>
+  </div>
+  {{else}}
+  <div class="table-scroll">
+  <table class="table">
+    <thead>
+      <tr>
+        <th scope="col">Version</th>
+        <th scope="col">Branch</th>
+        <th scope="col">Commit</th>
+        <th scope="col">Published</th>
+        <th scope="col">Running in</th>
+        <th scope="col"><span class="visually-hidden">Actions</span></th>
+      </tr>
+    </thead>
+    <tbody>
+      {{range $v := .Detail.Versions}}
+      {{$running := $.Data.Detail.RunningIn $v.VersionID}}
+      <tr>
+        <td><span class="id">{{$v.VersionID}}</span></td>
+        <td>{{if and $v.GitBranch (ne $v.GitBranch "unknown")}}{{$v.GitBranch}}{{else}}<span class="muted">Unknown</span>{{end}}</td>
+        <td>{{if and $v.GitSHA (ne $v.GitSHA "unknown")}}<span class="id" title="{{$v.GitSHA}}">{{shortSHA $v.GitSHA}}</span>{{else}}<span class="muted">Unknown</span>{{end}}</td>
+        <td>{{if $v.PublishedAt}}{{template "time" $v.PublishedAt}}{{else}}<span class="muted">Draft</span>{{end}}</td>
+        <td>{{range $i, $env := $running}}{{if $i}}, {{end}}{{$env}}{{else}}<span class="muted">Nowhere</span>{{end}}</td>
+        <td class="actions">
+          {{if eq $v.Status "published"}}
+          <details class="deploy-menu">
+            <summary>Deploy</summary>
+            <div class="deploy-menu__list">
+              {{range $env := $.Data.Detail.Environments}}
+              {{if eq (index $.Data.Detail.CurrentVersions $env) $v.VersionID}}
+              <span class="muted">Running in {{$env}}</span>
+              {{else}}
+              <form method="post" action="/ui/apps/{{$.Data.Detail.App.ID}}/versions/{{$v.VersionID}}/deploy"
+                    hx-confirm="Deploy {{$v.VersionID}} to {{$env}}?" hx-disabled-elt="find button">
+                <input type="hidden" name="environment" value="{{$env}}">
+                <button type="submit" class="button">To {{$env}}</button>
+              </form>
+              {{end}}
+              {{end}}
+            </div>
+          </details>
+          {{end}}
+        </td>
+      </tr>
+      {{end}}
+    </tbody>
+  </table>
+  </div>
+  {{if or .PrevPage .NextPage}}
+  <nav class="pager" aria-label="Versions pages">
+    {{with .PrevPage}}<a href="?page={{.}}">Newer versions</a>{{end}}
+    {{with .NextPage}}<a href="?page={{.}}">Older versions</a>{{end}}
+  </nav>
+  {{end}}
+  {{end}}
+</section>
+
+<section class="section" aria-labelledby="recent">
+  <h2 class="section-title" id="recent">Recent deployments</h2>
+  {{if .Detail.RecentDeployments}}
+  <div class="table-scroll">
+  <table class="table">
+    <thead>
+      <tr>
+        <th scope="col">Status</th>
+        <th scope="col">Version</th>
+        <th scope="col">Environment</th>
+        <th scope="col">Triggered by</th>
+        <th scope="col">Started</th>
+      </tr>
+    </thead>
+    <tbody>
+      {{range .Detail.RecentDeployments}}
+      <tr>
+        <td>{{template "status" .}}</td>
+        <td><span class="id">{{.VersionID}}</span></td>
+        <td>{{.Environment}}</td>
+        <td>{{if .PolicyName}}Policy {{.PolicyName}}{{else if .TriggeredBy}}{{.TriggeredBy}}{{else}}<span class="muted">Unknown</span>{{end}}</td>
+        <td>{{template "time" .StartedAt}}</td>
+      </tr>
+      {{end}}
+    </tbody>
+  </table>
+  </div>
+  {{else}}
+  <p class="muted">This app has not been deployed yet.</p>
+  {{end}}
+</section>
+
+<section class="section" aria-labelledby="policies">
+  <h2 class="section-title" id="policies">Auto-deploy policies</h2>
+  {{if .Detail.Policies}}
+  <ul class="policies">
+    {{range .Detail.Policies}}
+    <li>{{.Name}}: deploys branch <span class="id">{{.GitBranchPattern}}</span> to {{.TargetEnvironment}}{{if not .Enabled}} <span class="muted">(disabled)</span>{{end}}</li>
+    {{end}}
+  </ul>
+  {{else}}
+  <p class="muted">No policies. Versions are only deployed when someone deploys them.</p>
+  {{end}}
+</section>
+{{end}}
+{{end}}

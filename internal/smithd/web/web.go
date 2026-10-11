@@ -72,6 +72,9 @@ func New(svc *service.Service, auth AuthConfig) (http.Handler, error) {
 	r.Group(func(r chi.Router) {
 		r.Use(authenticate)
 		r.Get("/", ui.handleHome)
+		r.Get("/apps", ui.handleApps)
+		r.Get("/apps/{appId}", ui.handleApp)
+		r.Post("/apps/{appId}/versions/{versionId}/deploy", ui.handleDeploy)
 	})
 
 	return r, nil
@@ -93,7 +96,7 @@ func parsePages() (map[string]*template.Template, error) {
 	pages := make(map[string]*template.Template, len(files))
 	for _, file := range files {
 		name := path.Base(file)
-		tmpl, err := template.New(name).Funcs(funcs).ParseFS(assets, "templates/layout.html", file)
+		tmpl, err := template.New(name).Funcs(funcs).ParseFS(assets, "templates/layout.html", "templates/partials.html", file)
 		if err != nil {
 			return nil, fmt.Errorf("failed to parse %s: %w", file, err)
 		}
@@ -122,6 +125,8 @@ func templateFuncs() (template.FuncMap, error) {
 	}
 
 	return template.FuncMap{
+		"ago":      ago,
+		"shortSHA": shortSHA,
 		"asset": func(name string) (string, error) {
 			version, ok := versions[name]
 			if !ok {
@@ -165,6 +170,35 @@ func (ui *UI) renderError(w http.ResponseWriter, r *http.Request, status int, me
 	ui.render(w, r, status, "error", page{Title: http.StatusText(status), Data: message})
 }
 
+// renderServiceError shows the right error page for a service error
+func (ui *UI) renderServiceError(w http.ResponseWriter, r *http.Request, err error) {
+	if svcErr, ok := service.AsError(err); ok {
+		status := http.StatusBadRequest
+		switch svcErr.Kind {
+		case service.KindNotFound:
+			status = http.StatusNotFound
+		case service.KindConflict:
+			status = http.StatusConflict
+		}
+		ui.renderError(w, r, status, svcErr.Message)
+		return
+	}
+
+	log.Printf("web: %s %s: %v", r.Method, r.URL.Path, err)
+	ui.renderError(w, r, http.StatusInternalServerError, "Something went wrong on the server. Check the smithd logs for details.")
+}
+
+// redirect sends the browser to url after a form submission. htmx requests
+// get a full-page redirect so the address bar and history stay correct.
+func redirect(w http.ResponseWriter, r *http.Request, url string) {
+	if r.Header.Get("HX-Request") == "true" {
+		w.Header().Set("HX-Redirect", url)
+		w.WriteHeader(http.StatusOK)
+		return
+	}
+	http.Redirect(w, r, url, http.StatusSeeOther)
+}
+
 func (ui *UI) handleHome(w http.ResponseWriter, r *http.Request) {
-	ui.render(w, r, http.StatusOK, "home", page{Title: "Home"})
+	http.Redirect(w, r, Prefix+"/apps", http.StatusFound)
 }

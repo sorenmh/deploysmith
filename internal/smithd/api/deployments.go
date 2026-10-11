@@ -71,3 +71,13 @@ func (s *Server) handleGetDeployment(w http.ResponseWriter, r *http.Request) {
 
 	writeJSON(w, http.StatusOK, deployment)
 }
+
+func (s *Server) handleOverview(w http.ResponseWriter, r *http.Request) {
+	overview, err := s.svc.Overview()
+	if err != nil {
+		writeServiceError(w, err, "Failed to build overview")
+		return
+	}
+
+	writeJSON(w, http.StatusOK, overview)
+}

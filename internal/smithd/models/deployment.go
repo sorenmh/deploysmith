@@ -58,3 +58,25 @@ type DeployVersionResponse struct {
 	GitopsCommitSHA string    `json:"gitopsCommitSha,omitempty"`
 	StartedAt       time.Time `json:"startedAt"`
 }
+
+// Overview shows, for every app, what runs in each environment
+type Overview struct {
+	Environments []string      `json:"environments"`
+	Apps         []AppOverview `json:"apps"`
+}
+
+// AppOverview is one app's row in the Overview
+type AppOverview struct {
+	ID      string                 `json:"id"`
+	Name    string                 `json:"name"`
+	Targets map[string]TargetState `json:"targets"` // keyed by environment
+}
+
+// TargetState describes an app in one environment
+type TargetState struct {
+	// CurrentVersion is the version of the latest successful deployment
+	CurrentVersion string `json:"currentVersion,omitempty"`
+	// LastDeployment is the most recent deployment attempt, which may be
+	// pending or failed
+	LastDeployment *DeploymentDetail `json:"lastDeployment,omitempty"`
+}

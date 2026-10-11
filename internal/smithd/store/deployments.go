@@ -229,6 +229,44 @@ func (s *DeploymentStore) GetDetailed(id string) (*models.DeploymentDetail, erro
 	return &detail, nil
 }
 
+// LatestPerTarget returns the most recent deployment of every app to every
+// environment it was deployed to
+func (s *DeploymentStore) LatestPerTarget() ([]models.DeploymentDetail, error) {
+	return s.queryDetails(deploymentDetailSelect + `
+		WHERE d.started_at = (
+			SELECT MAX(d2.started_at) FROM deployments d2
+			WHERE d2.app_id = d.app_id AND d2.environment = d.environment
+		)`)
+}
+
+// LatestSuccessPerTarget returns the most recent successful deployment of
+// every app to every environment, i.e. what is currently running there
+func (s *DeploymentStore) LatestSuccessPerTarget() ([]models.DeploymentDetail, error) {
+	return s.queryDetails(deploymentDetailSelect + `
+		WHERE d.status = 'success' AND d.completed_at = (
+			SELECT MAX(d2.completed_at) FROM deployments d2
+			WHERE d2.app_id = d.app_id AND d2.environment = d.environment AND d2.status = 'success'
+		)`)
+}
+
+func (s *DeploymentStore) queryDetails(query string, args ...any) ([]models.DeploymentDetail, error) {
+	rows, err := s.db.Query(query, args...)
+	if err != nil {
+		return nil, fmt.Errorf("failed to query deployments: %w", err)
+	}
+	defer rows.Close()
+
+	deployments := []models.DeploymentDetail{}
+	for rows.Next() {
+		detail, err := scanDeploymentDetail(rows)
+		if err != nil {
+			return nil, fmt.Errorf("failed to scan deployment: %w", err)
+		}
+		deployments = append(deployments, detail)
+	}
+	return deployments, rows.Err()
+}
+
 // ListStalePending returns deployments that are still pending but were
 // started before cutoff, i.e. deployments whose worker most likely died
 func (s *DeploymentStore) ListStalePending(cutoff time.Time) ([]models.Deployment, error) {
