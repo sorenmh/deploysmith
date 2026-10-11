@@ -1,7 +1,6 @@
 package api
 
 import (
-	"log"
 	"net/http"
 	"strconv"
 
@@ -33,17 +32,9 @@ func (s *Server) handleListDeployments(w http.ResponseWriter, r *http.Request) {
 		Environment: query.Get("environment"),
 		Status:      query.Get("status"),
 	}
-	switch filter.Status {
-	case "", "pending", "success", "failed":
-	default:
-		writeError(w, http.StatusBadRequest, "invalid_request", "status must be one of: pending, success, failed")
-		return
-	}
-
-	deployments, total, err := s.deploymentStore.ListDetailed(filter, limit, offset)
+	deployments, total, err := s.svc.ListDeployments(filter, limit, offset)
 	if err != nil {
-		log.Printf("Failed to list deployments: %v", err)
-		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to list deployments")
+		writeServiceError(w, err, "Failed to list deployments")
 		return
 	}
 
@@ -58,14 +49,9 @@ func (s *Server) handleListDeployments(w http.ResponseWriter, r *http.Request) {
 func (s *Server) handleGetDeployment(w http.ResponseWriter, r *http.Request) {
 	deploymentID := chi.URLParam(r, "deploymentId")
 
-	deployment, err := s.deploymentStore.GetDetailed(deploymentID)
+	deployment, err := s.svc.GetDeployment(deploymentID)
 	if err != nil {
-		if err.Error() == "deployment not found" {
-			writeError(w, http.StatusNotFound, "not_found", "Deployment not found")
-			return
-		}
-		log.Printf("Failed to get deployment: %v", err)
-		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to get deployment")
+		writeServiceError(w, err, "Failed to get deployment")
 		return
 	}
 

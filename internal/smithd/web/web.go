@@ -75,6 +75,8 @@ func New(svc *service.Service, auth AuthConfig) (http.Handler, error) {
 		r.Get("/apps", ui.handleApps)
 		r.Get("/apps/{appId}", ui.handleApp)
 		r.Post("/apps/{appId}/versions/{versionId}/deploy", ui.handleDeploy)
+		r.Get("/deployments", ui.handleDeployments)
+		r.Get("/deployments/{deploymentId}", ui.handleDeployment)
 	})
 
 	return r, nil

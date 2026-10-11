@@ -1,0 +1,28 @@
+{{define "content"}}
+{{template "deployment-detail" .Data}}
+{{end}}
+
+{{/* deployment-detail is also served on its own for live refreshes while
+     the deployment is pending */}}
+{{define "deployment-detail"}}
+<div id="deployment"{{if eq .Status "pending"}} hx-get="/ui/deployments/{{.ID}}?partial=1" hx-trigger="every 3s" hx-swap="outerHTML"{{end}}>
+  <h1 class="page-title">{{.AppName}} <span class="id title-id">{{.VersionID}}</span> to {{.Environment}}</h1>
+  <p class="detail-status">{{template "status" .}}</p>
+
+  {{if .ErrorMessage}}
+  <div class="error" role="alert">
+    <p>{{.ErrorMessage}}</p>
+  </div>
+  {{end}}
+
+  <dl class="facts">
+    <div><dt>App</dt><dd><a href="/ui/apps/{{.AppID}}">{{.AppName}}</a></dd></div>
+    <div><dt>Version</dt><dd><span class="id">{{.VersionID}}</span></dd></div>
+    <div><dt>Environment</dt><dd>{{.Environment}}</dd></div>
+    <div><dt>Triggered by</dt><dd>{{template "trigger" .}}</dd></div>
+    <div><dt>Started</dt><dd>{{template "time" .StartedAt}}</dd></div>
+    {{with .CompletedAt}}<div><dt>Finished</dt><dd>{{template "time" .}}</dd></div>{{end}}
+    {{with .GitopsCommitSHA}}<div><dt>Gitops commit</dt><dd><span class="id" title="{{.}}">{{shortSHA .}}</span></dd></div>{{end}}
+  </dl>
+</div>
+{{end}}

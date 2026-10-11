@@ -114,10 +114,10 @@
     <tbody>
       {{range .Detail.RecentDeployments}}
       <tr>
-        <td>{{template "status" .}}</td>
+        <td><a class="status-link" href="/ui/deployments/{{.ID}}">{{template "status" .}}</a></td>
         <td><span class="id">{{.VersionID}}</span></td>
         <td>{{.Environment}}</td>
-        <td>{{if .PolicyName}}Policy {{.PolicyName}}{{else if .TriggeredBy}}{{.TriggeredBy}}{{else}}<span class="muted">Unknown</span>{{end}}</td>
+        <td>{{template "trigger" .}}</td>
         <td>{{template "time" .StartedAt}}</td>
       </tr>
       {{end}}
@@ -127,6 +127,7 @@
   {{else}}
   <p class="muted">This app has not been deployed yet.</p>
   {{end}}
+  {{if .Detail.RecentDeployments}}<p><a href="/ui/deployments?app={{.Detail.App.ID}}">All deployments of {{.Detail.App.Name}}</a></p>{{end}}
 </section>
 
 <section class="section" aria-labelledby="policies">

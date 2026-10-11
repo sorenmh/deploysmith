@@ -1,0 +1,76 @@
+{{define "content"}}
+<h1 class="page-title">Deployments</h1>
+{{with .Data}}
+<form class="filters" method="get" action="/ui/deployments">
+  <label>App
+    <select name="app">
+      <option value="">All apps</option>
+      {{range .Apps}}<option value="{{.ID}}"{{if eq .ID $.Data.Filter.AppID}} selected{{end}}>{{.Name}}</option>{{end}}
+    </select>
+  </label>
+  <label>Environment
+    <select name="environment">
+      <option value="">All environments</option>
+      {{range .Environments}}<option value="{{.Name}}"{{if eq .Name $.Data.Filter.Environment}} selected{{end}}>{{.Name}}</option>{{end}}
+    </select>
+  </label>
+  <label>Status
+    <select name="status">
+      <option value="">Any status</option>
+      <option value="pending"{{if eq .Filter.Status "pending"}} selected{{end}}>Deploying</option>
+      <option value="success"{{if eq .Filter.Status "success"}} selected{{end}}>Deployed</option>
+      <option value="failed"{{if eq .Filter.Status "failed"}} selected{{end}}>Failed</option>
+    </select>
+  </label>
+  <button type="submit" class="button button--quiet">Filter</button>
+</form>
+{{template "deployments-table" .}}
+{{end}}
+{{end}}
+
+{{/* deployments-table is also served on its own for live refreshes; it
+     keeps polling only while a listed deployment is still pending */}}
+{{define "deployments-table"}}
+<div id="deployments"{{if .AnyPending}} hx-get="{{.RefreshURL}}" hx-trigger="every 3s" hx-swap="outerHTML"{{end}}>
+  {{if .Deployments}}
+  <div class="table-scroll">
+  <table class="table">
+    <thead>
+      <tr>
+        <th scope="col">Status</th>
+        <th scope="col">App</th>
+        <th scope="col">Version</th>
+        <th scope="col">Environment</th>
+        <th scope="col">Triggered by</th>
+        <th scope="col">Started</th>
+      </tr>
+    </thead>
+    <tbody>
+      {{range .Deployments}}
+      <tr>
+        <td><a class="status-link" href="/ui/deployments/{{.ID}}">{{template "status" .}}</a></td>
+        <td><a href="/ui/apps/{{.AppID}}">{{.AppName}}</a></td>
+        <td><span class="id">{{.VersionID}}</span></td>
+        <td>{{.Environment}}</td>
+        <td>{{template "trigger" .}}</td>
+        <td>{{template "time" .StartedAt}}</td>
+      </tr>
+      {{end}}
+    </tbody>
+  </table>
+  </div>
+  {{if or .PrevPage .NextPage}}
+  <nav class="pager" aria-label="Deployment pages">
+    {{with .PrevPage}}<a href="{{.}}">Newer deployments</a>{{end}}
+    {{with .NextPage}}<a href="{{.}}">Older deployments</a>{{end}}
+  </nav>
+  {{end}}
+  {{else}}
+  <div class="empty">
+    {{if .Filtered}}<p>No deployments match these filters.</p>
+    {{else}}<p>No deployments yet.</p>
+    <p class="muted">Deploy a version from its app page, or set up an auto-deploy policy.</p>{{end}}
+  </div>
+  {{end}}
+</div>
+{{end}}

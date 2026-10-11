@@ -142,3 +142,28 @@ func (s *Service) GetDeployment(deploymentID string) (*models.DeploymentDetail, 
 	}
 	return deployment, nil
 }
+
+// ListDeployments lists deployments, newest first
+func (s *Service) ListDeployments(filter store.DeploymentFilter, limit, offset int) ([]models.DeploymentDetail, int, error) {
+	switch filter.Status {
+	case "", "pending", "success", "failed":
+	default:
+		return nil, 0, invalid("invalid_request", "status must be one of: pending, success, failed")
+	}
+	return s.Deployments.ListDetailed(filter, limit, offset)
+}
+
+// ListApps lists all apps by name
+func (s *Service) ListApps() ([]models.Application, error) {
+	apps, _, err := s.Apps.List(maxApps, 0)
+	if err != nil {
+		return nil, err
+	}
+	sort.Slice(apps, func(i, j int) bool { return apps[i].Name < apps[j].Name })
+	return apps, nil
+}
+
+// ListEnvironments lists all environments by name
+func (s *Service) ListEnvironments() ([]*models.Environment, error) {
+	return s.Environments.List()
+}
