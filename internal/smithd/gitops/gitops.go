@@ -15,6 +15,7 @@ import (
 	"github.com/go-git/go-git/v5/plumbing/object"
 	"github.com/go-git/go-git/v5/plumbing/transport/ssh"
 	cryptossh "golang.org/x/crypto/ssh"
+	"gopkg.in/yaml.v3"
 )
 
 // Service handles gitops repository operations
@@ -146,7 +147,101 @@ func (s *Service) WriteManifests(appName, environment, versionID string, manifes
 		return fmt.Errorf("failed to add files to git: %w", err)
 	}
 
+	// Make sure the app is referenced from the environment's apps kustomization
+	appsDir := filepath.Join(s.workDir, "environments", environment, "apps")
+	kustomizationFile, changed, err := ensureKustomizationResource(appsDir, appName)
+	if err != nil {
+		return fmt.Errorf("failed to update apps kustomization: %w", err)
+	}
+	if changed {
+		relativeKustomization := filepath.Join("environments", environment, "apps", kustomizationFile)
+		if _, err := worktree.Add(relativeKustomization); err != nil {
+			return fmt.Errorf("failed to add %s to git: %w", relativeKustomization, err)
+		}
+	}
+
 	return nil
+}
+
+// ensureKustomizationResource makes sure the kustomization file in dir lists
+// resource. If no kustomization file exists, one is created. It returns the
+// kustomization filename and whether the file was modified.
+func ensureKustomizationResource(dir, resource string) (string, bool, error) {
+	filename := "kustomization.yaml"
+	for _, candidate := range []string{"kustomization.yaml", "kustomization.yml", "Kustomization"} {
+		if _, err := os.Stat(filepath.Join(dir, candidate)); err == nil {
+			filename = candidate
+			break
+		}
+	}
+	path := filepath.Join(dir, filename)
+
+	data, err := os.ReadFile(path)
+	if os.IsNotExist(err) {
+		content := fmt.Sprintf("apiVersion: kustomize.config.k8s.io/v1beta1\nkind: Kustomization\nresources:\n  - %s\n", resource)
+		if err := os.WriteFile(path, []byte(content), 0644); err != nil {
+			return "", false, err
+		}
+		return filename, true, nil
+	}
+	if err != nil {
+		return "", false, err
+	}
+
+	// Work on the node tree so comments and ordering are preserved
+	var doc yaml.Node
+	if err := yaml.Unmarshal(data, &doc); err != nil {
+		return "", false, fmt.Errorf("failed to parse %s: %w", filename, err)
+	}
+	if len(doc.Content) == 0 {
+		doc = yaml.Node{Kind: yaml.DocumentNode, Content: []*yaml.Node{{Kind: yaml.MappingNode, Tag: "!!map"}}}
+	}
+	root := doc.Content[0]
+	if root.Kind != yaml.MappingNode {
+		return "", false, fmt.Errorf("%s is not a YAML mapping", filename)
+	}
+
+	var resources *yaml.Node
+	for i := 0; i+1 < len(root.Content); i += 2 {
+		if root.Content[i].Value == "resources" {
+			resources = root.Content[i+1]
+			break
+		}
+	}
+	if resources == nil || resources.Tag == "!!null" {
+		if resources == nil {
+			resources = &yaml.Node{}
+			root.Content = append(root.Content, &yaml.Node{Kind: yaml.ScalarNode, Tag: "!!str", Value: "resources"}, resources)
+		}
+		resources.Kind = yaml.SequenceNode
+		resources.Tag = "!!seq"
+		resources.Value = ""
+	}
+	if resources.Kind != yaml.SequenceNode {
+		return "", false, fmt.Errorf("resources in %s is not a list", filename)
+	}
+
+	for _, item := range resources.Content {
+		if filepath.Clean(item.Value) == filepath.Clean(resource) {
+			return filename, false, nil
+		}
+	}
+	resources.Style &^= yaml.FlowStyle
+	resources.Content = append(resources.Content, &yaml.Node{Kind: yaml.ScalarNode, Tag: "!!str", Value: resource})
+
+	var buf bytes.Buffer
+	enc := yaml.NewEncoder(&buf)
+	enc.SetIndent(2)
+	if err := enc.Encode(&doc); err != nil {
+		return "", false, err
+	}
+	if err := enc.Close(); err != nil {
+		return "", false, err
+	}
+	if err := os.WriteFile(path, buf.Bytes(), 0644); err != nil {
+		return "", false, err
+	}
+	return filename, true, nil
 }
 
 // Commit commits the changes and returns the commit SHA
