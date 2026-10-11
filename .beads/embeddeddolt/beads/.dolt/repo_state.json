@@ -4,7 +4,7 @@
   "backups": {
     "backup_export": {
       "name": "backup_export",
-      "url": "file:///Users/sor/projects/personal/deploysmith/.beads/backup",
+      "url": "file:///home/smh/projects/personal/deploysmith/.beads/backup",
       "fetch_specs": [
         "refs/heads/*:refs/remotes/backup_export/*"
       ],
