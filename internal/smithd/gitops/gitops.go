@@ -53,6 +53,12 @@ func NewService(repoURL, sshKeyPath string) *Service {
 	}
 }
 
+// isSafePathSegment reports whether name can be used as a single directory
+// name without escaping its parent
+func isSafePathSegment(name string) bool {
+	return name != "" && name != "." && name != ".." && !strings.ContainsAny(name, `/\`)
+}
+
 // appsPath returns the repo-relative directory holding an environment's apps
 // kustomization: environments/{environment}/apps
 func appsPath(environment string) string {
@@ -72,6 +78,12 @@ func appPath(environment, appName string) string {
 // When a push is rejected (e.g. because the remote moved), the working copy
 // is reset to the new remote state and the change is re-applied.
 func (s *Service) Deploy(appName, environment, message string, manifests map[string][]byte) (string, error) {
+	for _, segment := range []string{appName, environment} {
+		if !isSafePathSegment(segment) {
+			return "", fmt.Errorf("invalid app or environment name %q", segment)
+		}
+	}
+
 	files, err := s.processManifests(manifests)
 	if err != nil {
 		return "", err
@@ -216,6 +228,10 @@ func (s *Service) writeManifests(appName, environment string, files map[string][
 
 	for filename, content := range files {
 		filePath := filepath.Join(appDir, filename)
+		// Reject entries such as "../x.yaml" that would escape the app directory
+		if rel, err := filepath.Rel(appDir, filePath); err != nil || rel == "." || strings.HasPrefix(rel, "..") {
+			return fmt.Errorf("invalid manifest path %q", filename)
+		}
 		if err := os.MkdirAll(filepath.Dir(filePath), 0755); err != nil {
 			return fmt.Errorf("failed to create directory for %s: %w", filename, err)
 		}

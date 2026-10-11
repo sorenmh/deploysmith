@@ -4,7 +4,6 @@ import (
 	"archive/tar"
 	"compress/gzip"
 	"context"
-	"database/sql"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -200,19 +199,9 @@ func (s *Server) handleRegisterApp(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if req.Name == "" {
-		writeError(w, http.StatusBadRequest, "invalid_request", "Application name is required")
-		return
-	}
-
-	app, err := s.appStore.Create(req.Name)
+	app, err := s.svc.RegisterApp(req.Name)
 	if err != nil {
-		if err.Error() == fmt.Sprintf("application with name '%s' already exists", req.Name) {
-			writeError(w, http.StatusConflict, "conflict", err.Error())
-			return
-		}
-		log.Printf("Failed to create application: %v", err)
-		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to create application")
+		writeServiceError(w, err, "Failed to create application")
 		return
 	}
 
@@ -740,28 +729,9 @@ func (s *Server) handleCreateEnvironment(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
-	if req.Name == "" {
-		writeError(w, http.StatusBadRequest, "invalid_request", "Environment name is required")
-		return
-	}
-
-	// Check if environment already exists
-	exists, err := s.environmentStore.Exists(req.Name)
+	env, err := s.svc.CreateEnvironment(req)
 	if err != nil {
-		log.Printf("Failed to check if environment exists: %v", err)
-		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to check environment")
-		return
-	}
-
-	if exists {
-		writeError(w, http.StatusConflict, "environment_exists", "Environment already exists")
-		return
-	}
-
-	env, err := s.environmentStore.Create(req)
-	if err != nil {
-		log.Printf("Failed to create environment: %v", err)
-		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to create environment")
+		writeServiceError(w, err, "Failed to create environment")
 		return
 	}
 
@@ -770,33 +740,22 @@ func (s *Server) handleCreateEnvironment(w http.ResponseWriter, r *http.Request)
 
 // handleListEnvironments lists all environments
 func (s *Server) handleListEnvironments(w http.ResponseWriter, r *http.Request) {
-	environments, err := s.environmentStore.List()
+	environments, err := s.svc.ListEnvironments()
 	if err != nil {
-		log.Printf("Failed to list environments: %v", err)
-		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to list environments")
+		writeServiceError(w, err, "Failed to list environments")
 		return
 	}
 
-	response := map[string]interface{}{
+	writeJSON(w, http.StatusOK, map[string]interface{}{
 		"environments": environments,
-	}
-
-	writeJSON(w, http.StatusOK, response)
+	})
 }
 
 // handleGetEnvironment gets an environment by ID
 func (s *Server) handleGetEnvironment(w http.ResponseWriter, r *http.Request) {
-	environmentID := chi.URLParam(r, "environmentId")
-
-	env, err := s.environmentStore.GetByID(environmentID)
+	env, err := s.svc.GetEnvironment(chi.URLParam(r, "environmentId"))
 	if err != nil {
-		log.Printf("Failed to get environment: %v", err)
-		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to get environment")
-		return
-	}
-
-	if env == nil {
-		writeError(w, http.StatusNotFound, "environment_not_found", "Environment not found")
+		writeServiceError(w, err, "Failed to get environment")
 		return
 	}
 
@@ -805,22 +764,15 @@ func (s *Server) handleGetEnvironment(w http.ResponseWriter, r *http.Request) {
 
 // handleUpdateEnvironment updates an environment
 func (s *Server) handleUpdateEnvironment(w http.ResponseWriter, r *http.Request) {
-	environmentID := chi.URLParam(r, "environmentId")
-
 	var req models.UpdateEnvironmentRequest
 	if err := decodeJSON(r, &req); err != nil {
 		writeError(w, http.StatusBadRequest, "invalid_request", "Invalid request body")
 		return
 	}
 
-	env, err := s.environmentStore.Update(environmentID, req)
-	if err == sql.ErrNoRows {
-		writeError(w, http.StatusNotFound, "environment_not_found", "Environment not found")
-		return
-	}
+	env, err := s.svc.UpdateEnvironment(chi.URLParam(r, "environmentId"), req)
 	if err != nil {
-		log.Printf("Failed to update environment: %v", err)
-		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to update environment")
+		writeServiceError(w, err, "Failed to update environment")
 		return
 	}
 
@@ -829,16 +781,8 @@ func (s *Server) handleUpdateEnvironment(w http.ResponseWriter, r *http.Request)
 
 // handleDeleteEnvironment deletes an environment
 func (s *Server) handleDeleteEnvironment(w http.ResponseWriter, r *http.Request) {
-	environmentID := chi.URLParam(r, "environmentId")
-
-	err := s.environmentStore.Delete(environmentID)
-	if err == sql.ErrNoRows {
-		writeError(w, http.StatusNotFound, "environment_not_found", "Environment not found")
-		return
-	}
-	if err != nil {
-		log.Printf("Failed to delete environment: %v", err)
-		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to delete environment")
+	if err := s.svc.DeleteEnvironment(chi.URLParam(r, "environmentId")); err != nil {
+		writeServiceError(w, err, "Failed to delete environment")
 		return
 	}
 

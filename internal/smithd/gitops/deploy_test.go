@@ -251,3 +251,27 @@ func TestConcurrentDeploys(t *testing.T) {
 		}
 	}
 }
+
+func TestDeployRejectsPathEscapes(t *testing.T) {
+	remote := newTestRemote(t)
+	s := newTestService(t, remote)
+
+	for _, tt := range []struct{ app, env string }{
+		{"..", "production"},
+		{"a/b", "production"},
+		{"hello", "../../etc"},
+		{"hello", ""},
+	} {
+		if _, err := s.Deploy(tt.app, tt.env, "deploy", manifest("x")); err == nil {
+			t.Errorf("Deploy(%q, %q) succeeded, want error", tt.app, tt.env)
+		}
+	}
+
+	escaping := map[string][]byte{"../../outside.yaml": []byte("x: 1")}
+	if _, err := s.Deploy("hello", "production", "deploy", escaping); err == nil {
+		t.Error("manifest path escaping the app directory was accepted")
+	}
+	if readRemote(t, remote, "outside.yaml") != "" || readRemote(t, remote, "environments/outside.yaml") != "" {
+		t.Error("file outside the app directory reached the remote")
+	}
+}
