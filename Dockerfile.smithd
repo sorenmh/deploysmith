@@ -13,6 +13,7 @@ RUN go mod download
 # Copy source code
 COPY cmd/smithd ./cmd/smithd
 COPY internal/smithd ./internal/smithd
+COPY internal/shared ./internal/shared
 
 # Build binary
 RUN CGO_ENABLED=1 go build -o smithd \
