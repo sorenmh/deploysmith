@@ -305,6 +305,22 @@ func (s *DeploymentStore) ListStalePending(cutoff time.Time) ([]models.Deploymen
 	return deployments, nil
 }
 
+// HasNewer reports whether the app was deployed to the same environment
+// after the given deployment started, regardless of the outcome
+func (s *DeploymentStore) HasNewer(deployment *models.Deployment) (bool, error) {
+	var exists bool
+	err := s.db.QueryRow(`
+		SELECT EXISTS (
+			SELECT 1 FROM deployments
+			WHERE app_id = ? AND environment = ? AND id != ? AND started_at > ?
+		)
+	`, deployment.AppID, deployment.Environment, deployment.ID, deployment.StartedAt.UTC()).Scan(&exists)
+	if err != nil {
+		return false, fmt.Errorf("failed to check for newer deployments: %w", err)
+	}
+	return exists, nil
+}
+
 // ClaimStale atomically takes over a stale pending deployment by resetting
 // its start time. It returns false if the deployment is no longer pending or
 // another instance claimed it first.
@@ -316,6 +332,27 @@ func (s *DeploymentStore) ClaimStale(id string, cutoff time.Time) (bool, error) 
 	`, time.Now().UTC(), id, cutoff.UTC())
 	if err != nil {
 		return false, fmt.Errorf("failed to claim deployment: %w", err)
+	}
+
+	rows, err := result.RowsAffected()
+	if err != nil {
+		return false, fmt.Errorf("failed to check rows affected: %w", err)
+	}
+
+	return rows == 1, nil
+}
+
+// FailStale marks a stale pending deployment as failed, leaving its start
+// time alone so it still orders correctly against later deployments. It
+// returns false if the deployment is no longer pending or no longer stale.
+func (s *DeploymentStore) FailStale(id string, cutoff time.Time, errorMsg string) (bool, error) {
+	result, err := s.db.Exec(`
+		UPDATE deployments
+		SET status = 'failed', error_message = ?, completed_at = ?
+		WHERE id = ? AND status = 'pending' AND started_at < ?
+	`, errorMsg, time.Now().UTC(), id, cutoff.UTC())
+	if err != nil {
+		return false, fmt.Errorf("failed to fail deployment: %w", err)
 	}
 
 	rows, err := result.RowsAffected()

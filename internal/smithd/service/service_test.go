@@ -48,6 +48,7 @@ func (f *fakeGitops) Calls() []gitopsCall {
 }
 
 type fixture struct {
+	db      *db.DB
 	svc     *Service
 	gitops  *fakeGitops
 	storage *fakeStorage
@@ -63,7 +64,7 @@ func newFixture(t *testing.T) *fixture {
 	}
 	t.Cleanup(func() { database.Close() })
 
-	f := &fixture{gitops: &fakeGitops{}, storage: &fakeStorage{}}
+	f := &fixture{db: database, gitops: &fakeGitops{}, storage: &fakeStorage{}}
 	f.svc = New(Deps{
 		Apps:         store.NewApplicationStore(database),
 		Versions:     store.NewVersionStore(database),
