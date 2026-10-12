@@ -186,7 +186,9 @@ its channel as each deployment progresses:
 The last message needs `FLUX_KUSTOMIZATION_NAME`, the Flux Kustomization
 that applies `environments/<env>/apps`, and read access to it (the Helm
 chart's RBAC). With `UI_PUBLIC_URL`, messages link to the deployment in the
-web UI. Note that Flux reports a Kustomization as applied without waiting for
+web UI. For the Slack app's icon, use
+[docs/brand/deploysmith-slack-icon.png](docs/brand/deploysmith-slack-icon.png).
+Note that Flux reports a Kustomization as applied without waiting for
 the workloads to become healthy unless the Kustomization sets `wait: true`.
 
 ### Running

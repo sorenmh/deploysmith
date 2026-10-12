@@ -111,6 +111,31 @@ a {
   text-decoration: none;
 }
 
+/* The logo: an anvil with a glowing ingot, in the same ember as pending
+   deployments */
+.wordmark__mark {
+  width: 1.75em;
+  height: 1.75em;
+  margin-right: var(--space-1);
+  /* Sit on the text baseline, so the nav still lines up with the name */
+  vertical-align: -0.4em;
+}
+
+.wordmark__anvil {
+  fill: currentColor;
+}
+
+.wordmark__ingot {
+  fill: var(--ember);
+}
+
+.wordmark__sparks {
+  fill: none;
+  stroke: var(--ember);
+  stroke-width: 3;
+  stroke-linecap: round;
+}
+
 .nav {
   display: flex;
   gap: var(--space-4);

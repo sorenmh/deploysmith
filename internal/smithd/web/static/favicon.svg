@@ -1,0 +1,13 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
+  <title>deploysmith</title>
+  <rect width="64" height="64" rx="14" fill="#1d252c"/>
+  <g transform="translate(6.96 7.9) scale(0.76)">
+    <path fill="#e6eaee" d="M4 27 H44 Q54 27 62 31.5 Q54 36 45 36 Q41 37 40.5 42 V47 L48 52 V59 H16 V52 L23.5 47 V42 Q23 37 17 36 H9 Q4 36 4 31.5 Z"/>
+    <rect x="12" y="19" width="24" height="6.5" rx="2.2" fill="#ff7a3d"/>
+    <g stroke="#ff7a3d" stroke-width="3" stroke-linecap="round" fill="none">
+      <path d="M25 14 L22 6"/>
+      <path d="M29.5 14.5 L34 7.5"/>
+      <path d="M33 16.5 L40.5 13"/>
+    </g>
+  </g>
+</svg>
