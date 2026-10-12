@@ -62,10 +62,16 @@ func New(svc *service.Service, auth AuthConfig) (http.Handler, error) {
 
 	r := chi.NewRouter()
 
-	// Static assets are public and cache-busted via asset(), so they can
-	// be cached for a long time
+	// Static assets are public (home screen icons and the manifest are
+	// fetched without cookies). URLs from asset() are cache-busted, so they
+	// can be cached for a long time; the manifest refers to its icons by
+	// plain URL, so those must be revalidated.
 	r.Handle("/static/*", http.StripPrefix(Prefix+"/static/", http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
-		w.Header().Set("Cache-Control", "public, max-age=31536000, immutable")
+		if req.URL.Query().Has("v") {
+			w.Header().Set("Cache-Control", "public, max-age=31536000, immutable")
+		} else {
+			w.Header().Set("Cache-Control", "public, max-age=3600")
+		}
 		http.FileServerFS(static).ServeHTTP(w, req)
 	})))
 

@@ -116,6 +116,9 @@ spec:
         - --cookie-secure=true
         - --skip-provider-button=true
         - --email-domain=*
+        # Static assets hold nothing private, and iOS fetches home screen
+        # icons and the web manifest without the session cookie
+        - --skip-auth-route=GET=^/ui/static/
         {{- with .githubUsers }}
         - --github-user={{ . }}
         {{- end }}

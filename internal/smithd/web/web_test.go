@@ -121,8 +121,8 @@ func TestStaticAssets(t *testing.T) {
 
 	// Every asset referenced by the layout is served, without authentication
 	refs := regexp.MustCompile(`(?:href|src)="(/ui/static/[^"]+)"`).FindAllStringSubmatch(page, -1)
-	if len(refs) != 3 {
-		t.Fatalf("expected 3 static asset references (stylesheet, favicon, htmx), found %d", len(refs))
+	if len(refs) != 5 {
+		t.Fatalf("expected 5 static asset references (favicon, touch icon, manifest, stylesheet, htmx), found %d", len(refs))
 	}
 	for _, ref := range refs {
 		resp, body := get(t, srv, ref[1], "")
