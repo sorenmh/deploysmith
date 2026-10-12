@@ -41,6 +41,8 @@ func (f *fakeGitops) Deploy(appName, environment, message string, manifests map[
 	return "sha-123", nil
 }
 
+func (f *fakeGitops) Contains(revision, commit string) (bool, error) { return revision == commit, nil }
+
 func (f *fakeGitops) Calls() []gitopsCall {
 	f.mu.Lock()
 	defer f.mu.Unlock()

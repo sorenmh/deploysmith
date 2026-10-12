@@ -22,11 +22,13 @@ type ManifestStorage interface {
 // the resulting commit SHA
 type GitopsRepo interface {
 	Deploy(appName, environment, message string, manifests map[string][]byte) (string, error)
+	// Contains reports whether revision is commit or one of its descendants
+	Contains(revision, commit string) (bool, error)
 }
 
-// FluxPoller waits for a Flux Kustomization to become ready
+// FluxPoller waits for a Flux Kustomization to apply a commit
 type FluxPoller interface {
-	Poll(ctx context.Context, name string, maxWait, pollInterval time.Duration) flux.PollResult
+	WaitForCommit(ctx context.Context, name, commitSHA string, contains func(revision string) (bool, error), maxWait, pollInterval time.Duration) flux.PollResult
 }
 
 // Deps holds the dependencies of a Service. Optional integrations (Flux,
@@ -46,6 +48,10 @@ type Deps struct {
 	FluxPoller            FluxPoller
 	FluxKustomizationName string
 	Slack                 *slack.Notifier
+
+	// UIBaseURL is the web UI's public URL, used to link to deployments
+	// from notifications. Empty if there is none.
+	UIBaseURL string
 }
 
 // Service implements smithd's operations

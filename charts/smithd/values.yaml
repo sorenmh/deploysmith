@@ -217,8 +217,9 @@ config:
   flux:
     # Namespace where Flux Kustomization CRDs live
     namespace: flux-system
-    # Name of the Kustomization CR to poll for reconciliation status after deploy.
-    # Leave empty to disable Flux status polling.
+    # Name of the Flux Kustomization that applies the apps smithd deploys
+    # (environments/<env>/apps). After a deploy smithd waits for it to apply
+    # the commit and reports the outcome to Slack. Leave empty to disable.
     kustomizationName: ""
 
   # Web UI (optional), served at /ui
@@ -239,6 +240,9 @@ config:
     # UI through the main ingress without uiIngress, since anyone could then
     # forge the user header.
     protectedExternally: false
+    # Public URL of the UI, used to link to deployments from Slack messages.
+    # Defaults to https://<uiProxy.host> with uiProxy.
+    publicUrl: ""
 
 # Secrets configuration
 secrets:

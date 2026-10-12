@@ -52,6 +52,7 @@ func (s *Service) autoDeploy(ctx context.Context, app *models.Application, versi
 		logging.LogErrorCtx(ctx, "Auto-deploy failed to create deployment record: "+err.Error(), err)
 		return
 	}
+	s.Slack.Requested(ctx, s.slackDeploy(deployment, app, version, &policy))
 
 	// execute records and reports failures itself
 	_ = s.execute(ctx, deployment, app, version, &policy)

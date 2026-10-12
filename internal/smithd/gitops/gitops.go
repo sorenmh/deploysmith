@@ -129,6 +129,38 @@ func (s *Service) Deploy(appName, environment, message string, manifests map[str
 	return "", fmt.Errorf("gitops deploy failed after %d attempts: %w", s.pushAttempts, lastErr)
 }
 
+// Contains reports whether revision includes commit, i.e. is the commit or
+// one of its descendants. It fetches first if revision is not known yet.
+func (s *Service) Contains(revision, commit string) (bool, error) {
+	if revision == commit {
+		return true, nil
+	}
+
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	if s.repo == nil || !s.hasCommit(revision) {
+		if err := s.sync(); err != nil {
+			return false, fmt.Errorf("failed to sync gitops repo: %w", err)
+		}
+	}
+
+	descendant, err := s.repo.CommitObject(plumbing.NewHash(revision))
+	if err != nil {
+		return false, fmt.Errorf("failed to find commit %s: %w", revision, err)
+	}
+	ancestor, err := s.repo.CommitObject(plumbing.NewHash(commit))
+	if err != nil {
+		return false, fmt.Errorf("failed to find commit %s: %w", commit, err)
+	}
+	return ancestor.IsAncestor(descendant)
+}
+
+func (s *Service) hasCommit(sha string) bool {
+	_, err := s.repo.CommitObject(plumbing.NewHash(sha))
+	return err == nil
+}
+
 // sync makes the local working copy an exact copy of the remote branch,
 // cloning it if needed. Unpushed commits, staged changes and untracked files
 // from earlier attempts are discarded.

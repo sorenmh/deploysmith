@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -26,11 +27,12 @@ func TestNewNotifier_NonEmptyURL_ReturnsNotifier(t *testing.T) {
 func TestNilNotifier_NoOps(t *testing.T) {
 	var n *Notifier
 	ctx := context.Background()
+	d := Deploy{App: "app", Version: "1.0", Environment: "prod"}
 
-	assert.NotPanics(t, func() { n.DeployStarted(ctx, "app", "1.0", "prod", "policy") })
-	assert.NotPanics(t, func() { n.DeploySucceeded(ctx, "app", "1.0", "prod", "abc123") })
-	assert.NotPanics(t, func() { n.DeployFailed(ctx, "app", "1.0", "prod", "something went wrong") })
-	assert.NotPanics(t, func() { n.FluxError(ctx, "app", "prod", "infrastructure", "apply failed") })
+	assert.NotPanics(t, func() { n.Requested(ctx, d) })
+	assert.NotPanics(t, func() { n.Committed(ctx, d, true) })
+	assert.NotPanics(t, func() { n.Applied(ctx, d, time.Minute) })
+	assert.NotPanics(t, func() { n.Failed(ctx, d, "gitops", "something went wrong") })
 }
 
 // helper: spin up a test server, call fn, capture the posted message text.
@@ -52,48 +54,52 @@ func withTestServer(t *testing.T, fn func(n *Notifier)) string {
 	return captured
 }
 
-func TestDeployStarted_MessageContent(t *testing.T) {
+func TestRequested_MessageContent(t *testing.T) {
 	text := withTestServer(t, func(n *Notifier) {
-		n.DeployStarted(context.Background(), "myapp", "v1.2.3", "production", "auto-prod")
+		n.Requested(context.Background(), Deploy{App: "myapp", Version: "v1.2.3", Environment: "production", TriggeredBy: "sorenmh", URL: "https://ui.example.com/ui/deployments/1"})
 	})
-	assert.Contains(t, text, "Deploy started")
-	assert.Contains(t, text, "myapp")
-	assert.Contains(t, text, "v1.2.3")
-	assert.Contains(t, text, "production")
-	assert.Contains(t, text, "auto-prod")
+	assert.Contains(t, text, "Deployment requested")
+	assert.Contains(t, text, "`myapp` `v1.2.3` → `production`")
+	assert.Contains(t, text, "by sorenmh")
+	assert.Contains(t, text, "<https://ui.example.com/ui/deployments/1|View deployment>")
+
+	text = withTestServer(t, func(n *Notifier) {
+		n.Requested(context.Background(), Deploy{App: "myapp", Version: "v1.2.3", Environment: "production", TriggeredBy: "auto-deploy", Policy: "main-to-prod"})
+	})
+	assert.Contains(t, text, "by policy `main-to-prod`")
+	assert.NotContains(t, text, "View deployment")
 }
 
-func TestDeploySucceeded_MessageContent(t *testing.T) {
+func TestCommitted_MessageContent(t *testing.T) {
 	text := withTestServer(t, func(n *Notifier) {
-		n.DeploySucceeded(context.Background(), "myapp", "v1.2.3", "staging", "deadbeef")
+		n.Committed(context.Background(), Deploy{App: "myapp", Version: "v1.2.3", Environment: "staging", CommitSHA: "deadbeefcafe"}, true)
 	})
-	assert.Contains(t, text, "Deploy succeeded")
-	assert.Contains(t, text, "myapp")
-	assert.Contains(t, text, "v1.2.3")
-	assert.Contains(t, text, "staging")
-	assert.Contains(t, text, "deadbeef")
+	assert.Contains(t, text, "Committed to gitops")
+	assert.Contains(t, text, "`deadbee`")
+	assert.Contains(t, text, "Waiting for Flux")
+
+	text = withTestServer(t, func(n *Notifier) {
+		n.Committed(context.Background(), Deploy{App: "myapp", Version: "v1.2.3", Environment: "staging", CommitSHA: "deadbeefcafe"}, false)
+	})
+	assert.NotContains(t, text, "Waiting for Flux")
 }
 
-func TestDeployFailed_MessageContent(t *testing.T) {
+func TestApplied_MessageContent(t *testing.T) {
 	text := withTestServer(t, func(n *Notifier) {
-		n.DeployFailed(context.Background(), "myapp", "v1.2.3", "production", "git push rejected")
+		n.Applied(context.Background(), Deploy{App: "myapp", Version: "v1.2.3", Environment: "production"}, 72400*time.Millisecond)
 	})
-	assert.Contains(t, text, "Deploy failed")
-	assert.Contains(t, text, "myapp")
-	assert.Contains(t, text, "v1.2.3")
-	assert.Contains(t, text, "production")
-	assert.Contains(t, text, "git push rejected")
+	assert.Contains(t, text, "Deployed")
+	assert.Contains(t, text, "`myapp` `v1.2.3` → `production`")
+	assert.Contains(t, text, "1m12s")
 }
 
-func TestFluxError_MessageContent(t *testing.T) {
+func TestFailed_MessageContent(t *testing.T) {
 	text := withTestServer(t, func(n *Notifier) {
-		n.FluxError(context.Background(), "myapp", "production", "infrastructure", "health check failed")
+		n.Failed(context.Background(), Deploy{App: "myapp", Version: "v1.2.3", Environment: "production"}, "Flux", "Deployment/x <failed> & stuck")
 	})
-	assert.Contains(t, text, "Flux reconciliation error")
-	assert.Contains(t, text, "myapp")
-	assert.Contains(t, text, "production")
-	assert.Contains(t, text, "infrastructure")
-	assert.Contains(t, text, "health check failed")
+	assert.Contains(t, text, "Deployment failed")
+	assert.Contains(t, text, "(Flux)")
+	assert.Contains(t, text, "Deployment/x &lt;failed&gt; &amp; stuck")
 }
 
 func TestSend_Non2xxResponse_HandledGracefully(t *testing.T) {
@@ -105,6 +111,6 @@ func TestSend_Non2xxResponse_HandledGracefully(t *testing.T) {
 	n := NewNotifier(srv.URL)
 	// Should not panic even on a 500 response.
 	assert.NotPanics(t, func() {
-		n.DeployStarted(context.Background(), "app", "1.0", "prod", "policy")
+		n.Requested(context.Background(), Deploy{App: "app", Version: "1.0", Environment: "prod"})
 	})
 }

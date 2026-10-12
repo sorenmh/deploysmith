@@ -275,3 +275,56 @@ func TestDeployRejectsPathEscapes(t *testing.T) {
 		t.Error("file outside the app directory reached the remote")
 	}
 }
+
+// remoteHead returns the SHA the remote's HEAD points to
+func remoteHead(t *testing.T, remote string) string {
+	t.Helper()
+	repo, err := git.PlainClone(t.TempDir(), false, &git.CloneOptions{URL: remote})
+	if err != nil {
+		t.Fatal(err)
+	}
+	head, err := repo.Head()
+	if err != nil {
+		t.Fatal(err)
+	}
+	return head.Hash().String()
+}
+
+func TestContains(t *testing.T) {
+	remote := newTestRemote(t)
+	s := newTestService(t, remote)
+
+	ours, err := s.Deploy("hello", "production", "deploy hello", manifest("hello"))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Someone else pushes after us; smithd has not fetched that commit yet
+	pushFromOtherClone(t, remote, "other.yaml", "other")
+	later := remoteHead(t, remote)
+
+	tests := []struct {
+		name             string
+		revision, commit string
+		want             bool
+	}{
+		{"same commit", ours, ours, true},
+		{"later commit includes ours", later, ours, true},
+		{"earlier commit does not include a later one", ours, later, false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := s.Contains(tt.revision, tt.commit)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if got != tt.want {
+				t.Errorf("Contains = %v, want %v", got, tt.want)
+			}
+		})
+	}
+
+	if _, err := s.Contains("0123456789012345678901234567890123456789", ours); err == nil {
+		t.Error("expected an error for an unknown revision")
+	}
+}

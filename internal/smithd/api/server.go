@@ -84,6 +84,7 @@ func NewServer(cfg *config.Config, database *db.DB) *Server {
 		FluxReconciler:        flux.NewReconciler(cfg.FluxWebhookURL, cfg.FluxWebhookToken),
 		FluxKustomizationName: cfg.FluxKustomizationName,
 		Slack:                 slack.NewNotifier(cfg.SlackWebhookURL),
+		UIBaseURL:             cfg.UIPublicURL,
 	}
 	// Assign only when available, so the interface is nil rather than
 	// holding a nil pointer

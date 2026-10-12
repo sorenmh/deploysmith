@@ -3,11 +3,13 @@ package service
 import (
 	"context"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/sorenmh/deploysmith/internal/shared/logging"
 	"github.com/sorenmh/deploysmith/internal/smithd/events"
 	"github.com/sorenmh/deploysmith/internal/smithd/models"
+	"github.com/sorenmh/deploysmith/internal/smithd/slack"
 )
 
 // DeployVersion deploys a published version to an environment and waits
@@ -43,6 +45,7 @@ func (s *Service) DeployVersion(ctx context.Context, appID, versionID, environme
 	}
 
 	ctx = deployCtx(ctx, app.Name, version, environment, "")
+	s.Slack.Requested(ctx, s.slackDeploy(deployment, app, version, nil))
 	err = s.execute(ctx, deployment, app, version, nil)
 	return deployment, err
 }
@@ -54,11 +57,9 @@ func (s *Service) DeployVersion(ctx context.Context, appID, versionID, environme
 func (s *Service) execute(ctx context.Context, deployment *models.Deployment, app *models.Application, version *models.Version, policy *models.Policy) error {
 	environment := deployment.Environment
 
-	trigger := "manual"
 	policyName := ""
 	commitMsg := fmt.Sprintf("Deploy %s version %s to %s", app.Name, version.VersionID, environment)
 	if policy != nil {
-		trigger = policy.Name
 		policyName = policy.Name
 		commitMsg = fmt.Sprintf("Auto-deploy %s version %s to %s (policy: %s)", app.Name, version.VersionID, environment, policy.Name)
 	}
@@ -81,33 +82,35 @@ func (s *Service) execute(ctx context.Context, deployment *models.Deployment, ap
 		s.Publisher.Publish(e)
 	}
 
-	fail := func(err error) error {
+	notice := s.slackDeploy(deployment, app, version, policy)
+
+	fail := func(stage string, err error) error {
 		logging.LogErrorCtx(ctx, "Deployment failed: "+err.Error(), err)
 		if updateErr := s.Deployments.UpdateStatus(deployment.ID, "failed", "", err.Error()); updateErr != nil {
 			logging.LogErrorCtx(ctx, "Failed to record deployment failure: "+updateErr.Error(), updateErr)
 		}
 		deployment.Status = "failed"
 		deployment.ErrorMessage = err.Error()
-		s.Slack.DeployFailed(ctx, app.Name, version.VersionID, environment, err.Error())
+		s.Slack.Failed(ctx, notice, stage, err.Error())
 		publish(events.EventDeploymentFailed, func(e *events.Event) { e.Error = err.Error() })
 		return err
 	}
 
 	logging.LogInfoCtx(ctx, "Deployment started", logging.Field("deployment_id", deployment.ID))
-	s.Slack.DeployStarted(ctx, app.Name, version.VersionID, environment, trigger)
 	publish(events.EventDeploymentStarted, nil)
 
 	logging.LogDebugCtx(ctx, "Fetching manifests from storage")
 	manifests, err := s.Storage.GetAllFiles(app.Name, version.VersionID, true)
 	if err != nil {
-		return fail(fmt.Errorf("failed to fetch manifests: %w", err))
+		return fail("fetching manifests", fmt.Errorf("failed to fetch manifests: %w", err))
 	}
 
 	logging.LogDebugCtx(ctx, "Deploying to gitops repo")
 	commitSHA, err := s.Gitops.Deploy(app.Name, environment, commitMsg, manifests)
 	if err != nil {
-		return fail(err)
+		return fail("gitops", err)
 	}
+	committedAt := time.Now()
 
 	s.FluxReconciler.Trigger(ctx)
 
@@ -119,26 +122,57 @@ func (s *Service) execute(ctx context.Context, deployment *models.Deployment, ap
 	deployment.GitopsCommitSHA = commitSHA
 
 	publish(events.EventDeploymentSucceeded, func(e *events.Event) { e.CommitSHA = commitSHA })
-	s.Slack.DeploySucceeded(ctx, app.Name, version.VersionID, environment, commitSHA)
+	notice.CommitSHA = commitSHA
+	watchFlux := s.FluxPoller != nil && s.FluxKustomizationName != ""
+	s.Slack.Committed(ctx, notice, watchFlux)
 	logging.LogInfoCtx(ctx, "Deployment succeeded",
 		logging.Field("deployment_id", deployment.ID),
 		logging.Field("commit_sha", commitSHA),
 	)
 
 	// Watch Flux in the background so callers don't wait for reconciliation
-	if s.FluxPoller != nil && s.FluxKustomizationName != "" {
-		go s.watchFlux(context.WithoutCancel(ctx), app.Name, environment)
+	if watchFlux {
+		go s.watchFlux(context.WithoutCancel(ctx), notice, committedAt)
 	}
 
 	return nil
 }
 
-// watchFlux alerts if Flux fails to reconcile after a deployment
-func (s *Service) watchFlux(ctx context.Context, appName, environment string) {
-	result := s.FluxPoller.Poll(ctx, s.FluxKustomizationName, 2*time.Minute, 10*time.Second)
+const (
+	// fluxApplyTimeout is how long to wait for Flux to apply a deployment
+	fluxApplyTimeout = 10 * time.Minute
+	fluxPollInterval = 10 * time.Second
+)
+
+// watchFlux reports whether Flux applies a deployment's commit
+func (s *Service) watchFlux(ctx context.Context, notice slack.Deploy, committedAt time.Time) {
+	contains := func(revision string) (bool, error) { return s.Gitops.Contains(revision, notice.CommitSHA) }
+	result := s.FluxPoller.WaitForCommit(ctx, s.FluxKustomizationName, notice.CommitSHA, contains, fluxApplyTimeout, fluxPollInterval)
 	if !result.Ready {
-		s.Slack.FluxError(ctx, appName, environment, s.FluxKustomizationName, result.Message)
+		logging.LogWarnCtx(ctx, "Flux did not apply deployment: "+result.Message)
+		s.Slack.Failed(ctx, notice, "Flux", result.Message)
+		return
 	}
+	logging.LogInfoCtx(ctx, "Flux applied deployment", logging.Field("commit_sha", notice.CommitSHA))
+	s.Slack.Applied(ctx, notice, time.Since(committedAt))
+}
+
+// slackDeploy describes a deployment for notifications
+func (s *Service) slackDeploy(deployment *models.Deployment, app *models.Application, version *models.Version, policy *models.Policy) slack.Deploy {
+	notice := slack.Deploy{
+		App:         app.Name,
+		Version:     version.VersionID,
+		Environment: deployment.Environment,
+		TriggeredBy: deployment.TriggeredBy,
+		CommitSHA:   deployment.GitopsCommitSHA,
+	}
+	if policy != nil {
+		notice.Policy = policy.Name
+	}
+	if s.UIBaseURL != "" {
+		notice.URL = strings.TrimSuffix(s.UIBaseURL, "/") + "/ui/deployments/" + deployment.ID
+	}
+	return notice
 }
 
 // deployCtx adds a deployment's identifying fields to the log context

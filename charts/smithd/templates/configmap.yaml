@@ -29,6 +29,9 @@ data:
   {{- if .Values.uiProxy.enabled }}
   UI_LISTEN_ADDR: {{ printf "127.0.0.1:%v" .Values.uiProxy.uiPort | quote }}
   {{- end }}
+  {{- with (default (ternary (printf "https://%s" .Values.uiProxy.host) "" .Values.uiProxy.enabled) .Values.config.ui.publicUrl) }}
+  UI_PUBLIC_URL: {{ . | quote }}
+  {{- end }}
   {{- with .Values.config.ui }}
   {{- if .allowedUsers }}
   UI_ALLOWED_USERS: {{ .allowedUsers | quote }}

@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/sorenmh/deploysmith/internal/shared/logging"
@@ -21,6 +22,17 @@ func NewNotifier(webhookURL string) *Notifier {
 		return nil
 	}
 	return &Notifier{webhookURL: webhookURL}
+}
+
+// Deploy describes the deployment a message is about
+type Deploy struct {
+	App         string
+	Version     string
+	Environment string
+	TriggeredBy string // who requested it, for manual deployments
+	Policy      string // the auto-deploy policy, if any
+	CommitSHA   string
+	URL         string // link to the deployment in the web UI, if any
 }
 
 func (n *Notifier) send(ctx context.Context, text string) {
@@ -49,18 +61,57 @@ func (n *Notifier) send(ctx context.Context, text string) {
 	}
 }
 
-func (n *Notifier) DeployStarted(ctx context.Context, app, version, env, policy string) {
-	n.send(ctx, fmt.Sprintf(":rocket: *Deploy started* — `%s` version `%s` → `%s` (policy: %s)", app, version, env, policy))
+// Requested reports a deployment that was just requested
+func (n *Notifier) Requested(ctx context.Context, d Deploy) {
+	by := ""
+	switch {
+	case d.Policy != "":
+		by = fmt.Sprintf(" by policy `%s`", escape(d.Policy))
+	case d.TriggeredBy != "":
+		by = " by " + escape(d.TriggeredBy)
+	}
+	n.send(ctx, fmt.Sprintf(":inbox_tray: *Deployment requested*: %s%s%s", target(d), by, link(d)))
 }
 
-func (n *Notifier) DeploySucceeded(ctx context.Context, app, version, env, commitSHA string) {
-	n.send(ctx, fmt.Sprintf(":white_check_mark: *Deploy succeeded* — `%s` version `%s` → `%s` (commit: `%s`)", app, version, env, commitSHA))
+// Committed reports a deployment whose manifests are pushed to the gitops
+// repository. waitingForFlux says whether a final message will follow.
+func (n *Notifier) Committed(ctx context.Context, d Deploy, waitingForFlux bool) {
+	next := ""
+	if waitingForFlux {
+		next = " Waiting for Flux to apply it."
+	}
+	n.send(ctx, fmt.Sprintf(":package: *Committed to gitops*: %s (commit `%s`).%s%s", target(d), shortSHA(d.CommitSHA), next, link(d)))
 }
 
-func (n *Notifier) DeployFailed(ctx context.Context, app, version, env, errMsg string) {
-	n.send(ctx, fmt.Sprintf(":x: *Deploy failed* — `%s` version `%s` → `%s`\nError: %s", app, version, env, errMsg))
+// Applied reports a deployment Flux has applied to the cluster
+func (n *Notifier) Applied(ctx context.Context, d Deploy, took time.Duration) {
+	n.send(ctx, fmt.Sprintf(":white_check_mark: *Deployed*: %s, applied by Flux in %s%s", target(d), took.Round(time.Second), link(d)))
 }
 
-func (n *Notifier) FluxError(ctx context.Context, app, env, kustomizationName, errMsg string) {
-	n.send(ctx, fmt.Sprintf(":warning: *Flux reconciliation error* — `%s` in `%s` (kustomization: `%s`)\nError: %s", app, env, kustomizationName, errMsg))
+// Failed reports a deployment that failed at the given stage
+func (n *Notifier) Failed(ctx context.Context, d Deploy, stage, errMsg string) {
+	n.send(ctx, fmt.Sprintf(":x: *Deployment failed* (%s): %s%s\n> %s", stage, target(d), link(d), escape(errMsg)))
+}
+
+func target(d Deploy) string {
+	return fmt.Sprintf("`%s` `%s` → `%s`", escape(d.App), escape(d.Version), escape(d.Environment))
+}
+
+func link(d Deploy) string {
+	if d.URL == "" {
+		return ""
+	}
+	return fmt.Sprintf(" <%s|View deployment>", d.URL)
+}
+
+func shortSHA(sha string) string {
+	if len(sha) > 7 {
+		return sha[:7]
+	}
+	return sha
+}
+
+// escape makes text safe to embed in a Slack message
+func escape(text string) string {
+	return strings.NewReplacer("&", "&amp;", "<", "&lt;", ">", "&gt;").Replace(text)
 }

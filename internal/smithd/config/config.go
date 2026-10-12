@@ -53,6 +53,9 @@ type Config struct {
 	// port, e.g. 127.0.0.1:8081 behind an oauth2-proxy sidecar, so that
 	// nothing but the proxy can reach it and set the user header
 	UIListenAddr string
+	// UIPublicURL is where users reach the UI, e.g. https://smithui.example.com,
+	// used to link to deployments from Slack messages
+	UIPublicURL string
 }
 
 // Load loads configuration from environment variables
@@ -81,6 +84,7 @@ func Load() (*Config, error) {
 		UIAllowedUsers:        splitList(getEnv("UI_ALLOWED_USERS", "")),
 		UITrustedOrigins:      splitList(getEnv("UI_TRUSTED_ORIGINS", "")),
 		UIListenAddr:          getEnv("UI_LISTEN_ADDR", ""),
+		UIPublicURL:           getEnv("UI_PUBLIC_URL", ""),
 	}
 
 	// Validate required fields

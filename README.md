@@ -163,7 +163,31 @@ UI_ALLOWED_USERS=@example.com
 # Serve the UI on its own listener instead of the API port, e.g. on
 # localhost behind an oauth2-proxy sidecar (the Helm chart's uiProxy)
 UI_LISTEN_ADDR=127.0.0.1:8081
+
+# Slack notifications (optional), see below
+SLACK_WEBHOOK_URL=https://hooks.slack.com/services/...
+FLUX_KUSTOMIZATION_NAME=apps
+UI_PUBLIC_URL=https://smithui.example.com
 ```
+
+### Slack notifications
+
+With `SLACK_WEBHOOK_URL` set to a Slack incoming webhook, smithd posts to
+its channel as each deployment progresses:
+
+1. **Deployment requested**: the deployment was created, by a user or an
+   auto-deploy policy.
+2. **Committed to gitops**: the manifests are pushed to the gitops repo.
+3. **Deployed** once Flux has applied a revision containing that commit, or
+   **Deployment failed** if Flux reports an error for it or has not applied
+   it within 10 minutes. A deployment that fails before reaching the gitops
+   repo is reported as failed too.
+
+The last message needs `FLUX_KUSTOMIZATION_NAME`, the Flux Kustomization
+that applies `environments/<env>/apps`, and read access to it (the Helm
+chart's RBAC). With `UI_PUBLIC_URL`, messages link to the deployment in the
+web UI. Note that Flux reports a Kustomization as applied without waiting for
+the workloads to become healthy unless the Kustomization sets `wait: true`.
 
 ### Running
 

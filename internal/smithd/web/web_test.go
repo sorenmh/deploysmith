@@ -88,6 +88,8 @@ func (f *fakeGitops) Deploy(appName, environment, message string, manifests map[
 	return "0123456789abcdef", nil
 }
 
+func (f *fakeGitops) Contains(revision, commit string) (bool, error) { return revision == commit, nil }
+
 func TestLayout(t *testing.T) {
 	srv, _ := newTestServer(t)
 
