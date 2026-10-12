@@ -1,44 +1,52 @@
 package storage
 
 import (
+	"context"
 	"fmt"
 	"io"
+	"net/url"
 	"strings"
 	"time"
 
-	"github.com/aws/aws-sdk-go/aws"
-	"github.com/aws/aws-sdk-go/aws/session"
-	"github.com/aws/aws-sdk-go/service/s3"
+	"github.com/aws/aws-sdk-go-v2/aws"
+	awsconfig "github.com/aws/aws-sdk-go-v2/config"
+	"github.com/aws/aws-sdk-go-v2/service/s3"
 )
 
 // S3Storage handles S3 operations for version storage
 type S3Storage struct {
-	bucket string
-	region string
-	client *s3.S3
+	bucket  string
+	region  string
+	client  *s3.Client
+	presign *s3.PresignClient
 }
 
 // NewS3Storage creates a new S3 storage client
 func NewS3Storage(bucket, region, endpoint string) (*S3Storage, error) {
-	config := &aws.Config{
-		Region: aws.String(region),
-	}
-
-	// If custom endpoint is provided (for MinIO, etc.), configure it
-	if endpoint != "" {
-		config.Endpoint = aws.String(endpoint)
-		config.S3ForcePathStyle = aws.Bool(true) // Required for MinIO
-	}
-
-	sess, err := session.NewSession(config)
+	cfg, err := awsconfig.LoadDefaultConfig(context.Background(),
+		awsconfig.WithRegion(region),
+		// Checksums only where S3 requires them, as with SDK v1: some
+		// S3-compatible stores reject the checksum headers v2 adds by default
+		awsconfig.WithRequestChecksumCalculation(aws.RequestChecksumCalculationWhenRequired),
+		awsconfig.WithResponseChecksumValidation(aws.ResponseChecksumValidationWhenRequired),
+	)
 	if err != nil {
-		return nil, fmt.Errorf("failed to create AWS session: %w", err)
+		return nil, fmt.Errorf("failed to load AWS config: %w", err)
 	}
+
+	client := s3.NewFromConfig(cfg, func(o *s3.Options) {
+		// If custom endpoint is provided (for MinIO, etc.), configure it
+		if endpoint != "" {
+			o.BaseEndpoint = aws.String(endpoint)
+			o.UsePathStyle = true // Required for MinIO
+		}
+	})
 
 	return &S3Storage{
-		bucket: bucket,
-		region: region,
-		client: s3.New(sess),
+		bucket:  bucket,
+		region:  region,
+		client:  client,
+		presign: s3.NewPresignClient(client),
 	}, nil
 }
 
@@ -46,18 +54,16 @@ func NewS3Storage(bucket, region, endpoint string) (*S3Storage, error) {
 func (s *S3Storage) GeneratePresignedURL(appName, versionID, filename string) (string, error) {
 	key := fmt.Sprintf("drafts/%s/%s/%s", appName, versionID, filename)
 
-	req, _ := s.client.PutObjectRequest(&s3.PutObjectInput{
+	// URL expires in 5 minutes
+	req, err := s.presign.PresignPutObject(context.Background(), &s3.PutObjectInput{
 		Bucket: aws.String(s.bucket),
 		Key:    aws.String(key),
-	})
-
-	// URL expires in 5 minutes
-	url, err := req.Presign(5 * time.Minute)
+	}, s3.WithPresignExpires(5*time.Minute))
 	if err != nil {
 		return "", fmt.Errorf("failed to generate presigned URL: %w", err)
 	}
 
-	return url, nil
+	return req.URL, nil
 }
 
 // ListFiles lists all files for a version
@@ -67,22 +73,25 @@ func (s *S3Storage) ListFiles(appName, versionID string, published bool) ([]stri
 		prefix = fmt.Sprintf("published/%s/%s/", appName, versionID)
 	}
 
-	result, err := s.client.ListObjectsV2(&s3.ListObjectsV2Input{
+	files := []string{}
+	pages := s3.NewListObjectsV2Paginator(s.client, &s3.ListObjectsV2Input{
 		Bucket: aws.String(s.bucket),
 		Prefix: aws.String(prefix),
 	})
-	if err != nil {
-		return nil, fmt.Errorf("failed to list files: %w", err)
-	}
+	for pages.HasMorePages() {
+		page, err := pages.NextPage(context.Background())
+		if err != nil {
+			return nil, fmt.Errorf("failed to list files: %w", err)
+		}
 
-	files := []string{}
-	for _, obj := range result.Contents {
-		// Extract just the filename from the full key
-		parts := strings.Split(*obj.Key, "/")
-		if len(parts) > 0 {
-			filename := parts[len(parts)-1]
-			if filename != "" {
-				files = append(files, filename)
+		for _, obj := range page.Contents {
+			// Extract just the filename from the full key
+			parts := strings.Split(aws.ToString(obj.Key), "/")
+			if len(parts) > 0 {
+				filename := parts[len(parts)-1]
+				if filename != "" {
+					files = append(files, filename)
+				}
 			}
 		}
 	}
@@ -108,9 +117,9 @@ func (s *S3Storage) MoveVersion(appName, versionID string) error {
 		dstKey := fmt.Sprintf("published/%s/%s/%s", appName, versionID, file)
 
 		// Copy file
-		_, err := s.client.CopyObject(&s3.CopyObjectInput{
+		_, err := s.client.CopyObject(context.Background(), &s3.CopyObjectInput{
 			Bucket:     aws.String(s.bucket),
-			CopySource: aws.String(fmt.Sprintf("%s/%s", s.bucket, srcKey)),
+			CopySource: aws.String(copySource(s.bucket, srcKey)),
 			Key:        aws.String(dstKey),
 		})
 		if err != nil {
@@ -118,7 +127,7 @@ func (s *S3Storage) MoveVersion(appName, versionID string) error {
 		}
 
 		// Delete original
-		_, err = s.client.DeleteObject(&s3.DeleteObjectInput{
+		_, err = s.client.DeleteObject(context.Background(), &s3.DeleteObjectInput{
 			Bucket: aws.String(s.bucket),
 			Key:    aws.String(srcKey),
 		})
@@ -137,7 +146,7 @@ func (s *S3Storage) GetFile(appName, versionID, filename string, published bool)
 		key = fmt.Sprintf("published/%s/%s/%s", appName, versionID, filename)
 	}
 
-	result, err := s.client.GetObject(&s3.GetObjectInput{
+	result, err := s.client.GetObject(context.Background(), &s3.GetObjectInput{
 		Bucket: aws.String(s.bucket),
 		Key:    aws.String(key),
 	})
@@ -172,4 +181,13 @@ func (s *S3Storage) GetAllFiles(appName, versionID string, published bool) (map[
 	}
 
 	return result, nil
+}
+
+// copySource returns the URL-encoded "bucket/key" CopyObject expects
+func copySource(bucket, key string) string {
+	segments := strings.Split(bucket+"/"+key, "/")
+	for i, segment := range segments {
+		segments[i] = url.PathEscape(segment)
+	}
+	return strings.Join(segments, "/")
 }
