@@ -25,7 +25,11 @@ Your DeploySmith server (smithd) has been deployed to your Kubernetes cluster.
   kubectl --namespace {{ .Release.Namespace }} port-forward $POD_NAME 8080:$CONTAINER_PORT
 {{- end }}
 
-{{- if .Values.config.ui.userHeader }}
+{{- if .Values.uiProxy.enabled }}
+
+   The web UI is at https://{{ .Values.uiProxy.host }}/
+   (users sign in through the oauth2-proxy sidecar; identity header: {{ include "smithd.uiUserHeader" . }})
+{{- else if .Values.config.ui.userHeader }}
 
    The web UI is enabled at /ui
    {{- if .Values.uiIngress.enabled }}{{ range .Values.ingress.hosts }}: http{{ if $.Values.ingress.tls }}s{{ end }}://{{ .host }}/ui{{ end }}{{ end }}

@@ -65,6 +65,48 @@ ingress:
   #    hosts:
   #      - smithd.example.com
 
+# Web UI on its own host, behind an oauth2-proxy sidecar. smithd then serves
+# the UI on localhost only, so signing in through the proxy is the only way
+# to reach it; nothing can forge the user header, not even other pods. Works
+# with any ingress controller. The UI user header defaults to
+# X-Forwarded-User, the GitHub login with the GitHub provider.
+#
+# The proxy reads its OAuth app credentials from the smithd secret, keys
+# oauth2-proxy-client-id, oauth2-proxy-client-secret and
+# oauth2-proxy-cookie-secret (see secrets.oauth2Proxy).
+uiProxy:
+  enabled: false
+  # Public host of the UI, e.g. smithui.example.com. The OAuth app's
+  # callback URL is https://<host>/oauth2/callback
+  host: ""
+  image:
+    repository: quay.io/oauth2-proxy/oauth2-proxy
+    tag: v7.15.5
+    pullPolicy: IfNotPresent
+  provider: github
+  # With the github provider: comma-separated GitHub users who may sign in.
+  # Alternatively, or as well, restrict to an organization (and team).
+  githubUsers: ""
+  githubOrg: ""
+  githubTeam: ""
+  # Extra oauth2-proxy flags, e.g. --email-domain=example.com
+  extraArgs: []
+  port: 4180
+  # Port smithd serves the UI on, bound to localhost
+  uiPort: 8081
+  resources:
+    limits:
+      cpu: 100m
+      memory: 64Mi
+    requests:
+      cpu: 5m
+      memory: 20Mi
+  ingress:
+    className: ""
+    annotations: {}
+    # Secret for the TLS certificate of host; no TLS if empty
+    tlsSecretName: ""
+
 # Ingress for the web UI (config.ui), protected by oauth2-proxy through
 # ingress-nginx's external authentication. It routes /ui on the same hosts
 # as the main ingress, so /ui is never reachable there without signing in.
@@ -193,7 +235,7 @@ config:
     # if the Host header smithd sees differs from the public URL.
     trustedOrigins: ""
     # Set to true only if /ui is protected by an authenticating proxy that
-    # this chart does not manage. Otherwise the chart refuses to expose the
+    # this chart does not manage. Not needed with uiProxy or uiIngress. Otherwise the chart refuses to expose the
     # UI through the main ingress without uiIngress, since anyone could then
     # forge the user header.
     protectedExternally: false
@@ -229,6 +271,13 @@ secrets:
   nats:
     url: ""
 
+  # OAuth app for uiProxy. Generate the cookie secret with:
+  #   openssl rand -base64 32 | tr -- '+/' '-_'
+  oauth2Proxy:
+    clientId: ""
+    clientSecret: ""
+    cookieSecret: ""
+
   # Alternatively, use existing secrets
   # If set, the above values will be ignored
   existingSecret: ""
@@ -241,3 +290,6 @@ secrets:
   #   - flux-webhook-url       (optional)
   #   - flux-webhook-token     (optional)
   #   - nats-url               (optional)
+  #   - oauth2-proxy-client-id      (uiProxy)
+  #   - oauth2-proxy-client-secret  (uiProxy)
+  #   - oauth2-proxy-cookie-secret  (uiProxy)

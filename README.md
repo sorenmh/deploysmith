@@ -160,6 +160,9 @@ GITOPS_SSH_KEY_PATH=/path/to/ssh/key
 # authenticating proxy that sets this header with the user's email.
 UI_USER_HEADER=X-Auth-Request-Email
 UI_ALLOWED_USERS=@example.com
+# Serve the UI on its own listener instead of the API port, e.g. on
+# localhost behind an oauth2-proxy sidecar (the Helm chart's uiProxy)
+UI_LISTEN_ADDR=127.0.0.1:8081
 ```
 
 ### Running

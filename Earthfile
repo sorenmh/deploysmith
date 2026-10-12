@@ -12,12 +12,14 @@ deps:
 
 build-smithd:
     FROM +deps
+    ARG VERSION=dev
+    ARG COMMIT=unknown
     COPY cmd/smithd ./cmd/smithd
     COPY internal/smithd ./internal/smithd
     COPY internal/shared ./internal/shared
     RUN apk add --no-cache git gcc musl-dev
     RUN CGO_ENABLED=1 go build -o bin/smithd \
-        -ldflags "-X main.version=dev -X main.commit=$(git rev-parse --short HEAD 2>/dev/null || echo 'unknown') -X main.date=$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+        -ldflags "-X main.version=$VERSION -X main.commit=$COMMIT -X main.date=$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
         ./cmd/smithd
     SAVE ARTIFACT bin/smithd AS LOCAL bin/smithd
 
@@ -154,7 +156,9 @@ lint:
 docker-smithd:
     FROM alpine:3.19
     RUN apk add --no-cache ca-certificates git openssh-client
-    COPY +build-smithd/smithd /usr/local/bin/smithd
+    ARG VERSION=dev
+    ARG COMMIT=unknown
+    COPY (+build-smithd/smithd --VERSION=$VERSION --COMMIT=$COMMIT) /usr/local/bin/smithd
     ENTRYPOINT ["/usr/local/bin/smithd"]
     SAVE IMAGE smithd:latest
 

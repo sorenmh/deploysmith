@@ -15,5 +15,11 @@ spec:
     targetPort: {{ .Values.service.targetPort }}
     protocol: TCP
     name: http
+  {{- if .Values.uiProxy.enabled }}
+  - port: {{ .Values.uiProxy.port }}
+    targetPort: ui
+    protocol: TCP
+    name: ui
+  {{- end }}
   selector:
     {{- include "smithd.selectorLabels" . | nindent 4 }}

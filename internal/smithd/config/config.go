@@ -24,10 +24,10 @@ type Config struct {
 	AWSSecretAccessKey string
 
 	// Gitops
-	GitopsRepo        string
-	GitopsSSHKeyPath  string
-	GitopsUserName    string
-	GitopsUserEmail   string
+	GitopsRepo       string
+	GitopsSSHKeyPath string
+	GitopsUserName   string
+	GitopsUserEmail  string
 
 	// Events
 	NATSUrl string
@@ -49,24 +49,28 @@ type Config struct {
 	UIUserHeader     string
 	UIAllowedUsers   []string // emails, or "@domain" entries; empty allows all authenticated users
 	UITrustedOrigins []string // extra origins allowed to submit UI forms
+	// UIListenAddr serves the UI on its own listener instead of the API
+	// port, e.g. 127.0.0.1:8081 behind an oauth2-proxy sidecar, so that
+	// nothing but the proxy can reach it and set the user header
+	UIListenAddr string
 }
 
 // Load loads configuration from environment variables
 func Load() (*Config, error) {
 	cfg := &Config{
-		Port:              getEnv("PORT", "8080"),
-		APIKeys:           strings.Split(getEnv("API_KEYS", ""), ","),
-		DBDriver:          getEnv("DB_DRIVER", "sqlite"),
-		DBDSN:             getEnv("DB_DSN", "./data/smithd.db"),
-		S3Bucket:           getEnv("S3_BUCKET", ""),
-		S3Region:           getEnv("S3_REGION", "us-east-1"),
-		AWSEndpoint:        getEnv("AWS_ENDPOINT", ""),
-		AWSAccessKeyID:     getEnv("AWS_ACCESS_KEY_ID", ""),
-		AWSSecretAccessKey: getEnv("AWS_SECRET_ACCESS_KEY", ""),
-		GitopsRepo:        getEnv("GITOPS_REPO", ""),
-		GitopsSSHKeyPath:  getEnv("GITOPS_SSH_KEY_PATH", ""),
-		GitopsUserName:    getEnv("GITOPS_USER_NAME", "smithd"),
-		GitopsUserEmail:   getEnv("GITOPS_USER_EMAIL", "smithd@deploysmith.io"),
+		Port:                  getEnv("PORT", "8080"),
+		APIKeys:               strings.Split(getEnv("API_KEYS", ""), ","),
+		DBDriver:              getEnv("DB_DRIVER", "sqlite"),
+		DBDSN:                 getEnv("DB_DSN", "./data/smithd.db"),
+		S3Bucket:              getEnv("S3_BUCKET", ""),
+		S3Region:              getEnv("S3_REGION", "us-east-1"),
+		AWSEndpoint:           getEnv("AWS_ENDPOINT", ""),
+		AWSAccessKeyID:        getEnv("AWS_ACCESS_KEY_ID", ""),
+		AWSSecretAccessKey:    getEnv("AWS_SECRET_ACCESS_KEY", ""),
+		GitopsRepo:            getEnv("GITOPS_REPO", ""),
+		GitopsSSHKeyPath:      getEnv("GITOPS_SSH_KEY_PATH", ""),
+		GitopsUserName:        getEnv("GITOPS_USER_NAME", "smithd"),
+		GitopsUserEmail:       getEnv("GITOPS_USER_EMAIL", "smithd@deploysmith.io"),
 		NATSUrl:               getEnv("NATS_URL", ""),
 		FluxWebhookURL:        getEnv("FLUX_WEBHOOK_URL", ""),
 		FluxWebhookToken:      getEnv("FLUX_WEBHOOK_TOKEN", ""),
@@ -76,6 +80,7 @@ func Load() (*Config, error) {
 		UIUserHeader:          getEnv("UI_USER_HEADER", ""),
 		UIAllowedUsers:        splitList(getEnv("UI_ALLOWED_USERS", "")),
 		UITrustedOrigins:      splitList(getEnv("UI_TRUSTED_ORIGINS", "")),
+		UIListenAddr:          getEnv("UI_LISTEN_ADDR", ""),
 	}
 
 	// Validate required fields

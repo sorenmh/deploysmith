@@ -102,3 +102,15 @@ networking.k8s.io/v1beta1
 extensions/v1beta1
 {{- end -}}
 {{- end -}}
+
+{{/*
+Header smithd reads the signed-in UI user from. uiProxy defaults it to
+X-Forwarded-User, which oauth2-proxy sets.
+*/}}
+{{- define "smithd.uiUserHeader" -}}
+{{- if .Values.config.ui.userHeader -}}
+{{- .Values.config.ui.userHeader -}}
+{{- else if .Values.uiProxy.enabled -}}
+X-Forwarded-User
+{{- end -}}
+{{- end -}}

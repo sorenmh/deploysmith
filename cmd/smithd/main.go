@@ -18,6 +18,7 @@ var (
 
 func main() {
 	log.Printf("smithd %s (commit: %s, built: %s)\n", version, commit, date)
+	api.Version = version
 
 	// Load configuration
 	cfg, err := config.Load()

@@ -61,7 +61,7 @@ jobs:
 
       - name: Build and push smithd
         run: |
-          earthly +docker-smithd
+          earthly +docker-smithd --VERSION=v${{ steps.version.outputs.VERSION }} --COMMIT=${GITHUB_SHA::7}
           docker tag smithd:latest ghcr.io/${{ github.repository_owner }}/smithd:v${{ steps.version.outputs.VERSION }}
           docker tag smithd:latest ghcr.io/${{ github.repository_owner }}/smithd:latest
           docker push ghcr.io/${{ github.repository_owner }}/smithd:v${{ steps.version.outputs.VERSION }}

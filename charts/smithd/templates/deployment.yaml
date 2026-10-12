@@ -100,6 +100,72 @@ spec:
         {{- with .Values.volumeMounts }}
         {{- toYaml . | nindent 8 }}
         {{- end }}
+      {{- with .Values.uiProxy }}
+      {{- if .enabled }}
+      # Signs users in and forwards them to the UI, which smithd serves on
+      # localhost only, so this proxy is the only way to reach it
+      - name: oauth2-proxy
+        image: "{{ .image.repository }}:{{ .image.tag }}"
+        imagePullPolicy: {{ .image.pullPolicy }}
+        args:
+        - --http-address=0.0.0.0:{{ .port }}
+        - --upstream=http://127.0.0.1:{{ .uiPort }}/
+        - --provider={{ .provider }}
+        - --redirect-url=https://{{ required "uiProxy.host is required" .host }}/oauth2/callback
+        - --reverse-proxy=true
+        - --cookie-secure=true
+        - --skip-provider-button=true
+        - --email-domain=*
+        {{- with .githubUsers }}
+        - --github-user={{ . }}
+        {{- end }}
+        {{- with .githubOrg }}
+        - --github-org={{ . }}
+        {{- end }}
+        {{- with .githubTeam }}
+        - --github-team={{ . }}
+        {{- end }}
+        {{- range .extraArgs }}
+        - {{ . }}
+        {{- end }}
+        env:
+        - name: OAUTH2_PROXY_CLIENT_ID
+          valueFrom:
+            secretKeyRef:
+              name: {{ include "smithd.secretName" $ }}
+              key: oauth2-proxy-client-id
+        - name: OAUTH2_PROXY_CLIENT_SECRET
+          valueFrom:
+            secretKeyRef:
+              name: {{ include "smithd.secretName" $ }}
+              key: oauth2-proxy-client-secret
+        - name: OAUTH2_PROXY_COOKIE_SECRET
+          valueFrom:
+            secretKeyRef:
+              name: {{ include "smithd.secretName" $ }}
+              key: oauth2-proxy-cookie-secret
+        ports:
+        - name: ui
+          containerPort: {{ .port }}
+          protocol: TCP
+        livenessProbe:
+          httpGet:
+            path: /ping
+            port: ui
+        readinessProbe:
+          httpGet:
+            path: /ping
+            port: ui
+        resources:
+          {{- toYaml .resources | nindent 10 }}
+        securityContext:
+          allowPrivilegeEscalation: false
+          readOnlyRootFilesystem: true
+          runAsNonRoot: true
+          capabilities:
+            drop: ["ALL"]
+      {{- end }}
+      {{- end }}
       volumes:
       - name: data
         {{- if .Values.persistence.enabled }}

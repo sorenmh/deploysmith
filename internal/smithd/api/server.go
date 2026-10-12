@@ -22,12 +22,15 @@ import (
 	"github.com/sorenmh/deploysmith/internal/smithd/gitops"
 	"github.com/sorenmh/deploysmith/internal/smithd/models"
 	"github.com/sorenmh/deploysmith/internal/smithd/service"
-	"github.com/sorenmh/deploysmith/internal/smithd/web"
 	"github.com/sorenmh/deploysmith/internal/smithd/slack"
 	"github.com/sorenmh/deploysmith/internal/smithd/storage"
 	"github.com/sorenmh/deploysmith/internal/smithd/store"
+	"github.com/sorenmh/deploysmith/internal/smithd/web"
 	"gopkg.in/yaml.v3"
 )
+
+// Version is the smithd version reported by /health, set at startup
+var Version = "dev"
 
 // Server represents the HTTP server
 type Server struct {
@@ -42,6 +45,7 @@ type Server struct {
 	storage          *storage.S3Storage
 	publisher        events.Publisher
 	svc              *service.Service
+	uiRouter         *chi.Mux // set when the UI has its own listener
 }
 
 // NewServer creates a new HTTP server
@@ -151,8 +155,14 @@ func (s *Server) setupRoutes() {
 		if err != nil {
 			log.Fatalf("Failed to set up web UI: %v", err)
 		}
-		s.router.Mount(web.Prefix, ui)
-		s.router.Get("/", func(w http.ResponseWriter, r *http.Request) {
+		router := s.router
+		if s.cfg.UIListenAddr != "" {
+			s.uiRouter = chi.NewRouter()
+			s.uiRouter.Use(Logger)
+			router = s.uiRouter
+		}
+		router.Mount(web.Prefix, ui)
+		router.Get("/", func(w http.ResponseWriter, r *http.Request) {
 			http.Redirect(w, r, web.Prefix+"/", http.StatusFound)
 		})
 		log.Printf("Web UI enabled at %s (user header: %s)", web.Prefix, s.cfg.UIUserHeader)
@@ -163,6 +173,13 @@ func (s *Server) setupRoutes() {
 func (s *Server) Start() error {
 	go s.svc.WatchStaleDeployments(context.Background())
 
+	if s.uiRouter != nil {
+		go func() {
+			log.Printf("Serving web UI on %s", s.cfg.UIListenAddr)
+			log.Fatalf("Web UI server failed: %v", http.ListenAndServe(s.cfg.UIListenAddr, s.uiRouter))
+		}()
+	}
+
 	addr := fmt.Sprintf(":%s", s.cfg.Port)
 	log.Printf("Starting server on %s", addr)
 	return http.ListenAndServe(addr, s.router)
@@ -172,7 +189,7 @@ func (s *Server) Start() error {
 func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
 	health := map[string]interface{}{
 		"status":  "healthy",
-		"version": "dev",
+		"version": Version,
 		"checks": map[string]string{
 			"database": "ok",
 			"s3":       "ok",

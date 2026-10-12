@@ -1,4 +1,7 @@
 {{- if .Values.uiIngress.enabled -}}
+{{- if .Values.uiProxy.enabled }}
+{{- fail "uiIngress and uiProxy are alternatives; enable only one" }}
+{{- end }}
 {{- if not .Values.ingress.enabled }}
 {{- fail "uiIngress requires ingress.enabled: /ui is served on the main ingress hosts" }}
 {{- end }}

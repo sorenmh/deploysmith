@@ -184,12 +184,56 @@ ingress:
 
 #### Web UI with oauth2-proxy
 
-smithd can serve a web UI at `/ui` for viewing what runs where, deploying and
-rolling back versions, and managing auto-deploy policies and environments.
-smithd does not handle logins itself: it trusts a header with the user's email
-set by an authenticating proxy. The chart wires this up with
-[oauth2-proxy](https://oauth2-proxy.github.io/oauth2-proxy/) and ingress-nginx's
-external authentication.
+smithd can serve a web UI for viewing what runs where, deploying and rolling
+back versions, and managing auto-deploy policies and environments. smithd does
+not handle logins itself: it trusts a header naming the user, set by an
+authenticating proxy, [oauth2-proxy](https://oauth2-proxy.github.io/oauth2-proxy/).
+The chart supports two setups.
+
+##### Sidecar on its own host (any ingress controller, recommended)
+
+`uiProxy` runs oauth2-proxy as a sidecar in the smithd pod and serves the UI
+on its own host. smithd then serves the UI on localhost only, so signing in
+through the sidecar is the only way to reach it: the user header cannot be
+forged from outside the cluster or from other pods.
+
+1. Create an OAuth app. With GitHub, a personal one is enough (Settings →
+   Developer settings → OAuth Apps; no organization needed), with
+   homepage `https://smithui.example.com` and callback URL
+   `https://smithui.example.com/oauth2/callback`.
+
+2. Put its credentials in smithd's secret, as `oauth2-proxy-client-id`,
+   `oauth2-proxy-client-secret` and `oauth2-proxy-cookie-secret` (from
+   `openssl rand -base64 32 | tr -- '+/' '-_'`), or set
+   `secrets.oauth2Proxy.*` when the chart manages the secret.
+
+3. Enable it:
+
+   ```yaml
+   config:
+     ui:
+       allowedUsers: octocat            # optional second check in smithd
+
+   uiProxy:
+     enabled: true
+     host: smithui.example.com
+     githubUsers: octocat               # and/or githubOrg / githubTeam
+     ingress:
+       annotations:
+         cert-manager.io/cluster-issuer: letsencrypt-prod
+       tlsSecretName: smithui-tls
+   ```
+
+Users are identified by `X-Forwarded-User`, their GitHub login, which is also
+recorded on deployments they start. For another provider set
+`uiProxy.provider`, pass its flags in `uiProxy.extraArgs`, and consider
+`config.ui.userHeader: X-Forwarded-Email`.
+
+##### ingress-nginx external authentication
+
+Alternatively, with ingress-nginx, `uiIngress` serves `/ui` on the main
+ingress hosts and has nginx check every request with an oauth2-proxy you
+deploy yourself.
 
 1. Deploy oauth2-proxy on the same host as smithd under `/oauth2`, for example
    with its Helm chart (`oauth2-proxy/oauth2-proxy`). It must return the user's
@@ -239,7 +283,7 @@ The API under `/api/v1` keeps using API keys and is unaffected.
 
 Because smithd trusts the header, `/ui` must never be reachable without the
 proxy. The chart therefore refuses to enable the UI on the main ingress
-without `uiIngress`. If you protect `/ui` with a different proxy, set
+without `uiProxy` or `uiIngress`. If you protect `/ui` with a different proxy, set
 `config.ui.protectedExternally: true`. Consider a NetworkPolicy so that only
 the ingress controller can reach smithd's service.
 
