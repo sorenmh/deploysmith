@@ -534,6 +534,7 @@ func (s *Server) handlePublishVersion(w http.ResponseWriter, r *http.Request) {
 	// Refresh version to get updated fields
 	version, _ = s.versionStore.GetByVersionID(appID, versionID)
 
+	s.svc.VersionPublished(r.Context(), app, version)
 	s.svc.TriggerAutoDeploys(r.Context(), app, version)
 
 	resp := models.PublishVersionResponse{

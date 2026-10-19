@@ -9,6 +9,11 @@ import (
 	"github.com/sorenmh/deploysmith/internal/smithd/models"
 )
 
+// VersionPublished notifies that a new version was published
+func (s *Service) VersionPublished(ctx context.Context, app *models.Application, version *models.Version) {
+	go s.Slack.VersionPublished(context.WithoutCancel(ctx), app.Name, version.VersionID, version.GitBranch, version.GitCommitter)
+}
+
 // TriggerAutoDeploys starts an auto-deploy, in the background, for every
 // enabled policy of the app that matches the version's branch
 func (s *Service) TriggerAutoDeploys(ctx context.Context, app *models.Application, version *models.Version) {

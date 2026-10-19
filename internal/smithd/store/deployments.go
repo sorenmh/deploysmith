@@ -321,6 +321,25 @@ func (s *DeploymentStore) HasNewer(deployment *models.Deployment) (bool, error) 
 	return exists, nil
 }
 
+// PreviousSuccessVersion returns the ID of the version the most recent
+// successful deployment before the given one put into the same environment,
+// or "" if there is none
+func (s *DeploymentStore) PreviousSuccessVersion(deployment *models.Deployment) (string, error) {
+	var versionID string
+	err := s.db.QueryRow(`
+		SELECT version_id FROM deployments
+		WHERE app_id = ? AND environment = ? AND status = 'success' AND id != ? AND started_at < ?
+		ORDER BY started_at DESC LIMIT 1
+	`, deployment.AppID, deployment.Environment, deployment.ID, deployment.StartedAt.UTC()).Scan(&versionID)
+	if err == sql.ErrNoRows {
+		return "", nil
+	}
+	if err != nil {
+		return "", fmt.Errorf("failed to get previous deployment: %w", err)
+	}
+	return versionID, nil
+}
+
 // ClaimStale atomically takes over a stale pending deployment by resetting
 // its start time. It returns false if the deployment is no longer pending or
 // another instance claimed it first.

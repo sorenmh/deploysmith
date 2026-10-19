@@ -169,10 +169,25 @@ func (s *Service) slackDeploy(deployment *models.Deployment, app *models.Applica
 	if policy != nil {
 		notice.Policy = policy.Name
 	}
+	notice.Rollback = s.isRollback(deployment, version)
 	if s.UIBaseURL != "" {
 		notice.URL = strings.TrimSuffix(s.UIBaseURL, "/") + "/ui/deployments/" + deployment.ID
 	}
 	return notice
+}
+
+// isRollback reports whether a deployment puts an older version than the one
+// previously deployed into the environment
+func (s *Service) isRollback(deployment *models.Deployment, version *models.Version) bool {
+	previousID, err := s.Deployments.PreviousSuccessVersion(deployment)
+	if err != nil || previousID == "" || previousID == version.ID {
+		return false
+	}
+	previous, err := s.Versions.GetByID(previousID)
+	if err != nil {
+		return false
+	}
+	return version.CreatedAt.Before(previous.CreatedAt)
 }
 
 // deployCtx adds a deployment's identifying fields to the log context

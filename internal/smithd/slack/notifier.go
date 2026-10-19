@@ -33,6 +33,7 @@ type Deploy struct {
 	Policy      string // the auto-deploy policy, if any
 	CommitSHA   string
 	URL         string // link to the deployment in the web UI, if any
+	Rollback    bool   // the version is older than what runs in the environment
 }
 
 func (n *Notifier) send(ctx context.Context, text string) {
@@ -70,6 +71,10 @@ func (n *Notifier) Requested(ctx context.Context, d Deploy) {
 	case d.TriggeredBy != "":
 		by = " by " + escape(d.TriggeredBy)
 	}
+	if d.Rollback {
+		n.send(ctx, fmt.Sprintf(":rewind: *Rollback started*: %s%s%s", target(d), by, link(d)))
+		return
+	}
 	n.send(ctx, fmt.Sprintf(":inbox_tray: *Deployment requested*: %s%s%s", target(d), by, link(d)))
 }
 
@@ -80,17 +85,46 @@ func (n *Notifier) Committed(ctx context.Context, d Deploy, waitingForFlux bool)
 	if waitingForFlux {
 		next = " Waiting for Flux to apply it."
 	}
-	n.send(ctx, fmt.Sprintf(":package: *Committed to gitops*: %s (commit `%s`).%s%s", target(d), shortSHA(d.CommitSHA), next, link(d)))
+	what := "Committed to gitops"
+	if d.Rollback {
+		what = "Rollback committed to gitops"
+	}
+	n.send(ctx, fmt.Sprintf(":package: *%s*: %s (commit `%s`).%s%s", what, target(d), shortSHA(d.CommitSHA), next, link(d)))
 }
 
 // Applied reports a deployment Flux has applied to the cluster
 func (n *Notifier) Applied(ctx context.Context, d Deploy, took time.Duration) {
-	n.send(ctx, fmt.Sprintf(":white_check_mark: *Deployed*: %s, applied by Flux in %s%s", target(d), took.Round(time.Second), link(d)))
+	what := "Deployed"
+	if d.Rollback {
+		what = "Rollback done"
+	}
+	n.send(ctx, fmt.Sprintf(":white_check_mark: *%s*: %s, applied by Flux in %s%s", what, target(d), took.Round(time.Second), link(d)))
 }
 
 // Failed reports a deployment that failed at the given stage
 func (n *Notifier) Failed(ctx context.Context, d Deploy, stage, errMsg string) {
-	n.send(ctx, fmt.Sprintf(":x: *Deployment failed* (%s): %s%s\n> %s", stage, target(d), link(d), escape(errMsg)))
+	what := "Deployment failed"
+	if d.Rollback {
+		what = "Rollback failed"
+	}
+	n.send(ctx, fmt.Sprintf(":x: *%s* (%s): %s%s\n> %s", what, stage, target(d), link(d), escape(errMsg)))
+}
+
+// VersionPublished reports a new version that was published
+func (n *Notifier) VersionPublished(ctx context.Context, app, version, branch, committer string) {
+	detail := ""
+	if branch != "" && branch != "unknown" {
+		detail = fmt.Sprintf(" on `%s`", escape(branch))
+	}
+	if committer != "" {
+		detail += " by " + escape(committer)
+	}
+	n.send(ctx, fmt.Sprintf(":sparkles: *New version*: `%s` `%s`%s", escape(app), escape(version), detail))
+}
+
+// AppRegistered reports a newly registered application
+func (n *Notifier) AppRegistered(ctx context.Context, app string) {
+	n.send(ctx, fmt.Sprintf(":new: *New application registered*: `%s`", escape(app)))
 }
 
 func target(d Deploy) string {

@@ -145,3 +145,43 @@ func TestDeployNotifications(t *testing.T) {
 		}
 	})
 }
+
+func TestRollbackNotifications(t *testing.T) {
+	f := newFixture(t)
+	rec, notifier := newSlackRecorder(t)
+	f.svc.Slack = notifier
+	f.createVersion(t, "v2", "main", true)
+
+	for _, version := range []string{"v2", "v1"} {
+		if _, err := f.svc.DeployVersion(context.Background(), f.app.ID, version, "production", "sorenmh"); err != nil {
+			t.Fatal(err)
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+
+	messages := rec.waitFor(t, 4)
+	requireMessage(t, messages[0], "Deployment requested", "`v2`")
+	requireMessage(t, messages[1], "Committed to gitops")
+	requireMessage(t, messages[2], "Rollback started", "`v1`")
+	requireMessage(t, messages[3], "Rollback committed to gitops")
+}
+
+func TestAppRegisteredNotification(t *testing.T) {
+	f := newFixture(t)
+	rec, notifier := newSlackRecorder(t)
+	f.svc.Slack = notifier
+
+	if _, err := f.svc.RegisterApp("brand-new"); err != nil {
+		t.Fatal(err)
+	}
+	requireMessage(t, rec.waitFor(t, 1)[0], "New application registered", "`brand-new`")
+}
+
+func TestVersionPublishedNotification(t *testing.T) {
+	f := newFixture(t)
+	rec, notifier := newSlackRecorder(t)
+	f.svc.Slack = notifier
+
+	f.svc.VersionPublished(context.Background(), f.app, f.version)
+	requireMessage(t, rec.waitFor(t, 1)[0], "New version", "`hello` `v1`", "`main`")
+}

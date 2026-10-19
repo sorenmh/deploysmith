@@ -1,6 +1,7 @@
 package service
 
 import (
+	"context"
 	"database/sql"
 	"errors"
 	"fmt"
@@ -95,5 +96,6 @@ func (s *Service) RegisterApp(name string) (*models.Application, error) {
 		}
 		return nil, fmt.Errorf("failed to create application: %w", err)
 	}
+	go s.Slack.AppRegistered(context.Background(), app.Name)
 	return app, nil
 }
