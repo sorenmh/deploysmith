@@ -10,6 +10,12 @@ import (
 // Logger middleware logs HTTP requests
 func Logger(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// Probes hit the health endpoint constantly; logging them is noise
+		if r.URL.Path == "/health" {
+			next.ServeHTTP(w, r)
+			return
+		}
+
 		start := time.Now()
 
 		// Create a response writer wrapper to capture status code
