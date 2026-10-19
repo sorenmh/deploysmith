@@ -4,13 +4,12 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
-	"path/filepath"
 	"regexp"
 	"strings"
 	"testing"
 
 	"github.com/go-chi/chi/v5"
-	"github.com/sorenmh/deploysmith/internal/smithd/db"
+	"github.com/sorenmh/deploysmith/internal/smithd/db/dbtest"
 	"github.com/sorenmh/deploysmith/internal/smithd/events"
 	"github.com/sorenmh/deploysmith/internal/smithd/service"
 	"github.com/sorenmh/deploysmith/internal/smithd/store"
@@ -22,11 +21,7 @@ const testUserHeader = "X-Auth-Request-Email"
 // SQLite database
 func newTestServer(t *testing.T) (*httptest.Server, *service.Service) {
 	t.Helper()
-	database, err := db.Open("sqlite", filepath.Join(t.TempDir(), "test.db"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { database.Close() })
+	database := dbtest.Open(t)
 
 	svc := service.New(service.Deps{
 		Apps:         store.NewApplicationStore(database),

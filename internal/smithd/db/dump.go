@@ -85,9 +85,16 @@ func (db *DB) EnsureEmpty() error {
 }
 
 // Load inserts the given table dumps, in the order provided, into the
-// database. It relies on DB.Exec's automatic ?-to-$N placeholder rebinding,
-// so it works unmodified against both SQLite and PostgreSQL.
+// database in one transaction, so a failed import leaves nothing behind. It
+// rebinds ?-placeholders itself, so it works unmodified against both SQLite
+// and PostgreSQL.
 func (db *DB) Load(dumps []TableDump) error {
+	tx, err := db.DB.Begin()
+	if err != nil {
+		return fmt.Errorf("failed to begin import: %w", err)
+	}
+	defer tx.Rollback()
+
 	for _, dump := range dumps {
 		for _, row := range dump.Rows {
 			cols := make([]string, 0, len(row))
@@ -106,10 +113,10 @@ func (db *DB) Load(dumps []TableDump) error {
 				strings.Join(placeholders, ", "),
 			)
 
-			if _, err := db.Exec(query, values...); err != nil {
+			if _, err := tx.Exec(db.rebind(query), values...); err != nil {
 				return fmt.Errorf("failed to insert row into table %s: %w", dump.Table, err)
 			}
 		}
 	}
-	return nil
+	return tx.Commit()
 }

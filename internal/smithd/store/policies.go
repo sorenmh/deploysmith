@@ -136,7 +136,7 @@ func (s *PolicyStore) FindMatchingPolicies(appID, branch string) ([]models.Polic
 	rows, err := s.db.Query(`
 		SELECT id, app_id, name, git_branch_pattern, target_environment, enabled, created_at
 		FROM policies
-		WHERE app_id = ? AND enabled = 1
+		WHERE app_id = ? AND enabled = TRUE
 		ORDER BY created_at ASC
 	`, appID)
 	if err != nil {

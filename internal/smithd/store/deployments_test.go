@@ -1,20 +1,18 @@
 package store
 
 import (
-	"path/filepath"
 	"testing"
 	"time"
 
-	"github.com/sorenmh/deploysmith/internal/smithd/db"
+	"github.com/sorenmh/deploysmith/internal/smithd/db/dbtest"
 	"github.com/sorenmh/deploysmith/internal/smithd/models"
 )
 
 func TestClaimStaleDeployment(t *testing.T) {
-	database, err := db.Open("sqlite", filepath.Join(t.TempDir(), "test.db"))
-	if err != nil {
+	database := dbtest.Open(t)
+	if _, err := NewEnvironmentStore(database).Create(models.CreateEnvironmentRequest{Name: "production"}); err != nil {
 		t.Fatal(err)
 	}
-	defer database.Close()
 
 	app, err := NewApplicationStore(database).Create("hello")
 	if err != nil {

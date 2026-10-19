@@ -1,18 +1,13 @@
 package store
 
 import (
-	"path/filepath"
 	"testing"
 
-	"github.com/sorenmh/deploysmith/internal/smithd/db"
+	"github.com/sorenmh/deploysmith/internal/smithd/db/dbtest"
 )
 
 func TestPushSubscriptions(t *testing.T) {
-	database, err := db.Open("sqlite", filepath.Join(t.TempDir(), "test.db"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { database.Close() })
+	database := dbtest.Open(t)
 	subs := NewPushSubscriptionStore(database)
 
 	if err := subs.Save(PushSubscription{Endpoint: "https://push.example/1", P256dh: "k1", Auth: "a1", User: "me@example.com"}); err != nil {

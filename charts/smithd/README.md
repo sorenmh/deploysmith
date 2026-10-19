@@ -139,7 +139,10 @@ persistence:
 config:
   database:
     driver: postgres
-    dsn: "postgres://user:pass@host:5432/smithd?sslmode=disable"
+
+secrets:
+  # Kept in the Secret rather than the ConfigMap, since it holds a password
+  databaseDsn: "postgres://user:pass@host:5432/smithd?sslmode=require"
 
 # No local file needed with postgres — turn off the PVC
 persistence:
@@ -160,6 +163,10 @@ smithctl db export dump.json
 # 3. Import into the new instance
 smithctl db import dump.json
 ```
+
+Cut-over with minimal downtime: export, then switch the release to PostgreSQL (the new pod starts with an empty database), then import. Deployments requested in between are lost, so do it when nothing is deploying. Keep the old PVC until you have checked the result; setting `persistence.enabled: false` does not delete an existing claim.
+
+Only applications, environments, versions, policies and deployments are moved. Push notification subscriptions are not: re-enable notifications once on each device. PostgreSQL enforces foreign keys, which SQLite (as smithd uses it) does not, so a dump containing rows that point at something deleted is refused, and nothing is written. Fix the rows or delete the orphans from the dump file and import again.
 
 Import requires an empty target database (a freshly-migrated schema with no rows) — it refuses with a clear error otherwise, and does not partially write on failure.
 

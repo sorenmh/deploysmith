@@ -2,12 +2,11 @@ package web
 
 import (
 	"net/http"
-	"path/filepath"
 	"strings"
 	"testing"
 
 	webpush "github.com/SherClockHolmes/webpush-go"
-	"github.com/sorenmh/deploysmith/internal/smithd/db"
+	"github.com/sorenmh/deploysmith/internal/smithd/db/dbtest"
 	"github.com/sorenmh/deploysmith/internal/smithd/push"
 	"github.com/sorenmh/deploysmith/internal/smithd/store"
 )
@@ -58,11 +57,7 @@ func TestPushDisabledByDefault(t *testing.T) {
 
 func TestPushSubscribeAndUnsubscribe(t *testing.T) {
 	srv, svc := newTestServer(t)
-	database, err := db.Open("sqlite", filepath.Join(t.TempDir(), "push.db"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { database.Close() })
+	database := dbtest.Open(t)
 	subs := store.NewPushSubscriptionStore(database)
 	private, public, err := webpush.GenerateVAPIDKeys()
 	if err != nil {

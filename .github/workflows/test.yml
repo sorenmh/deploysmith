@@ -39,3 +39,36 @@ jobs:
         run: |
           ./bin/smithd --help || true
           ./bin/forge version
+
+  test-postgres:
+    name: Test against PostgreSQL
+    runs-on: ubuntu-latest
+
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: smithd
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+
+      - name: Run tests
+        # Packages share one database, so they run one at a time
+        run: go test -p 1 ./internal/smithd/...
+        env:
+          TEST_POSTGRES_DSN: postgres://postgres:postgres@localhost:5432/smithd?sslmode=disable

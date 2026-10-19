@@ -67,6 +67,14 @@ spec:
               name: {{ include "smithd.secretName" . }}
               key: slack-webhook-url
               optional: true
+        # A PostgreSQL DSN holds a password, so it is kept in the secret;
+        # when set it takes precedence over config.database.dsn
+        - name: DB_DSN
+          valueFrom:
+            secretKeyRef:
+              name: {{ include "smithd.secretName" . }}
+              key: database-dsn
+              optional: true
         - name: VAPID_PUBLIC_KEY
           valueFrom:
             secretKeyRef:

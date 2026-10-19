@@ -14,6 +14,17 @@ CREATE TABLE IF NOT EXISTS applications (
 
 CREATE INDEX IF NOT EXISTS idx_applications_name ON applications(name);
 
+-- Environments table
+CREATE TABLE IF NOT EXISTS environments (
+    id TEXT PRIMARY KEY,
+    name TEXT UNIQUE NOT NULL,
+    description TEXT,
+    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE INDEX IF NOT EXISTS idx_environments_name ON environments(name);
+
 -- Versions table
 CREATE TABLE IF NOT EXISTS versions (
     id TEXT PRIMARY KEY,
@@ -40,6 +51,24 @@ CREATE INDEX IF NOT EXISTS idx_versions_app_id ON versions(app_id);
 CREATE INDEX IF NOT EXISTS idx_versions_status ON versions(status);
 CREATE INDEX IF NOT EXISTS idx_versions_created_at ON versions(created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_versions_git_branch ON versions(git_branch);
+
+-- Policies table
+CREATE TABLE IF NOT EXISTS policies (
+    id TEXT PRIMARY KEY,
+    app_id TEXT NOT NULL,
+    name TEXT NOT NULL,
+    git_branch_pattern TEXT NOT NULL,
+    target_environment TEXT NOT NULL,
+    enabled BOOLEAN NOT NULL DEFAULT 1,
+    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+
+    FOREIGN KEY (app_id) REFERENCES applications(id) ON DELETE CASCADE,
+    FOREIGN KEY (target_environment) REFERENCES environments(name) ON DELETE RESTRICT,
+    UNIQUE(app_id, name)
+);
+
+CREATE INDEX IF NOT EXISTS idx_policies_app_id ON policies(app_id);
+CREATE INDEX IF NOT EXISTS idx_policies_enabled ON policies(enabled);
 
 -- Deployments table
 CREATE TABLE IF NOT EXISTS deployments (
@@ -72,35 +101,6 @@ CREATE TABLE IF NOT EXISTS deployments (
 CREATE INDEX IF NOT EXISTS idx_deployments_app_id ON deployments(app_id);
 CREATE INDEX IF NOT EXISTS idx_deployments_environment ON deployments(environment);
 CREATE INDEX IF NOT EXISTS idx_deployments_started_at ON deployments(started_at DESC);
-
--- Policies table
-CREATE TABLE IF NOT EXISTS policies (
-    id TEXT PRIMARY KEY,
-    app_id TEXT NOT NULL,
-    name TEXT NOT NULL,
-    git_branch_pattern TEXT NOT NULL,
-    target_environment TEXT NOT NULL,
-    enabled BOOLEAN NOT NULL DEFAULT 1,
-    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
-
-    FOREIGN KEY (app_id) REFERENCES applications(id) ON DELETE CASCADE,
-    FOREIGN KEY (target_environment) REFERENCES environments(name) ON DELETE RESTRICT,
-    UNIQUE(app_id, name)
-);
-
-CREATE INDEX IF NOT EXISTS idx_policies_app_id ON policies(app_id);
-CREATE INDEX IF NOT EXISTS idx_policies_enabled ON policies(enabled);
-
--- Environments table
-CREATE TABLE IF NOT EXISTS environments (
-    id TEXT PRIMARY KEY,
-    name TEXT UNIQUE NOT NULL,
-    description TEXT,
-    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
-);
-
-CREATE INDEX IF NOT EXISTS idx_environments_name ON environments(name);
 
 -- Record schema version
 INSERT OR IGNORE INTO schema_version (version) VALUES (2);

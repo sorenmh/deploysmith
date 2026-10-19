@@ -4,12 +4,11 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
-	"path/filepath"
 	"testing"
 	"time"
 
 	"github.com/go-chi/chi/v5"
-	"github.com/sorenmh/deploysmith/internal/smithd/db"
+	"github.com/sorenmh/deploysmith/internal/smithd/db/dbtest"
 	"github.com/sorenmh/deploysmith/internal/smithd/events"
 	"github.com/sorenmh/deploysmith/internal/smithd/models"
 	"github.com/sorenmh/deploysmith/internal/smithd/service"
@@ -20,11 +19,7 @@ import (
 // with only the stores wired up
 func newStoreTestServer(t *testing.T) *Server {
 	t.Helper()
-	database, err := db.Open("sqlite", filepath.Join(t.TempDir(), "test.db"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { database.Close() })
+	database := dbtest.Open(t)
 
 	s := &Server{
 		appStore:         store.NewApplicationStore(database),
@@ -54,6 +49,11 @@ func (s *Server) testRouter() http.Handler {
 
 func TestDeploymentsAPI(t *testing.T) {
 	s := newStoreTestServer(t)
+	for _, env := range []string{"production", "staging"} {
+		if _, err := s.environmentStore.Create(models.CreateEnvironmentRequest{Name: env}); err != nil {
+			t.Fatal(err)
+		}
+	}
 
 	app, err := s.appStore.Create("hello")
 	if err != nil {

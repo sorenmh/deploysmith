@@ -3,12 +3,12 @@ package service
 import (
 	"context"
 	"errors"
-	"path/filepath"
 	"sync"
 	"testing"
 	"time"
 
 	"github.com/sorenmh/deploysmith/internal/smithd/db"
+	"github.com/sorenmh/deploysmith/internal/smithd/db/dbtest"
 	"github.com/sorenmh/deploysmith/internal/smithd/events"
 	"github.com/sorenmh/deploysmith/internal/smithd/models"
 	"github.com/sorenmh/deploysmith/internal/smithd/store"
@@ -60,11 +60,7 @@ type fixture struct {
 
 func newFixture(t *testing.T) *fixture {
 	t.Helper()
-	database, err := db.Open("sqlite", filepath.Join(t.TempDir(), "test.db"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { database.Close() })
+	database := dbtest.Open(t)
 
 	f := &fixture{db: database, gitops: &fakeGitops{}, storage: &fakeStorage{}}
 	f.svc = New(Deps{
@@ -83,6 +79,7 @@ func newFixture(t *testing.T) *fixture {
 			t.Fatal(err)
 		}
 	}
+	var err error
 	if f.app, err = f.svc.Apps.Create("hello"); err != nil {
 		t.Fatal(err)
 	}

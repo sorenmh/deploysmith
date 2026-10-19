@@ -266,6 +266,12 @@ secrets:
   slack:
     webhookUrl: ""
 
+  # PostgreSQL connection string (optional), e.g.
+  # postgres://user:pass@host:5432/smithd?sslmode=require. Overrides
+  # config.database.dsn and keeps the password out of the ConfigMap. Also
+  # set config.database.driver to postgres.
+  databaseDsn: ""
+
   # Web Push notifications to the installed web UI (optional). Generate the
   # pair with `smithd vapid-keys`.
   vapid:
@@ -297,6 +303,7 @@ secrets:
   #   - aws-secret-access-key
   #   - gitops-ssh-key
   #   - slack-webhook-url      (optional)
+  #   - database-dsn           (optional, PostgreSQL)
   #   - vapid-public-key       (optional)
   #   - vapid-private-key      (optional)
   #   - flux-webhook-url       (optional)
