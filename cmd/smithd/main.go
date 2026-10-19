@@ -1,10 +1,12 @@
 package main
 
 import (
+	"fmt"
 	"log"
 	"os"
 	"path/filepath"
 
+	webpush "github.com/SherClockHolmes/webpush-go"
 	"github.com/sorenmh/deploysmith/internal/smithd/api"
 	"github.com/sorenmh/deploysmith/internal/smithd/config"
 	"github.com/sorenmh/deploysmith/internal/smithd/db"
@@ -17,6 +19,16 @@ var (
 )
 
 func main() {
+	// Generates the key pair for Web Push (VAPID_PUBLIC_KEY, VAPID_PRIVATE_KEY)
+	if len(os.Args) > 1 && os.Args[1] == "vapid-keys" {
+		private, public, err := webpush.GenerateVAPIDKeys()
+		if err != nil {
+			log.Fatalf("Failed to generate VAPID keys: %v", err)
+		}
+		fmt.Printf("VAPID_PUBLIC_KEY=%s\nVAPID_PRIVATE_KEY=%s\n", public, private)
+		return
+	}
+
 	log.Printf("smithd %s (commit: %s, built: %s)\n", version, commit, date)
 	api.Version = version
 

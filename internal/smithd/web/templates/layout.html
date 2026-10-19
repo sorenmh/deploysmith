@@ -12,6 +12,7 @@
   <!-- Swap error responses too, so validation errors and error pages are shown -->
   <meta name="htmx-config" content='{"responseHandling":[{"code":"204","swap":false},{"code":"...","swap":true}]}'>
   <script src="{{asset "htmx-2.0.4.min.js"}}" defer></script>
+  <script src="{{asset "push.js"}}" defer></script>
 </head>
 <body hx-boost="true">
   <header class="masthead">
@@ -29,7 +30,9 @@
       <a href="/ui/deployments"{{if eq .Section "deployments"}} aria-current="page"{{end}}>Deployments</a>
       <a href="/ui/environments"{{if eq .Section "environments"}} aria-current="page"{{end}}>Environments</a>
     </nav>
-    <span class="whoami">Signed in as {{.User}}</span>
+    <span class="whoami">Signed in as {{.User}}
+      {{if .PushKey}}<button type="button" id="push-toggle" class="push-toggle" data-key="{{.PushKey}}" hidden>Enable notifications</button>{{end}}
+    </span>
     </div>
   </header>
   <main class="page">

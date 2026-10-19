@@ -191,6 +191,21 @@ web UI. For the Slack app's icon, use
 Note that Flux reports a Kustomization as applied without waiting for
 the workloads to become healthy unless the Kustomization sets `wait: true`.
 
+Slack also gets **New version** when a version is published, **New
+application registered**, and the same deployment messages worded as
+**Rollback started / committed / done / failed** when the deployed version
+is older than the one that last succeeded in that environment.
+
+### Push notifications
+
+The web UI can send the same notifications as Web Push, including to an
+iPhone (iOS 16.4 or later) where the UI is added to the Home Screen. Generate
+a key pair once with `smithd vapid-keys` and set `VAPID_PUBLIC_KEY` and
+`VAPID_PRIVATE_KEY` (the chart's `secrets.vapid`); `VAPID_SUBJECT` defaults
+to `UI_PUBLIC_URL`. Every signed-in user then gets an **Enable notifications**
+button in the UI header, and each device that taps it receives every event
+Slack does. On iOS the button only works from the Home Screen app.
+
 ### Running
 
 ```bash

@@ -45,7 +45,7 @@ func (s *Service) DeployVersion(ctx context.Context, appID, versionID, environme
 	}
 
 	ctx = deployCtx(ctx, app.Name, version, environment, "")
-	s.Slack.Requested(ctx, s.slackDeploy(deployment, app, version, nil))
+	s.notifyRequested(ctx, s.slackDeploy(deployment, app, version, nil))
 	err = s.execute(ctx, deployment, app, version, nil)
 	return deployment, err
 }
@@ -91,7 +91,7 @@ func (s *Service) execute(ctx context.Context, deployment *models.Deployment, ap
 		}
 		deployment.Status = "failed"
 		deployment.ErrorMessage = err.Error()
-		s.Slack.Failed(ctx, notice, stage, err.Error())
+		s.notifyFailed(ctx, notice, stage, err.Error())
 		publish(events.EventDeploymentFailed, func(e *events.Event) { e.Error = err.Error() })
 		return err
 	}
@@ -124,7 +124,7 @@ func (s *Service) execute(ctx context.Context, deployment *models.Deployment, ap
 	publish(events.EventDeploymentSucceeded, func(e *events.Event) { e.CommitSHA = commitSHA })
 	notice.CommitSHA = commitSHA
 	watchFlux := s.FluxPoller != nil && s.FluxKustomizationName != ""
-	s.Slack.Committed(ctx, notice, watchFlux)
+	s.notifyCommitted(ctx, notice, watchFlux)
 	logging.LogInfoCtx(ctx, "Deployment succeeded",
 		logging.Field("deployment_id", deployment.ID),
 		logging.Field("commit_sha", commitSHA),
@@ -150,11 +150,11 @@ func (s *Service) watchFlux(ctx context.Context, notice slack.Deploy, committedA
 	result := s.FluxPoller.WaitForCommit(ctx, s.FluxKustomizationName, notice.CommitSHA, contains, fluxApplyTimeout, fluxPollInterval)
 	if !result.Ready {
 		logging.LogWarnCtx(ctx, "Flux did not apply deployment: "+result.Message)
-		s.Slack.Failed(ctx, notice, "Flux", result.Message)
+		s.notifyFailed(ctx, notice, "Flux", result.Message)
 		return
 	}
 	logging.LogInfoCtx(ctx, "Flux applied deployment", logging.Field("commit_sha", notice.CommitSHA))
-	s.Slack.Applied(ctx, notice, time.Since(committedAt))
+	s.notifyApplied(ctx, notice, time.Since(committedAt))
 }
 
 // slackDeploy describes a deployment for notifications

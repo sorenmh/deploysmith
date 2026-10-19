@@ -67,6 +67,18 @@ spec:
               name: {{ include "smithd.secretName" . }}
               key: slack-webhook-url
               optional: true
+        - name: VAPID_PUBLIC_KEY
+          valueFrom:
+            secretKeyRef:
+              name: {{ include "smithd.secretName" . }}
+              key: vapid-public-key
+              optional: true
+        - name: VAPID_PRIVATE_KEY
+          valueFrom:
+            secretKeyRef:
+              name: {{ include "smithd.secretName" . }}
+              key: vapid-private-key
+              optional: true
         - name: FLUX_WEBHOOK_URL
           valueFrom:
             secretKeyRef:
@@ -119,6 +131,7 @@ spec:
         # Static assets hold nothing private, and iOS fetches home screen
         # icons and the web manifest without the session cookie
         - --skip-auth-route=GET=^/ui/static/
+        - --skip-auth-route=GET=^/ui/sw.js$
         {{- with .githubUsers }}
         - --github-user={{ . }}
         {{- end }}

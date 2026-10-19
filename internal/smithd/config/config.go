@@ -39,6 +39,11 @@ type Config struct {
 	// Slack
 	SlackWebhookURL string
 
+	// Web Push (generate keys with `smithd vapid-keys`); push is off without them
+	VAPIDPublicKey  string
+	VAPIDPrivateKey string
+	VAPIDSubject    string
+
 	// Flux Kustomization polling
 	FluxNamespace         string
 	FluxKustomizationName string
@@ -78,6 +83,9 @@ func Load() (*Config, error) {
 		FluxWebhookURL:        getEnv("FLUX_WEBHOOK_URL", ""),
 		FluxWebhookToken:      getEnv("FLUX_WEBHOOK_TOKEN", ""),
 		SlackWebhookURL:       getEnv("SLACK_WEBHOOK_URL", ""),
+		VAPIDPublicKey:        getEnv("VAPID_PUBLIC_KEY", ""),
+		VAPIDPrivateKey:       getEnv("VAPID_PRIVATE_KEY", ""),
+		VAPIDSubject:          getEnv("VAPID_SUBJECT", ""),
 		FluxNamespace:         getEnv("FLUX_NAMESPACE", "flux-system"),
 		FluxKustomizationName: getEnv("FLUX_KUSTOMIZATION_NAME", ""),
 		UIUserHeader:          getEnv("UI_USER_HEADER", ""),

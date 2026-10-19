@@ -9,6 +9,7 @@ import (
 
 	"github.com/sorenmh/deploysmith/internal/smithd/events"
 	"github.com/sorenmh/deploysmith/internal/smithd/flux"
+	"github.com/sorenmh/deploysmith/internal/smithd/push"
 	"github.com/sorenmh/deploysmith/internal/smithd/slack"
 	"github.com/sorenmh/deploysmith/internal/smithd/store"
 )
@@ -48,6 +49,8 @@ type Deps struct {
 	FluxPoller            FluxPoller
 	FluxKustomizationName string
 	Slack                 *slack.Notifier
+	Push                  *push.Notifier
+	PushSubscriptions     *store.PushSubscriptionStore
 
 	// UIBaseURL is the web UI's public URL, used to link to deployments
 	// from notifications. Empty if there is none.

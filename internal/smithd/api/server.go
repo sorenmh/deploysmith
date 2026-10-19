@@ -21,6 +21,7 @@ import (
 	"github.com/sorenmh/deploysmith/internal/smithd/flux"
 	"github.com/sorenmh/deploysmith/internal/smithd/gitops"
 	"github.com/sorenmh/deploysmith/internal/smithd/models"
+	"github.com/sorenmh/deploysmith/internal/smithd/push"
 	"github.com/sorenmh/deploysmith/internal/smithd/service"
 	"github.com/sorenmh/deploysmith/internal/smithd/slack"
 	"github.com/sorenmh/deploysmith/internal/smithd/storage"
@@ -42,6 +43,7 @@ type Server struct {
 	deploymentStore  *store.DeploymentStore
 	policyStore      *store.PolicyStore
 	environmentStore *store.EnvironmentStore
+	pushStore        *store.PushSubscriptionStore
 	storage          *storage.S3Storage
 	publisher        events.Publisher
 	svc              *service.Service
@@ -68,6 +70,7 @@ func NewServer(cfg *config.Config, database *db.DB) *Server {
 		deploymentStore:  store.NewDeploymentStore(database),
 		policyStore:      store.NewPolicyStore(database),
 		environmentStore: store.NewEnvironmentStore(database),
+		pushStore:        store.NewPushSubscriptionStore(database),
 		storage:          s3Storage,
 		publisher:        publisher,
 	}
@@ -84,6 +87,8 @@ func NewServer(cfg *config.Config, database *db.DB) *Server {
 		FluxReconciler:        flux.NewReconciler(cfg.FluxWebhookURL, cfg.FluxWebhookToken),
 		FluxKustomizationName: cfg.FluxKustomizationName,
 		Slack:                 slack.NewNotifier(cfg.SlackWebhookURL),
+		Push:                  push.NewNotifier(s.pushStore, cfg.VAPIDPublicKey, cfg.VAPIDPrivateKey, vapidSubject(cfg)),
+		PushSubscriptions:     s.pushStore,
 		UIBaseURL:             cfg.UIPublicURL,
 	}
 	// Assign only when available, so the interface is nil rather than
@@ -857,4 +862,13 @@ func getKeys(m map[string][]byte) []string {
 // Helper to decode JSON request
 func decodeJSON(r *http.Request, v interface{}) error {
 	return json.NewDecoder(r.Body).Decode(v)
+}
+
+// vapidSubject is the contact push services get with every notification: the
+// configured subject, or else the UI's public URL
+func vapidSubject(cfg *config.Config) string {
+	if cfg.VAPIDSubject != "" {
+		return cfg.VAPIDSubject
+	}
+	return cfg.UIPublicURL
 }

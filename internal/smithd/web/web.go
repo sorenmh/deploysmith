@@ -38,6 +38,7 @@ type page struct {
 	Title   string
 	Section string // highlighted navigation entry
 	User    string
+	PushKey string // VAPID public key; empty if push is not configured
 	Data    any
 }
 
@@ -75,8 +76,18 @@ func New(svc *service.Service, auth AuthConfig) (http.Handler, error) {
 		http.FileServerFS(static).ServeHTTP(w, req)
 	})))
 
+	// The service worker must be served from the UI's root to control all of
+	// it; it must always be revalidated so updates are picked up
+	r.Get("/sw.js", func(w http.ResponseWriter, req *http.Request) {
+		w.Header().Set("Cache-Control", "no-cache")
+		w.Header().Set("Content-Type", "text/javascript; charset=utf-8")
+		http.ServeFileFS(w, req, static, "sw.js")
+	})
+
 	r.Group(func(r chi.Router) {
 		r.Use(authenticate)
+		r.Post("/push/subscribe", ui.handlePushSubscribe)
+		r.Post("/push/unsubscribe", ui.handlePushUnsubscribe)
 		r.Get("/", ui.handleHome)
 		r.Get("/apps", ui.handleApps)
 		r.Get("/apps/{appId}", ui.handleApp)
@@ -163,6 +174,7 @@ func (ui *UI) render(w http.ResponseWriter, r *http.Request, status int, name st
 	}
 
 	p.User = UserFromContext(r.Context())
+	p.PushKey = ui.svc.PushPublicKey()
 
 	var buf bytes.Buffer
 	if err := tmpl.ExecuteTemplate(&buf, "layout", p); err != nil {

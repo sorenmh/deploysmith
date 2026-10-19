@@ -11,7 +11,7 @@ import (
 
 // VersionPublished notifies that a new version was published
 func (s *Service) VersionPublished(ctx context.Context, app *models.Application, version *models.Version) {
-	go s.Slack.VersionPublished(context.WithoutCancel(ctx), app.Name, version.VersionID, version.GitBranch, version.GitCommitter)
+	go s.notifyVersionPublished(context.WithoutCancel(ctx), app.Name, version.VersionID, version.GitBranch, version.GitCommitter)
 }
 
 // TriggerAutoDeploys starts an auto-deploy, in the background, for every
@@ -57,7 +57,7 @@ func (s *Service) autoDeploy(ctx context.Context, app *models.Application, versi
 		logging.LogErrorCtx(ctx, "Auto-deploy failed to create deployment record: "+err.Error(), err)
 		return
 	}
-	s.Slack.Requested(ctx, s.slackDeploy(deployment, app, version, &policy))
+	s.notifyRequested(ctx, s.slackDeploy(deployment, app, version, &policy))
 
 	// execute records and reports failures itself
 	_ = s.execute(ctx, deployment, app, version, &policy)

@@ -163,6 +163,26 @@ a {
   font-size: var(--step--1);
 }
 
+.push-toggle {
+  margin-left: 0.75rem;
+  padding: 0.15rem 0.6rem;
+  border: 1px solid var(--muted);
+  border-radius: 999px;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+}
+
+.push-toggle[data-subscribed="true"] {
+  border-color: currentColor;
+}
+
+.push-toggle:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+
 /* Page */
 
 .page {

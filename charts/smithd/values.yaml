@@ -266,6 +266,12 @@ secrets:
   slack:
     webhookUrl: ""
 
+  # Web Push notifications to the installed web UI (optional). Generate the
+  # pair with `smithd vapid-keys`.
+  vapid:
+    publicKey: ""
+    privateKey: ""
+
   # Flux webhook receiver (optional)
   flux:
     webhookUrl: ""
@@ -291,6 +297,8 @@ secrets:
   #   - aws-secret-access-key
   #   - gitops-ssh-key
   #   - slack-webhook-url      (optional)
+  #   - vapid-public-key       (optional)
+  #   - vapid-private-key      (optional)
   #   - flux-webhook-url       (optional)
   #   - flux-webhook-token     (optional)
   #   - nats-url               (optional)
