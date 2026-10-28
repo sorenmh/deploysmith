@@ -1,104 +1,39 @@
 # CI/CD Pipeline
 
-DeploySmith uses Earthly for consistent builds across local development and CI/CD environments.
+CI runs the same `make docker-*` targets you run locally. Each image has a multi-stage
+Dockerfile (`Dockerfile.smithd`, `Dockerfile.forge`, `Dockerfile.smithctl`); everything in
+them is pinned exactly (base image tags and digests, Go, golangci-lint, GitHub Actions by
+SHA, runner image).
 
-## Benefits of Using Earthly
-
-1. **Same Build Everywhere**: Run the exact same build commands locally and in CI
-2. **Reproducible Builds**: Docker-based builds ensure consistency
-3. **Cached Layers**: Fast incremental builds with layer caching
-4. **Self-Contained**: No need to install Go, linters, or tools on the host
-
-## Local Development
+## Local development
 
 ```bash
-# Run all checks (what CI runs)
-earthly +test
-earthly +lint
-earthly +build-smithd
-earthly +build-forge
-
-# Or run everything at once
-earthly +all
-
-# Build Docker images
-earthly +docker-smithd
-earthly +docker-forge
+make docker-lint     # gofmt, go vet, golangci-lint (Dockerfile.smithd, lint stage)
+make docker-test     # go test against a throwaway PostgreSQL (test stage)
+make docker-build    # build the smithd, forge and smithctl images, tagged :local
 ```
 
-## GitHub Actions Workflows
+Lint and test cover the whole repository (one Go module), so they live in
+`Dockerfile.smithd` only. For fast iteration use `make test`, `make lint` and
+`make build` natively.
 
-### Test Workflow (`.github/workflows/test.yml`)
+## GitHub Actions (`.github/workflows/ci.yml`)
 
-Runs on every push and PR:
-- Uses Earthly for consistent testing
-- Runs unit tests with `earthly +test`
-- Runs linter with `earthly +lint`
-- Builds both binaries with `earthly +build-smithd` and `earthly +build-forge`
+| Job | Runs on | What it does |
+| -- | -- | -- |
+| `lint` | every push and PR | `make docker-lint` |
+| `test` | every push and PR | `make docker-test` |
+| `build` | push to master, after lint and test | builds the three images, pushes `ghcr.io/sorenmh/<image>:<sha7>-<run number>` |
+| `release` | push of a `v*` tag, after lint and test | GoReleaser (GitHub release with binaries), then pushes `ghcr.io/sorenmh/<image>:vX.Y.Z` and `:latest` |
 
-### Release Workflows
-
-**smithd**: `.github/workflows/release-smithd.yml`
-- Triggered by tags matching `smithd/v*`
-- Uses GoReleaser for multi-platform binary releases
-- Uses Earthly for Docker image builds
-- Pushes to ghcr.io
-
-**forge**: `.github/workflows/release-forge.yml`
-- Triggered by tags matching `forge/v*`
-- Uses GoReleaser for multi-platform binary releases
-- Uses Earthly for Docker image builds
-- Pushes to ghcr.io
-
-## Creating a Release
+## Creating a release
 
 ```bash
-# For smithd
-git tag smithd/v1.0.0
-git push origin smithd/v1.0.0
-
-# For forge
-git tag forge/v1.0.0
-git push origin forge/v1.0.0
+git tag v1.0.0
+git push origin v1.0.0
 ```
 
-This will:
-1. Run GoReleaser to build binaries for Linux/macOS/Windows (amd64/arm64)
-2. Create a GitHub Release with changelogs
-3. Build Docker image with Earthly
-4. Push Docker image to ghcr.io
+## Known issues
 
-## Earthfile Targets
-
-- `+deps` - Download Go dependencies
-- `+build-smithd` - Build smithd binary
-- `+build-forge` - Build forge binary
-- `+test` - Run unit tests
-- `+lint` - Run golangci-lint
-- `+docker-smithd` - Build smithd Docker image
-- `+docker-forge` - Build forge Docker image
-- `+all` - Run test, lint, and build all binaries
-
-## Configuration
-
-### Go Version
-
-The project uses Go 1.21 (specified in `go.mod` and Earthfile).
-
-### Linter
-
-golangci-lint runs in the Earthfile with a 5-minute timeout. Warnings are non-blocking.
-
-## Troubleshooting
-
-### "No such tool 'covdata'" error
-
-This happens when using `-race` flag with coverage. The Earthfile runs tests without race detection to avoid this issue.
-
-### Linter version mismatch
-
-The linter runs inside the Earthly container with Go 1.21, so there's no version mismatch between the linter and the Go version.
-
-### Local vs CI differences
-
-There shouldn't be any! That's the whole point of using Earthly. If it works locally with `earthly +test`, it will work in CI.
+- golangci-lint reports 45 findings (errcheck, staticcheck) that predate the pipeline. They
+  are shown but do not fail the lint stage yet; gofmt and `go vet` do.

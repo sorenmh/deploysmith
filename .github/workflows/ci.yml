@@ -1,0 +1,92 @@
+name: CI/CD
+
+on:
+  push:
+    branches: ["**"]
+    tags: ["v*"]
+  pull_request:
+    branches: ["**"]
+
+permissions:
+  contents: read
+
+jobs:
+  lint:
+    runs-on: ubuntu-26.04
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Lint
+        run: make docker-lint
+
+  test:
+    runs-on: ubuntu-26.04
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Test
+        run: make docker-test
+
+  build:
+    # Only master is built and pushed; tags are handled by the release job.
+    if: github.event_name == 'push' && github.ref == 'refs/heads/master'
+    runs-on: ubuntu-26.04
+    needs: [lint, test]
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Log in to ghcr.io
+        uses: docker/login-action@81c6f93d4bc991e510b342a00b419b3bb4efc5c6 # v4.7.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Build and push images
+        run: |
+          short="$(echo "${{ github.sha }}" | cut -c1-7)"
+          version="$short-${{ github.run_number }}"
+          make docker-build VERSION="$version" COMMIT="$short"
+          for image in smithd forge smithctl; do
+            docker tag ghcr.io/sorenmh/$image:local ghcr.io/sorenmh/$image:$version
+            docker push ghcr.io/sorenmh/$image:$version
+          done
+
+  release:
+    # Tagged releases: GitHub release with binaries, and the vX.Y.Z / latest images.
+    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-26.04
+    needs: [lint, test]
+    permissions:
+      contents: write
+      packages: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+      - name: Run GoReleaser
+        uses: goreleaser/goreleaser-action@a4f02ab5355a589de60d917a659ce617ed19b3de # v7.3.0
+        with:
+          distribution: goreleaser
+          version: "~> v2"
+          args: release --clean
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      - name: Log in to ghcr.io
+        uses: docker/login-action@81c6f93d4bc991e510b342a00b419b3bb4efc5c6 # v4.7.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Build and push images
+        run: |
+          version="${GITHUB_REF_NAME}"
+          make docker-build VERSION="$version" COMMIT="$(echo "${{ github.sha }}" | cut -c1-7)"
+          for image in smithd forge smithctl; do
+            docker tag ghcr.io/sorenmh/$image:local ghcr.io/sorenmh/$image:$version
+            docker tag ghcr.io/sorenmh/$image:local ghcr.io/sorenmh/$image:latest
+            docker push ghcr.io/sorenmh/$image:$version
+            docker push ghcr.io/sorenmh/$image:latest
+          done

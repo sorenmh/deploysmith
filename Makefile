@@ -1,4 +1,4 @@
-.PHONY: build build-smithd build-forge build-smithctl build-smithctl-all docker test lint clean help
+.PHONY: build build-smithd build-forge build-smithctl test lint clean help docker-lint docker-test docker-build docker-build-smithd docker-build-forge docker-build-smithctl
 
 # Default target
 .DEFAULT_GOAL := help
@@ -28,38 +28,27 @@ build-smithctl: ## Build smithctl CLI
 		-ldflags "-X github.com/sorenmh/deploysmith/internal/smithctl/cmd.Version=dev -X github.com/sorenmh/deploysmith/internal/smithctl/cmd.GitCommit=$$(git rev-parse --short HEAD 2>/dev/null || echo 'unknown') -X github.com/sorenmh/deploysmith/internal/smithctl/cmd.BuildTime=$$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
 		./cmd/smithctl
 
-# Earthly builds
-build-smithctl-all: ## Build smithctl for all platforms (Linux, macOS, Windows) using Earthly
-	@echo "Building smithctl for all platforms..."
-	earthly +build-smithctl-all
+# Docker — mirrors CI exactly. Lint and test cover the whole repo (Dockerfile.smithd).
+REGISTRY ?= ghcr.io/sorenmh
+VERSION ?= dev
+COMMIT ?= $(shell git rev-parse --short HEAD 2>/dev/null || echo unknown)
 
-build-forge-all: ## Build forge for all platforms (Linux, macOS, Windows) using Earthly
-	@echo "Building forge for all platforms..."
-	earthly +build-forge-all
+docker-lint: ## Run golangci-lint in Docker
+	docker build -f Dockerfile.smithd --target lint -t smithd-lint .
 
-earthly-build-smithd: ## Build smithd using Earthly (Linux binary)
-	earthly +build-smithd
+docker-test: ## Run the tests in Docker, against a throwaway PostgreSQL
+	docker build -f Dockerfile.smithd --target test -t smithd-test .
 
-earthly-build-forge: ## Build forge using Earthly (Linux binary)
-	earthly +build-forge
+docker-build: docker-build-smithd docker-build-forge docker-build-smithctl ## Build all Docker images (tagged :local)
 
-earthly-build-smithctl: ## Build smithctl using Earthly (Linux binary)
-	earthly +build-smithctl
+docker-build-smithd: ## Build the smithd image
+	docker build -f Dockerfile.smithd --build-arg VERSION=$(VERSION) --build-arg COMMIT=$(COMMIT) -t $(REGISTRY)/smithd:local .
 
-earthly-all: ## Build everything using Earthly (includes tests and linting)
-	earthly +all
+docker-build-forge: ## Build the forge image
+	docker build -f Dockerfile.forge --build-arg VERSION=$(VERSION) --build-arg COMMIT=$(COMMIT) -t $(REGISTRY)/forge:local .
 
-# Docker images
-docker: docker-smithd docker-forge docker-smithctl ## Build all Docker images
-
-docker-smithd: ## Build smithd Docker image
-	earthly +docker-smithd
-
-docker-forge: ## Build forge Docker image
-	earthly +docker-forge
-
-docker-smithctl: ## Build smithctl Docker image
-	earthly +docker-smithctl
+docker-build-smithctl: ## Build the smithctl image
+	docker build -f Dockerfile.smithctl --build-arg VERSION=$(VERSION) --build-arg COMMIT=$(COMMIT) -t $(REGISTRY)/smithctl:local .
 
 # Testing
 test: ## Run tests
@@ -68,18 +57,9 @@ test: ## Run tests
 test-acceptance: ## Run acceptance tests
 	go test -v ./tests/acceptance/...
 
-earthly-test: ## Run tests using Earthly
-	earthly +test
-
-earthly-test-acceptance: ## Run acceptance tests using Earthly
-	earthly +test-acceptance
-
 # Linting
 lint: ## Run golangci-lint
 	golangci-lint run --timeout 5m
-
-earthly-lint: ## Run linter using Earthly
-	earthly +lint
 
 # Clean
 clean: ## Clean build artifacts

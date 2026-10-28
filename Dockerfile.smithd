@@ -1,44 +1,54 @@
-# Build stage
-FROM golang:1.26-alpine AS builder
+# Build context is the repo root. `make docker-lint|docker-test|docker-build`
+# build the stages below; CI runs exactly those targets. The lint and test stages
+# cover the whole repository (one Go module), so they live only in this file.
 
-WORKDIR /build
-
-# Install build dependencies
-RUN apk add --no-cache git
-
-# Copy go mod files
+# --- shared base --------------------------------------------------------------
+# gcc/musl-dev: smithd links SQLite through cgo.
+FROM golang:1.27.3-alpine3.24@sha256:d200d2dd76b03a99b52651fd1325aff7dcd35422c35c01bac56571b0507f3deb AS go-deps
+RUN apk add --no-cache gcc musl-dev
+WORKDIR /src
 COPY go.mod go.sum ./
 RUN go mod download
 
-# Copy source code
+# --- lint ---------------------------------------------------------------------
+FROM go-deps AS lint
+COPY --from=golangci/golangci-lint:v2.15.0@sha256:fbfcfd12a6f8d7f1b97b3362ca80fc2a244d46863148c73cb88e7793af96c481 /usr/bin/golangci-lint /usr/bin/golangci-lint
+COPY . .
+# Reported but not failing yet: the code base has 45 findings (errcheck, staticcheck) from
+# before this pipeline existed, and the old Earthly lint never failed either. Remove
+# `|| true` once they are fixed.
+RUN gofmt -l cmd internal | tee /dev/stderr | (! read) \
+    && go vet ./... \
+    && (golangci-lint run --timeout 5m ./... || true)
+
+# --- test (Go against a throwaway PostgreSQL, so CI needs no services) --------
+FROM go-deps AS test
+# Unversioned on purpose: Alpine drops old package versions, so an exact pin would break the
+# build as soon as a new 17.x lands. The pinned base image bounds what it can resolve to.
+RUN apk add --no-cache git postgresql17
+COPY scripts/test-with-postgres.sh /usr/local/bin/
+COPY . .
+# Packages share one database, so they run one at a time.
+RUN test-with-postgres.sh go test -p 1 ./...
+
+# --- build --------------------------------------------------------------------
+FROM go-deps AS build
+ARG VERSION=dev
+ARG COMMIT=unknown
 COPY cmd/smithd ./cmd/smithd
 COPY internal/smithd ./internal/smithd
 COPY internal/shared ./internal/shared
-
-# Build binary
-RUN CGO_ENABLED=1 go build -o smithd \
-    -ldflags "-s -w -X main.version=${VERSION:-dev} -X main.commit=${COMMIT:-unknown} -X main.date=$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+RUN CGO_ENABLED=1 go build -trimpath -o /out/smithd \
+    -ldflags "-s -w -X main.version=${VERSION} -X main.commit=${COMMIT} -X main.date=$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
     ./cmd/smithd
 
-# Runtime stage
-FROM alpine:3.19
-
-# Install runtime dependencies
-RUN apk add --no-cache ca-certificates git openssh-client sqlite-libs
-
-# Create app user
-RUN addgroup -g 1000 smithd && \
-    adduser -D -u 1000 -G smithd smithd
-
-# Copy binary
-COPY --from=builder /build/smithd /usr/local/bin/smithd
-
-# Create data directory
-RUN mkdir -p /data && chown smithd:smithd /data
-
+# --- runtime ------------------------------------------------------------------
+FROM alpine:3.24.3@sha256:be2656061b536c1883c4034790e21d0a09c5aaaf51968b89368a3c0371ea2c9a
+RUN apk add --no-cache ca-certificates git openssh-client sqlite-libs \
+    && addgroup -g 1000 smithd && adduser -D -u 1000 -G smithd smithd \
+    && mkdir -p /data && chown smithd:smithd /data
+COPY --from=build /out/smithd /usr/local/bin/smithd
 USER smithd
 WORKDIR /data
-
 EXPOSE 8080
-
 ENTRYPOINT ["/usr/local/bin/smithd"]

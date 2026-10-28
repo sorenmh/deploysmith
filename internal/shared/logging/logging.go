@@ -215,6 +215,7 @@ func (l *Logger) Sync() error { return l.inner.Sync() }
 func (l *Logger) with(fields ...zap.Field) *Logger {
 	return &Logger{inner: l.inner.With(fields...)}
 }
+
 // callerSkipOffset counts the number of consecutive stack frames that belong
 // to this package above the call site. Passing that count to zap.AddCallerSkip
 // makes zap report the first frame outside the logging package, regardless of

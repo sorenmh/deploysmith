@@ -91,11 +91,11 @@ type Policy struct {
 
 // Environment represents an environment
 type Environment struct {
-	ID          string     `json:"id"`
-	Name        string     `json:"name"`
-	Description *string    `json:"description,omitempty"`
-	CreatedAt   time.Time  `json:"createdAt"`
-	UpdatedAt   time.Time  `json:"updatedAt"`
+	ID          string    `json:"id"`
+	Name        string    `json:"name"`
+	Description *string   `json:"description,omitempty"`
+	CreatedAt   time.Time `json:"createdAt"`
+	UpdatedAt   time.Time `json:"updatedAt"`
 }
 
 // CreateEnvironmentRequest is the request to create a new environment

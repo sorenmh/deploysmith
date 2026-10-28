@@ -1,0 +1,10 @@
+.git
+.beads
+.github
+bin
+data
+charts
+terraform
+docs
+*.db
+*.md

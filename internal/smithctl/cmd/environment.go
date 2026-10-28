@@ -11,9 +11,9 @@ import (
 )
 
 var environmentCmd = &cobra.Command{
-	Use:   "environment",
-	Short: "Manage environments",
-	Long:  `Create, list, update, and delete environments.`,
+	Use:     "environment",
+	Short:   "Manage environments",
+	Long:    `Create, list, update, and delete environments.`,
 	Aliases: []string{"env"},
 }
 
