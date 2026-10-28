@@ -13,7 +13,7 @@ func TestSetAuth(t *testing.T) {
 	var gotKey, gotAuth string
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		gotKey, gotAuth = r.Header.Get("X-API-Key"), r.Header.Get("Authorization")
-		json.NewEncoder(w).Encode(map[string]any{"environments": []any{}})
+		_ = json.NewEncoder(w).Encode(map[string]any{"environments": []any{}})
 	}))
 	t.Cleanup(srv.Close)
 
@@ -37,12 +37,12 @@ func TestWaitForLogin(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
 		case "/api/v1/auth/device":
-			json.NewEncoder(w).Encode(DeviceLogin{DeviceCode: "dc", UserCode: "ABCD-1234", VerificationURI: "https://github.com/login/device", ExpiresIn: 900, Interval: 5})
+			_ = json.NewEncoder(w).Encode(DeviceLogin{DeviceCode: "dc", UserCode: "ABCD-1234", VerificationURI: "https://github.com/login/device", ExpiresIn: 900, Interval: 5})
 		case "/api/v1/auth/device/token":
 			var req struct {
 				DeviceCode string `json:"deviceCode"`
 			}
-			json.NewDecoder(r.Body).Decode(&req)
+			_ = json.NewDecoder(r.Body).Decode(&req)
 			if req.DeviceCode != "dc" {
 				http.Error(w, "wrong device code", http.StatusBadRequest)
 				return
@@ -51,12 +51,12 @@ func TestWaitForLogin(t *testing.T) {
 			switch polls {
 			case 1:
 				w.WriteHeader(http.StatusAccepted)
-				json.NewEncoder(w).Encode(map[string]any{"status": "pending"})
+				_ = json.NewEncoder(w).Encode(map[string]any{"status": "pending"})
 			case 2:
 				w.WriteHeader(http.StatusAccepted)
-				json.NewEncoder(w).Encode(map[string]any{"status": "pending", "interval": 10})
+				_ = json.NewEncoder(w).Encode(map[string]any{"status": "pending", "interval": 10})
 			default:
-				json.NewEncoder(w).Encode(LoginSession{Token: "smithd_t", Login: "octocat", ExpiresAt: time.Now().Add(time.Hour)})
+				_ = json.NewEncoder(w).Encode(LoginSession{Token: "smithd_t", Login: "octocat", ExpiresAt: time.Now().Add(time.Hour)})
 			}
 		}
 	}))
@@ -85,7 +85,7 @@ func TestWaitForLogin(t *testing.T) {
 func TestWaitForLoginFails(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusForbidden)
-		json.NewEncoder(w).Encode(map[string]any{"error": map[string]string{"code": "not_allowed", "message": "Your GitHub account may not sign in to this server"}})
+		_ = json.NewEncoder(w).Encode(map[string]any{"error": map[string]string{"code": "not_allowed", "message": "Your GitHub account may not sign in to this server"}})
 	}))
 	t.Cleanup(srv.Close)
 
@@ -98,7 +98,7 @@ func TestWaitForLoginFails(t *testing.T) {
 func TestWaitForLoginExpires(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusAccepted)
-		json.NewEncoder(w).Encode(map[string]any{"status": "pending"})
+		_ = json.NewEncoder(w).Encode(map[string]any{"status": "pending"})
 	}))
 	t.Cleanup(srv.Close)
 

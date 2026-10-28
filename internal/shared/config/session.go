@@ -76,13 +76,14 @@ func saveSessions(sessions map[string]Session) error {
 	if err != nil {
 		return fmt.Errorf("failed to write sessions: %w", err)
 	}
-	defer os.Remove(tmp.Name())
+	// Removes the temporary file if anything fails; a no-op after the rename
+	defer func() { _ = os.Remove(tmp.Name()) }()
 	if err := tmp.Chmod(0600); err != nil {
-		tmp.Close()
+		_ = tmp.Close()
 		return fmt.Errorf("failed to write sessions: %w", err)
 	}
 	if _, err := tmp.Write(data); err != nil {
-		tmp.Close()
+		_ = tmp.Close()
 		return fmt.Errorf("failed to write sessions: %w", err)
 	}
 	if err := tmp.Close(); err != nil {
