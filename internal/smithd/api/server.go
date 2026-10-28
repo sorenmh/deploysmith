@@ -15,6 +15,7 @@ import (
 
 	"github.com/go-chi/chi/v5"
 	"github.com/sorenmh/deploysmith/internal/shared/logging"
+	"github.com/sorenmh/deploysmith/internal/smithd/auth"
 	"github.com/sorenmh/deploysmith/internal/smithd/config"
 	"github.com/sorenmh/deploysmith/internal/smithd/db"
 	"github.com/sorenmh/deploysmith/internal/smithd/events"
@@ -47,7 +48,8 @@ type Server struct {
 	storage          *storage.S3Storage
 	publisher        events.Publisher
 	svc              *service.Service
-	uiRouter         *chi.Mux // set when the UI has its own listener
+	login            *auth.Login // nil unless login with GitHub is configured
+	uiRouter         *chi.Mux    // set when the UI has its own listener
 }
 
 // NewServer creates a new HTTP server
@@ -97,6 +99,7 @@ func NewServer(cfg *config.Config, database *db.DB) *Server {
 		deps.FluxPoller = poller
 	}
 	s.svc = service.New(deps)
+	s.login = newLogin(cfg, database)
 
 	s.setupRoutes()
 	return s
@@ -114,65 +117,111 @@ func (s *Server) setupRoutes() {
 	s.router.Route("/api/v1", func(r chi.Router) {
 		r.Use(CORS)
 		r.Use(ContentType)
-		r.Use(Auth(s.cfg.APIKeys))
 
-		// Application routes
-		r.Post("/apps", s.handleRegisterApp)
-		r.Get("/apps", s.handleListApps)
-		r.Get("/apps/{appId}", s.handleGetApp)
+		// Signing in to smithctl, before there is a session
+		r.Post("/auth/device", s.handleStartDeviceLogin)
+		r.Post("/auth/device/token", s.handleDeviceToken)
 
-		// Version routes
-		r.Post("/apps/{appId}/versions/draft", s.handleDraftVersion)
-		r.Post("/apps/{appId}/versions/{versionId}/publish", s.handlePublishVersion)
-		r.Get("/apps/{appId}/versions", s.handleListVersions)
-		r.Get("/apps/{appId}/versions/{versionId}", s.handleGetVersion)
-
-		// Deployment routes
-		r.Post("/apps/{appId}/versions/{versionId}/deploy", s.handleDeployVersion)
-		r.Get("/deployments", s.handleListDeployments)
-		r.Get("/deployments/{deploymentId}", s.handleGetDeployment)
-		r.Get("/overview", s.handleOverview)
-
-		// Environment routes
-		r.Post("/environments", s.handleCreateEnvironment)
-		r.Get("/environments", s.handleListEnvironments)
-		r.Get("/environments/{environmentId}", s.handleGetEnvironment)
-		r.Put("/environments/{environmentId}", s.handleUpdateEnvironment)
-		r.Delete("/environments/{environmentId}", s.handleDeleteEnvironment)
-
-		// Policy routes
-		r.Post("/apps/{appId}/policies", s.handleCreatePolicy)
-		r.Get("/apps/{appId}/policies", s.handleListPolicies)
-		r.Patch("/apps/{appId}/policies/{policyId}", s.handleUpdatePolicy)
-		r.Delete("/apps/{appId}/policies/{policyId}", s.handleDeletePolicy)
-
-		// Admin routes (DB migration between drivers)
-		r.Get("/admin/db-export", s.handleDBExport)
-		r.Post("/admin/db-import", s.handleDBImport)
+		r.Group(func(r chi.Router) {
+			r.Use(Auth(s.cfg.APIKeys, s.login))
+			s.setupAuthenticatedRoutes(r)
+		})
 	})
 
-	// Web UI, only when an authenticating proxy is configured
-	if s.cfg.UIUserHeader != "" {
-		ui, err := web.New(s.svc, web.AuthConfig{
-			UserHeader:     s.cfg.UIUserHeader,
-			AllowedUsers:   s.cfg.UIAllowedUsers,
-			TrustedOrigins: s.cfg.UITrustedOrigins,
-		})
-		if err != nil {
-			log.Fatalf("Failed to set up web UI: %v", err)
-		}
-		router := s.router
-		if s.cfg.UIListenAddr != "" {
-			s.uiRouter = chi.NewRouter()
-			s.uiRouter.Use(Logger)
-			router = s.uiRouter
-		}
-		router.Mount(web.Prefix, ui)
-		router.Get("/", func(w http.ResponseWriter, r *http.Request) {
-			http.Redirect(w, r, web.Prefix+"/", http.StatusFound)
-		})
+	s.setupUI()
+}
+
+// setupAuthenticatedRoutes configures the API routes that need an API key
+// or a session
+func (s *Server) setupAuthenticatedRoutes(r chi.Router) {
+	// Who am I, and logging out of a session
+	r.Get("/auth/whoami", s.handleWhoAmI)
+	r.Post("/auth/logout", s.handleLogout)
+
+	// Application routes
+	r.Post("/apps", s.handleRegisterApp)
+	r.Get("/apps", s.handleListApps)
+	r.Get("/apps/{appId}", s.handleGetApp)
+
+	// Version routes
+	r.Post("/apps/{appId}/versions/draft", s.handleDraftVersion)
+	r.Post("/apps/{appId}/versions/{versionId}/publish", s.handlePublishVersion)
+	r.Get("/apps/{appId}/versions", s.handleListVersions)
+	r.Get("/apps/{appId}/versions/{versionId}", s.handleGetVersion)
+
+	// Deployment routes
+	r.Post("/apps/{appId}/versions/{versionId}/deploy", s.handleDeployVersion)
+	r.Get("/deployments", s.handleListDeployments)
+	r.Get("/deployments/{deploymentId}", s.handleGetDeployment)
+	r.Get("/overview", s.handleOverview)
+
+	// Environment routes
+	r.Post("/environments", s.handleCreateEnvironment)
+	r.Get("/environments", s.handleListEnvironments)
+	r.Get("/environments/{environmentId}", s.handleGetEnvironment)
+	r.Put("/environments/{environmentId}", s.handleUpdateEnvironment)
+	r.Delete("/environments/{environmentId}", s.handleDeleteEnvironment)
+
+	// Policy routes
+	r.Post("/apps/{appId}/policies", s.handleCreatePolicy)
+	r.Get("/apps/{appId}/policies", s.handleListPolicies)
+	r.Patch("/apps/{appId}/policies/{policyId}", s.handleUpdatePolicy)
+	r.Delete("/apps/{appId}/policies/{policyId}", s.handleDeletePolicy)
+
+	// Admin routes (DB migration between drivers)
+	r.Get("/admin/db-export", s.handleDBExport)
+	r.Post("/admin/db-import", s.handleDBImport)
+}
+
+// setupUI mounts the web UI, served when it signs people in with GitHub or
+// when an authenticating proxy is configured
+func (s *Server) setupUI() {
+	authCfg := web.AuthConfig{
+		UserHeader:     s.cfg.UIUserHeader,
+		AllowedUsers:   s.cfg.UIAllowedUsers,
+		TrustedOrigins: s.cfg.UITrustedOrigins,
+		Login:          s.login,
+		PublicURL:      s.cfg.UIPublicURL,
+	}
+	if authCfg.UserHeader == "" && authCfg.Login == nil {
+		return
+	}
+
+	ui, err := web.New(s.svc, authCfg)
+	if err != nil {
+		log.Fatalf("Failed to set up web UI: %v", err)
+	}
+	router := s.router
+	if s.cfg.UIListenAddr != "" {
+		s.uiRouter = chi.NewRouter()
+		s.uiRouter.Use(Logger)
+		router = s.uiRouter
+	}
+	router.Mount(web.Prefix, ui)
+	router.Get("/", func(w http.ResponseWriter, r *http.Request) {
+		http.Redirect(w, r, web.Prefix+"/", http.StatusFound)
+	})
+	if s.login != nil {
+		log.Printf("Web UI enabled at %s (login with GitHub)", web.Prefix)
+	} else {
 		log.Printf("Web UI enabled at %s (user header: %s)", web.Prefix, s.cfg.UIUserHeader)
 	}
+}
+
+// newLogin returns the login with GitHub service, or nil if it is not
+// configured
+func newLogin(cfg *config.Config, database *db.DB) *auth.Login {
+	if !cfg.GitHubLoginEnabled() {
+		return nil
+	}
+	log.Printf("Login with GitHub enabled (%s)", cfg.GitHubURL)
+	return auth.NewLogin(auth.Config{
+		GitHub:       auth.NewGitHub(cfg.GitHubClientID, cfg.GitHubClientSecret, cfg.GitHubURL, cfg.GitHubAPIURL),
+		AllowedOrg:   cfg.GitHubAllowedOrg,
+		AllowedTeam:  cfg.GitHubAllowedTeam,
+		AllowedUsers: cfg.GitHubAllowedUsers,
+		SessionTTL:   cfg.SessionTTL,
+	}, store.NewUserStore(database), store.NewSessionStore(database))
 }
 
 // Start starts the HTTP server
@@ -692,7 +741,14 @@ func (s *Server) handleDeployVersion(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	deployment, err := s.svc.DeployVersion(r.Context(), appID, versionID, req.Environment, req.TriggeredBy)
+	// A signed-in user is who triggered it, whatever the client says; API
+	// key clients name themselves
+	triggeredBy := req.TriggeredBy
+	if id, ok := auth.FromContext(r.Context()); ok && id.Kind == auth.KindUser {
+		triggeredBy = id.Login
+	}
+
+	deployment, err := s.svc.DeployVersion(r.Context(), appID, versionID, req.Environment, triggeredBy)
 	if err != nil {
 		writeServiceError(w, err, "Deployment failed")
 		return
