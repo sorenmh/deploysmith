@@ -318,8 +318,7 @@ func TestReadRejectsSymlinks(t *testing.T) {
 	if err := tarWriter.WriteHeader(&tar.Header{Name: "main.tf", Typeflag: tar.TypeSymlink, Linkname: "/etc/passwd"}); err != nil {
 		t.Fatal(err)
 	}
-	tarWriter.Close()
-	gzWriter.Close()
+	closeArchive(t, tarWriter, gzWriter)
 
 	_, err := Read(&buf)
 	requireProblem(t, err, "only regular files and directories")
@@ -332,8 +331,7 @@ func TestReadDirectories(t *testing.T) {
 	if err := tarWriter.WriteHeader(&tar.Header{Name: "./.terraform/", Typeflag: tar.TypeDir, Mode: 0755}); err != nil {
 		t.Fatal(err)
 	}
-	tarWriter.Close()
-	gzWriter.Close()
+	closeArchive(t, tarWriter, gzWriter)
 
 	files, err := Read(&buf)
 	if err != nil {
@@ -341,6 +339,16 @@ func TestReadDirectories(t *testing.T) {
 	}
 	if _, ok := files[".terraform/"]; !ok {
 		t.Fatalf("directory not returned: %v", files)
+	}
+}
+
+func closeArchive(t *testing.T, tarWriter *tar.Writer, gzWriter *gzip.Writer) {
+	t.Helper()
+	if err := tarWriter.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if err := gzWriter.Close(); err != nil {
+		t.Fatal(err)
 	}
 }
 

@@ -338,7 +338,7 @@ func Read(r io.Reader) (map[string][]byte, error) {
 	if err != nil {
 		return nil, fmt.Errorf("failed to create gzip reader: %w", err)
 	}
-	defer gzReader.Close()
+	defer func() { _ = gzReader.Close() }()
 
 	// Guard against archives that unpack to far more than they weigh
 	limited := &io.LimitedReader{R: gzReader, N: maxSize + 1}

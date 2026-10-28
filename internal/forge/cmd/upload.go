@@ -272,10 +272,10 @@ func checkArtifactType(uploading string) error {
 	if initialized == "" {
 		initialized = "manifests"
 	}
-	switch {
-	case initialized == uploading:
+	switch initialized {
+	case uploading:
 		return nil
-	case initialized == tfbundle.ArtifactType:
+	case tfbundle.ArtifactType:
 		return fmt.Errorf("version %s was initialized for a terraform bundle; upload it with 'forge upload --terraform <dir>'", versionInfo.Version)
 	default:
 		return fmt.Errorf("version %s was initialized for %s; run 'forge init --artifact-type %s' to upload a terraform bundle", versionInfo.Version, initialized, uploading)

@@ -23,9 +23,12 @@ func TestArtifactTypeMigration(t *testing.T) {
 				t.Fatal(err)
 			}
 			t.Cleanup(func() {
-				d.Exec("DELETE FROM versions")
-				d.Exec("DELETE FROM applications")
-				d.Close()
+				for _, table := range []string{"versions", "applications"} {
+					if _, err := d.Exec("DELETE FROM " + table); err != nil {
+						t.Errorf("failed to empty %s: %v", table, err)
+					}
+				}
+				_ = d.Close()
 			})
 
 			m, err := d.migrator()
