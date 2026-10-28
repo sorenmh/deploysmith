@@ -74,7 +74,7 @@ services:
   smithd:
     build:
       context: .
-      dockerfile: Dockerfile
+      dockerfile: Dockerfile.smithd
     container_name: deploysmith-smithd
     ports:
       - "8080:8080"

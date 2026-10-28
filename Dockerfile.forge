@@ -1,38 +1,25 @@
-# Build stage
-FROM golang:1.26-alpine AS builder
+# Build context is the repo root. `make docker-build` builds the image; lint and
+# test run once for the whole repository in Dockerfile.smithd.
 
-WORKDIR /build
-
-# Install build dependencies
-RUN apk add --no-cache git
-
-# Copy go mod files
+# --- build --------------------------------------------------------------------
+FROM golang:1.27.3-alpine3.24@sha256:d200d2dd76b03a99b52651fd1325aff7dcd35422c35c01bac56571b0507f3deb AS build
+WORKDIR /src
 COPY go.mod go.sum ./
 RUN go mod download
-
-# Copy source code
+ARG VERSION=dev
+ARG COMMIT=unknown
 COPY cmd/forge ./cmd/forge
 COPY internal/forge ./internal/forge
-
-# Build binary
-RUN CGO_ENABLED=0 go build -o forge \
-    -ldflags "-s -w -X github.com/deploysmith/deploysmith/internal/forge/cmd.Version=${VERSION:-dev} -X github.com/deploysmith/deploysmith/internal/forge/cmd.GitCommit=${COMMIT:-unknown} -X github.com/deploysmith/deploysmith/internal/forge/cmd.BuildTime=$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+COPY internal/shared ./internal/shared
+RUN CGO_ENABLED=0 go build -trimpath -o /out/forge \
+    -ldflags "-s -w -X github.com/sorenmh/deploysmith/internal/forge/cmd.Version=${VERSION} -X github.com/sorenmh/deploysmith/internal/forge/cmd.GitCommit=${COMMIT} -X github.com/sorenmh/deploysmith/internal/forge/cmd.BuildTime=$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
     ./cmd/forge
 
-# Runtime stage
-FROM alpine:3.19
-
-# Install runtime dependencies
-RUN apk add --no-cache ca-certificates
-
-# Create app user
-RUN addgroup -g 1000 forge && \
-    adduser -D -u 1000 -G forge forge
-
-# Copy binary
-COPY --from=builder /build/forge /usr/local/bin/forge
-
+# --- runtime ------------------------------------------------------------------
+FROM alpine:3.24.3@sha256:be2656061b536c1883c4034790e21d0a09c5aaaf51968b89368a3c0371ea2c9a
+RUN apk add --no-cache ca-certificates \
+    && addgroup -g 1000 forge && adduser -D -u 1000 -G forge forge
+COPY --from=build /out/forge /usr/local/bin/forge
 USER forge
 WORKDIR /workspace
-
 ENTRYPOINT ["/usr/local/bin/forge"]

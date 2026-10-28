@@ -59,12 +59,8 @@ docker run --rm -v $(pwd):/workspace -w /workspace \
 
 **Building the image:**
 ```bash
-# Using Docker
-docker build -f Dockerfile.forge -t forge:local .
-
-# Using Earthly (recommended)
-earthly +docker-forge
-# Creates forge:latest locally
+make docker-build-forge
+# Creates ghcr.io/sorenmh/forge:local
 ```
 
 ## Configuration
@@ -648,7 +644,4 @@ make docker
 make docker-forge
 make docker-smithd
 make docker-smithctl
-
-# Using Earthly (cross-platform)
-earthly +docker-forge    # Builds for current platform
 ```

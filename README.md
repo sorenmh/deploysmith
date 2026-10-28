@@ -121,16 +121,10 @@ go build -o bin/smithd ./cmd/smithd
 go build -o bin/forge ./cmd/forge
 go build -o bin/smithctl ./cmd/smithctl
 
-# Using Earthly (builds Linux binaries for CI/production)
-earthly +build-smithd    # Builds Linux binary
-earthly +build-forge     # Builds Linux binary
-earthly +build-smithctl  # Builds Linux binary
-earthly +all             # Build everything, run tests and linter
-
-# Build Docker images
-earthly +docker-smithd
-earthly +docker-forge
-earthly +docker-smithctl
+# Lint, test and build the Docker images exactly as CI does
+make docker-lint
+make docker-test
+make docker-build
 ```
 
 ### Configuration

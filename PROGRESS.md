@@ -206,9 +206,6 @@ All specs are in `docs/specs/`:
 go build -o bin/smithd ./cmd/smithd
 go build -o bin/forge ./cmd/forge
 
-# Or with Earthly
-earthly +build-smithd
-
 # Run smithd tests
 ./test-server.sh
 ./test-apps-api.sh
