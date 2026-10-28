@@ -105,6 +105,12 @@ spec:
               name: {{ include "smithd.secretName" . }}
               key: nats-url
               optional: true
+        - name: GITHUB_CLIENT_SECRET
+          valueFrom:
+            secretKeyRef:
+              name: {{ include "smithd.secretName" . }}
+              key: github-client-secret
+              optional: true
         livenessProbe:
           {{- toYaml .Values.livenessProbe | nindent 12 }}
         readinessProbe:
