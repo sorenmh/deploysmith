@@ -65,7 +65,7 @@ Example:
 		}
 
 		// Create API client
-		c := client.NewClient(GetSmithdURL(), GetSmithdAPIKey())
+		c := newClient()
 
 		// Determine enabled state
 		enabled := !disabled
@@ -131,7 +131,7 @@ Example:
 		}
 
 		// Create API client
-		c := client.NewClient(GetSmithdURL(), GetSmithdAPIKey())
+		c := newClient()
 
 		// List policies
 		resp, err := c.ListPolicies(appID)
@@ -222,7 +222,7 @@ Example:
 		}
 
 		// Create API client
-		c := client.NewClient(GetSmithdURL(), GetSmithdAPIKey())
+		c := newClient()
 
 		// List policies to find the policy ID
 		resp, err := c.ListPolicies(appID)

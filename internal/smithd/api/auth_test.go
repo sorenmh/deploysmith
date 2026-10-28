@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/go-chi/chi/v5"
+	"github.com/sorenmh/deploysmith/internal/smithctl/client"
 	"github.com/sorenmh/deploysmith/internal/smithd/auth"
 	"github.com/sorenmh/deploysmith/internal/smithd/auth/authtest"
 	"github.com/sorenmh/deploysmith/internal/smithd/config"
@@ -183,6 +184,52 @@ func TestDeviceLoginAPI(t *testing.T) {
 	}
 	if rec := call(t, s, http.MethodGet, "/api/v1/auth/whoami", "", bearer); rec.Code != http.StatusUnauthorized {
 		t.Errorf("whoami after logout = %d, want 401", rec.Code)
+	}
+}
+
+// TestSmithctlLogin runs smithctl's side of the login against the API
+func TestSmithctlLogin(t *testing.T) {
+	gh := authtest.NewGitHub(t, octocat)
+	s := newLoginTestServer(t, gh, auth.Config{AllowedOrg: "acme"})
+	srv := httptest.NewServer(s.router)
+	t.Cleanup(srv.Close)
+
+	c := client.NewClient(srv.URL, "")
+	login, err := c.StartLogin()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if login.UserCode != authtest.UserCode {
+		t.Fatalf("unexpected login: %+v", login)
+	}
+
+	polls := 0
+	session, err := c.WaitForLogin(login, func(time.Duration) {
+		// The user confirms on GitHub after a while
+		if polls++; polls == 2 {
+			gh.Approve()
+		}
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	id, err := client.NewClient(srv.URL, "").WithSessionToken(session.Token).WhoAmI()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if id.Kind != "user" || id.Login != "octocat" || id.ExpiresAt == nil {
+		t.Errorf("unexpected identity: %+v", id)
+	}
+	if id, err := client.NewClient(srv.URL, "key").WhoAmI(); err != nil || id.Kind != "api-key" {
+		t.Errorf("API key identity = %+v, %v", id, err)
+	}
+
+	if err := client.NewClient(srv.URL, "").WithSessionToken(session.Token).Logout(); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := client.NewClient(srv.URL, "").WithSessionToken(session.Token).WhoAmI(); err == nil || !strings.Contains(err.Error(), "Invalid session") {
+		t.Errorf("whoami after logout: err = %v", err)
 	}
 }
 

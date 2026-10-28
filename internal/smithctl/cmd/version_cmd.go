@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/sorenmh/deploysmith/internal/smithctl/client"
 	"github.com/sorenmh/deploysmith/internal/smithctl/output"
 	"github.com/spf13/cobra"
 )
@@ -52,7 +51,7 @@ Examples:
 		limit, _ := cmd.Flags().GetInt("limit")
 
 		// Create API client
-		c := client.NewClient(GetSmithdURL(), GetSmithdAPIKey())
+		c := newClient()
 
 		// List versions (use appID since client now resolves internally)
 		resp, err := c.ListVersions(appID, status, limit, 0)
@@ -134,7 +133,7 @@ Examples:
 		}
 
 		// Create API client
-		c := client.NewClient(GetSmithdURL(), GetSmithdAPIKey())
+		c := newClient()
 
 		// Get version
 		ver, err := c.GetVersion(appID, versionID)
