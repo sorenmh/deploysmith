@@ -182,7 +182,6 @@ func runUpload(cmd *cobra.Command, args []string) error {
 	return nil
 }
 
-
 func validateYAML(filePath string) error {
 	data, err := os.ReadFile(filePath)
 	if err != nil {

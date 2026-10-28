@@ -98,9 +98,9 @@ type PublishVersionRequest struct {
 
 // PublishVersionResponse is the response from publishing a version
 type PublishVersionResponse struct {
-	VersionID        string   `json:"versionId"`
-	Status           string   `json:"status"`
-	AutoDeployments  []string `json:"autoDeployments,omitempty"`
+	VersionID       string   `json:"versionId"`
+	Status          string   `json:"status"`
+	AutoDeployments []string `json:"autoDeployments,omitempty"`
 }
 
 // AppInfo represents basic app information

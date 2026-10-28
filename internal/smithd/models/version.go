@@ -4,16 +4,16 @@ import "time"
 
 // Version represents an application version
 type Version struct {
-	ID                string    `json:"id"`
-	AppID             string    `json:"appId"`
-	VersionID         string    `json:"versionId"`
-	Status            string    `json:"status"` // draft, published
-	GitSHA            string    `json:"gitSha,omitempty"`
-	GitBranch         string    `json:"gitBranch,omitempty"`
-	GitCommitter      string    `json:"gitCommitter,omitempty"`
-	BuildNumber       string    `json:"buildNumber,omitempty"`
-	MetadataTimestamp time.Time `json:"metadataTimestamp,omitempty"`
-	CreatedAt         time.Time `json:"createdAt"`
+	ID                string     `json:"id"`
+	AppID             string     `json:"appId"`
+	VersionID         string     `json:"versionId"`
+	Status            string     `json:"status"` // draft, published
+	GitSHA            string     `json:"gitSha,omitempty"`
+	GitBranch         string     `json:"gitBranch,omitempty"`
+	GitCommitter      string     `json:"gitCommitter,omitempty"`
+	BuildNumber       string     `json:"buildNumber,omitempty"`
+	MetadataTimestamp time.Time  `json:"metadataTimestamp,omitempty"`
+	CreatedAt         time.Time  `json:"createdAt"`
 	PublishedAt       *time.Time `json:"publishedAt,omitempty"`
 }
 
@@ -51,9 +51,9 @@ type PublishVersionResponse struct {
 // ListVersionsResponse is the response for listing versions
 type ListVersionsResponse struct {
 	Versions []VersionWithDeployment `json:"versions"`
-	Total    int                      `json:"total"`
-	Limit    int                      `json:"limit"`
-	Offset   int                      `json:"offset"`
+	Total    int                     `json:"total"`
+	Limit    int                     `json:"limit"`
+	Offset   int                     `json:"offset"`
 }
 
 // VersionWithDeployment includes deployment information
@@ -64,11 +64,11 @@ type VersionWithDeployment struct {
 
 // GetVersionResponse is the response for getting a version
 type GetVersionResponse struct {
-	VersionID         string    `json:"versionId"`
-	Status            string    `json:"status"`
-	CreatedAt         time.Time `json:"createdAt"`
-	PublishedAt       *time.Time `json:"publishedAt,omitempty"`
-	Metadata          VersionMetadata `json:"metadata"`
-	ManifestFiles     []string  `json:"manifestFiles"`
-	DeployedTo        []string  `json:"deployedTo,omitempty"`
+	VersionID     string          `json:"versionId"`
+	Status        string          `json:"status"`
+	CreatedAt     time.Time       `json:"createdAt"`
+	PublishedAt   *time.Time      `json:"publishedAt,omitempty"`
+	Metadata      VersionMetadata `json:"metadata"`
+	ManifestFiles []string        `json:"manifestFiles"`
+	DeployedTo    []string        `json:"deployedTo,omitempty"`
 }

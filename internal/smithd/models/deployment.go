@@ -4,17 +4,17 @@ import "time"
 
 // Deployment represents a deployment of a version to an environment
 type Deployment struct {
-	ID               string     `json:"id"`
-	AppID            string     `json:"appId"`
-	VersionID        string     `json:"versionId"`
-	Environment      string     `json:"environment"`
-	Status           string     `json:"status"` // pending, success, failed
-	TriggeredBy      string     `json:"triggeredBy,omitempty"`
-	PolicyID         *string    `json:"policyId,omitempty"`
-	GitopsCommitSHA  string     `json:"gitopsCommitSha,omitempty"`
-	ErrorMessage     string     `json:"errorMessage,omitempty"`
-	StartedAt        time.Time  `json:"startedAt"`
-	CompletedAt      *time.Time `json:"completedAt,omitempty"`
+	ID              string     `json:"id"`
+	AppID           string     `json:"appId"`
+	VersionID       string     `json:"versionId"`
+	Environment     string     `json:"environment"`
+	Status          string     `json:"status"` // pending, success, failed
+	TriggeredBy     string     `json:"triggeredBy,omitempty"`
+	PolicyID        *string    `json:"policyId,omitempty"`
+	GitopsCommitSHA string     `json:"gitopsCommitSha,omitempty"`
+	ErrorMessage    string     `json:"errorMessage,omitempty"`
+	StartedAt       time.Time  `json:"startedAt"`
+	CompletedAt     *time.Time `json:"completedAt,omitempty"`
 }
 
 // DeploymentDetail is a deployment enriched with the names of the app,

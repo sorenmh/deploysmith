@@ -147,9 +147,9 @@ func createTestTarball(t *testing.T, files map[string]string) []byte {
 
 	for filename, content := range files {
 		header := &tar.Header{
-			Name: filename,
-			Mode: 0644,
-			Size: int64(len(content)),
+			Name:    filename,
+			Mode:    0644,
+			Size:    int64(len(content)),
 			ModTime: time.Now(),
 		}
 
