@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"strings"
+	"time"
 )
 
 // Config holds the application configuration
@@ -61,6 +62,48 @@ type Config struct {
 	// UIPublicURL is where users reach the UI, e.g. https://smithui.example.com,
 	// used to link to deployments from Slack messages
 	UIPublicURL string
+
+	// OpenBao, where smithd sets up the roles, policies and Transit keys of
+	// Terraform apps. Terraform support is off without OpenBaoAddr. smithd
+	// logs in with Kubernetes auth as its ServiceAccount, unless
+	// OpenBaoToken is set (for development).
+	OpenBaoAddr      string
+	OpenBaoToken     string
+	OpenBaoCACert    string
+	OpenBaoAuthMount string
+	OpenBaoAuthRole  string
+	OpenBaoJWTPath   string
+	// Mounts the runners use: KV v2, Transit, AWS secrets engine and the
+	// Kubernetes auth method they log in with
+	OpenBaoKVMount         string
+	OpenBaoTransitMount    string
+	OpenBaoAWSMount        string
+	OpenBaoRunnerAuthMount string
+	// OpenBaoRunnerAudience is the audience runner ServiceAccount tokens
+	// must have; empty accepts any
+	OpenBaoRunnerAudience string
+	// OpenBaoK8sNamespace is the namespace OpenBao runs in, which runners
+	// may reach
+	OpenBaoK8sNamespace string
+
+	// Terraform apps
+	TerraformRunnerTokenTTL time.Duration // runner's OpenBao token, must cover the longest apply
+	TerraformSTSTTL         time.Duration // runner's AWS credentials
+	TerraformAWSAccountID   string        // account of the tf-<app>-<env> IAM roles
+	// Shared state backend, the default for new Terraform apps
+	TerraformStateBucket string
+	TerraformStateRegion string
+	TerraformLockTable   string
+	// TerraformControllerNamespace is where tofu-controller runs
+	TerraformControllerNamespace string
+	// TerraformKubeAPICIDRs are the Kubernetes API server addresses runners
+	// may reach; empty allows the private ranges on ports 443 and 6443
+	TerraformKubeAPICIDRs []string
+
+	// smithd's own namespace and ServiceAccount, which may read the plans
+	// in the runner namespaces
+	SmithdNamespace      string
+	SmithdServiceAccount string
 }
 
 // Load loads configuration from environment variables
@@ -93,6 +136,36 @@ func Load() (*Config, error) {
 		UITrustedOrigins:      splitList(getEnv("UI_TRUSTED_ORIGINS", "")),
 		UIListenAddr:          getEnv("UI_LISTEN_ADDR", ""),
 		UIPublicURL:           getEnv("UI_PUBLIC_URL", ""),
+
+		OpenBaoAddr:           getEnv("OPENBAO_ADDR", ""),
+		OpenBaoToken:          getEnv("OPENBAO_TOKEN", ""),
+		OpenBaoCACert:         getEnv("OPENBAO_CACERT", ""),
+		OpenBaoAuthMount:      getEnv("OPENBAO_AUTH_MOUNT", "kubernetes"),
+		OpenBaoAuthRole:       getEnv("OPENBAO_AUTH_ROLE", "smithd"),
+		OpenBaoJWTPath:        getEnv("OPENBAO_JWT_PATH", serviceAccountDir+"/token"),
+		OpenBaoKVMount:        getEnv("OPENBAO_KV_MOUNT", "secret"),
+		OpenBaoTransitMount:   getEnv("OPENBAO_TRANSIT_MOUNT", "transit"),
+		OpenBaoAWSMount:       getEnv("OPENBAO_AWS_MOUNT", "aws"),
+		OpenBaoRunnerAudience: getEnv("OPENBAO_RUNNER_AUDIENCE", ""),
+		OpenBaoK8sNamespace:   getEnv("OPENBAO_K8S_NAMESPACE", "openbao"),
+		TerraformAWSAccountID: getEnv("TERRAFORM_AWS_ACCOUNT_ID", ""),
+		TerraformStateBucket:  getEnv("TERRAFORM_STATE_BUCKET", ""),
+		TerraformStateRegion:  getEnv("TERRAFORM_STATE_REGION", ""),
+		TerraformLockTable:    getEnv("TERRAFORM_LOCK_TABLE", ""),
+		TerraformKubeAPICIDRs: splitList(getEnv("TERRAFORM_KUBE_API_CIDRS", "")),
+		SmithdServiceAccount:  getEnv("SMITHD_SERVICE_ACCOUNT", "smithd"),
+
+		TerraformControllerNamespace: getEnv("TERRAFORM_CONTROLLER_NAMESPACE", "flux-system"),
+	}
+	cfg.OpenBaoRunnerAuthMount = getEnv("OPENBAO_RUNNER_AUTH_MOUNT", cfg.OpenBaoAuthMount)
+	cfg.SmithdNamespace = getEnv("SMITHD_NAMESPACE", podNamespace())
+
+	var err error
+	if cfg.TerraformRunnerTokenTTL, err = getDuration("TERRAFORM_RUNNER_TOKEN_TTL", 2*time.Hour); err != nil {
+		return nil, err
+	}
+	if cfg.TerraformSTSTTL, err = getDuration("TERRAFORM_STS_TTL", time.Hour); err != nil {
+		return nil, err
 	}
 
 	// Validate required fields
@@ -120,6 +193,32 @@ func splitList(value string) []string {
 		}
 	}
 	return items
+}
+
+// serviceAccountDir holds the pod's ServiceAccount token and namespace
+const serviceAccountDir = "/var/run/secrets/kubernetes.io/serviceaccount"
+
+// podNamespace returns the namespace smithd runs in, or "deploysmith"
+// outside a cluster
+func podNamespace() string {
+	if data, err := os.ReadFile(serviceAccountDir + "/namespace"); err == nil {
+		if namespace := strings.TrimSpace(string(data)); namespace != "" {
+			return namespace
+		}
+	}
+	return "deploysmith"
+}
+
+func getDuration(key string, defaultValue time.Duration) (time.Duration, error) {
+	value := os.Getenv(key)
+	if value == "" {
+		return defaultValue, nil
+	}
+	d, err := time.ParseDuration(value)
+	if err != nil || d <= 0 {
+		return 0, fmt.Errorf("%s must be a positive duration such as 2h, got %q", key, value)
+	}
+	return d, nil
 }
 
 func getEnv(key, defaultValue string) string {

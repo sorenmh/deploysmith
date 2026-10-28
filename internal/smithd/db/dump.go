@@ -8,7 +8,7 @@ import (
 // dumpTables lists the tables that participate in dump/restore, in FK-safe
 // order (parents before children). schema_version is intentionally excluded
 // since golang-migrate owns it.
-var dumpTables = []string{"applications", "environments", "versions", "policies", "deployments"}
+var dumpTables = []string{"applications", "environments", "versions", "policies", "deployments", "terraform_environments"}
 
 // TableDump holds a generic snapshot of a single table's rows.
 type TableDump struct {

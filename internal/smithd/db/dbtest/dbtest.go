@@ -13,7 +13,7 @@ import (
 )
 
 // tables are emptied children first, so foreign keys allow it
-var tables = []string{"push_subscriptions", "deployments", "policies", "versions", "environments", "applications"}
+var tables = []string{"push_subscriptions", "terraform_environments", "deployments", "policies", "versions", "environments", "applications"}
 
 // Open returns an empty, migrated database that is closed (and for
 // PostgreSQL emptied) when the test ends

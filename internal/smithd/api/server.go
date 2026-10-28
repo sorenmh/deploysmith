@@ -96,6 +96,22 @@ func NewServer(cfg *config.Config, database *db.DB) *Server {
 	if poller := flux.NewKustomizationPoller(cfg.FluxNamespace); poller != nil {
 		deps.FluxPoller = poller
 	}
+
+	// Terraform apps, only with OpenBao
+	deps.TerraformEnvironments = store.NewTerraformStore(database)
+	deps.TerraformSharedBackend = models.TerraformBackend{Bucket: cfg.TerraformStateBucket, Region: cfg.TerraformStateRegion, LockTable: cfg.TerraformLockTable}
+	if deps.TerraformManifests, err = terraformManifestOptions(cfg); err != nil {
+		log.Fatalf("Failed to configure Terraform support: %v", err)
+	}
+	if deps.Terraform, err = newTerraformProvisioner(cfg); err != nil {
+		log.Fatalf("Failed to configure OpenBao: %v", err)
+	}
+	if deps.Terraform != nil {
+		deps.TerraformGitops = gitopsService
+		log.Printf("Terraform support enabled (OpenBao at %s)", cfg.OpenBaoAddr)
+	} else {
+		log.Printf("Terraform support disabled: OPENBAO_ADDR is not set")
+	}
 	s.svc = service.New(deps)
 
 	s.setupRoutes()
@@ -146,6 +162,11 @@ func (s *Server) setupRoutes() {
 		r.Patch("/apps/{appId}/policies/{policyId}", s.handleUpdatePolicy)
 		r.Delete("/apps/{appId}/policies/{policyId}", s.handleDeletePolicy)
 
+		// Terraform routes
+		r.Post("/apps/{appId}/terraform/environments", s.handleEnableTerraform)
+		r.Get("/apps/{appId}/terraform/environments", s.handleListTerraformEnvironments)
+		r.Post("/apps/{appId}/terraform/sync", s.handleSyncTerraform)
+
 		// Admin routes (DB migration between drivers)
 		r.Get("/admin/db-export", s.handleDBExport)
 		r.Post("/admin/db-import", s.handleDBImport)
@@ -178,6 +199,7 @@ func (s *Server) setupRoutes() {
 // Start starts the HTTP server
 func (s *Server) Start() error {
 	go s.svc.WatchStaleDeployments(context.Background())
+	go s.svc.SyncAllTerraform(context.Background())
 
 	if s.uiRouter != nil {
 		go func() {

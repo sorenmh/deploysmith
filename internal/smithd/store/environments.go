@@ -180,16 +180,19 @@ func (s *EnvironmentStore) Delete(id string) error {
 	return nil
 }
 
-// Usage returns how many policies target and deployments went to an
-// environment
-func (s *EnvironmentStore) Usage(name string) (policies, deployments int, err error) {
+// Usage returns how many policies target, deployments went to and Terraform
+// apps are enabled in an environment
+func (s *EnvironmentStore) Usage(name string) (policies, deployments, terraform int, err error) {
 	if err = s.db.QueryRow(`SELECT COUNT(*) FROM policies WHERE target_environment = ?`, name).Scan(&policies); err != nil {
-		return 0, 0, err
+		return 0, 0, 0, err
 	}
 	if err = s.db.QueryRow(`SELECT COUNT(*) FROM deployments WHERE environment = ?`, name).Scan(&deployments); err != nil {
-		return 0, 0, err
+		return 0, 0, 0, err
 	}
-	return policies, deployments, nil
+	if err = s.db.QueryRow(`SELECT COUNT(*) FROM terraform_environments WHERE environment = ?`, name).Scan(&terraform); err != nil {
+		return 0, 0, 0, err
+	}
+	return policies, deployments, terraform, nil
 }
 
 // Exists checks if an environment exists by name

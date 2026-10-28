@@ -36,6 +36,8 @@ func newStoreTestServer(t *testing.T) *Server {
 		Policies:     s.policyStore,
 		Environments: s.environmentStore,
 		Publisher:    s.publisher,
+
+		TerraformEnvironments: store.NewTerraformStore(database),
 	})
 	return s
 }
