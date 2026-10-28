@@ -58,13 +58,15 @@
       {{range $v := .Detail.Versions}}
       {{$running := $.Data.Detail.RunningIn $v.VersionID}}
       <tr>
-        <td><span class="id">{{$v.VersionID}}</span></td>
+        <td><span class="id">{{$v.VersionID}}</span>{{if eq $v.ArtifactType "terraform"}} <span class="muted">terraform</span>{{end}}</td>
         <td>{{if and $v.GitBranch (ne $v.GitBranch "unknown")}}{{$v.GitBranch}}{{else}}<span class="muted">Unknown</span>{{end}}</td>
         <td>{{if and $v.GitSHA (ne $v.GitSHA "unknown")}}<span class="id" title="{{$v.GitSHA}}">{{shortSHA $v.GitSHA}}</span>{{else}}<span class="muted">Unknown</span>{{end}}</td>
         <td>{{if $v.PublishedAt}}{{template "time" $v.PublishedAt}}{{else}}<span class="muted">Draft</span>{{end}}</td>
         <td>{{range $i, $env := $running}}{{if $i}}, {{end}}{{$env}}{{else}}<span class="muted">Nowhere</span>{{end}}</td>
         <td class="actions">
-          {{if eq $v.Status "published"}}
+          {{if eq $v.ArtifactType "terraform"}}
+          <span class="muted">Deploying terraform is not supported yet</span>
+          {{else if eq $v.Status "published"}}
           <details class="deploy-menu">
             <summary>Deploy</summary>
             <div class="deploy-menu__list">

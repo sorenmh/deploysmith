@@ -117,13 +117,17 @@ func TestValidateRejects(t *testing.T) {
 			problem: "OpenTofu version is not pinned",
 		},
 		{
-			name:    "version pinned twice",
-			mutate:  func(files map[string][]byte) { files["other.tf"] = []byte("terraform {\n  required_version = \"1.10.6\"\n}\n") },
+			name: "version pinned twice",
+			mutate: func(files map[string][]byte) {
+				files["other.tf"] = []byte("terraform {\n  required_version = \"1.10.6\"\n}\n")
+			},
 			problem: "required_version is set more than once",
 		},
 		{
-			name:    "version not a literal",
-			mutate:  func(files map[string][]byte) { files["versions.tf"] = []byte("terraform {\n  required_version = var.v\n}\n") },
+			name: "version not a literal",
+			mutate: func(files map[string][]byte) {
+				files["versions.tf"] = []byte("terraform {\n  required_version = var.v\n}\n")
+			},
 			problem: "required_version must be a string",
 		},
 		{

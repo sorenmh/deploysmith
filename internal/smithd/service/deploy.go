@@ -38,6 +38,9 @@ func (s *Service) DeployVersion(ctx context.Context, appID, versionID, environme
 	if version.Status != "published" {
 		return nil, invalid("invalid_status", "Version must be published before deployment")
 	}
+	if err := requireDeployable(version); err != nil {
+		return nil, err
+	}
 
 	deployment, err := s.Deployments.Create(appID, version.ID, environment, triggeredBy, nil)
 	if err != nil {
@@ -98,6 +101,11 @@ func (s *Service) execute(ctx context.Context, deployment *models.Deployment, ap
 
 	logging.LogInfoCtx(ctx, "Deployment started", logging.Field("deployment_id", deployment.ID))
 	publish(events.EventDeploymentStarted, nil)
+
+	// Never commit anything but manifests to the gitops repo
+	if err := requireDeployable(version); err != nil {
+		return fail("artifact type", err)
+	}
 
 	logging.LogDebugCtx(ctx, "Fetching manifests from storage")
 	manifests, err := s.Storage.GetAllFiles(app.Name, version.VersionID, true)
@@ -188,6 +196,16 @@ func (s *Service) isRollback(deployment *models.Deployment, version *models.Vers
 		return false
 	}
 	return version.CreatedAt.Before(previous.CreatedAt)
+}
+
+// requireDeployable returns an error for versions smithd cannot deploy yet:
+// terraform bundles, which are stored but not deployed until smithd can
+// commit them to the gitops repo for a controller to plan and apply
+func requireDeployable(version *models.Version) error {
+	if version.ArtifactType == models.ArtifactTerraform {
+		return invalid("unsupported_artifact_type", fmt.Sprintf("Version %s is a terraform bundle; deploying terraform versions is not supported yet", version.VersionID))
+	}
+	return nil
 }
 
 // deployCtx adds a deployment's identifying fields to the log context
