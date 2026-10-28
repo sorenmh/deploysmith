@@ -269,8 +269,22 @@ func forbidden(name string) string {
 		return fmt.Sprintf("%s: *.auto.tfvars files are loaded automatically and must not be in the bundle; use %s/<env>.tfvars for non-secret variables", name, EnvDir)
 	case base == "terraform.tfvars" || base == "terraform.tfvars.json":
 		return fmt.Sprintf("%s: %s is loaded automatically and must not be in the bundle; use %s/<env>.tfvars for non-secret variables", name, base, EnvDir)
+	case isOverride(base):
+		return fmt.Sprintf("%s: override files must not be in the bundle; the controller writes backend_override.tf with smithd's backend configuration", name)
 	}
 	return ""
+}
+
+// isOverride reports whether a file name is an OpenTofu override file
+// (override.tf, *_override.tf and their .tf.json variants), which could
+// replace the backend configuration smithd sets
+func isOverride(base string) bool {
+	for _, ext := range []string{".tf", ".tf.json"} {
+		if stem, ok := strings.CutSuffix(base, ext); ok && (stem == "override" || strings.HasSuffix(stem, "_override")) {
+			return true
+		}
+	}
+	return false
 }
 
 // included reports whether a file is part of a bundle

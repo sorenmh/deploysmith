@@ -367,6 +367,9 @@ publish. A bundle is rejected, with every problem listed, if:
 - the `backend` block has settings, or there is a `cloud` block
 - it contains state (`*.tfstate*`), `*.auto.tfvars` or `terraform.tfvars`, which
   OpenTofu would load automatically; use `env/<env>.tfvars` instead
+- it contains override files (`override.tf`, `*_override.tf` or their `.tf.json`
+  variants) anywhere: the controller writes `backend_override.tf` with smithd's
+  backend configuration, and a bundle must not be able to replace it
 - a file is not valid HCL
 
 The `.terraform` directory that `tofu init` creates (and any other hidden

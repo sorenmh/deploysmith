@@ -182,6 +182,31 @@ func TestValidateRejects(t *testing.T) {
 			problem: "terraform.tfvars is loaded automatically",
 		},
 		{
+			name:    "override.tf",
+			mutate:  func(files map[string][]byte) { files["override.tf"] = []byte("") },
+			problem: "override files must not be in the bundle",
+		},
+		{
+			name:    "backend_override.tf",
+			mutate:  func(files map[string][]byte) { files["backend_override.tf"] = []byte("") },
+			problem: "override files must not be in the bundle",
+		},
+		{
+			name:    "override in a module",
+			mutate:  func(files map[string][]byte) { files["modules/bucket/main_override.tf"] = []byte("") },
+			problem: "override files must not be in the bundle",
+		},
+		{
+			name:    "override.tf.json",
+			mutate:  func(files map[string][]byte) { files["override.tf.json"] = []byte("{}") },
+			problem: "override files must not be in the bundle",
+		},
+		{
+			name:    "backend_override.tf.json",
+			mutate:  func(files map[string][]byte) { files["backend_override.tf.json"] = []byte("{}") },
+			problem: "override files must not be in the bundle",
+		},
+		{
 			name:    "unexpected file",
 			mutate:  func(files map[string][]byte) { files["README.md"] = []byte("# hi") },
 			problem: "README.md: unexpected file",
