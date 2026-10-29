@@ -106,7 +106,7 @@ func (s *Service) deployTerraform(ctx context.Context, app *models.Application, 
 		if mutate != nil {
 			mutate(&e)
 		}
-		s.Publisher.Publish(e)
+		_ = s.Publisher.Publish(e)
 	}
 	logging.LogInfoCtx(ctx, "Terraform deployment started", logging.Field("deployment_id", deployment.ID))
 	publish(events.EventDeploymentStarted, nil)

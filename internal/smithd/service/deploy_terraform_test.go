@@ -36,7 +36,7 @@ type terraformDeployFixture struct {
 func newTerraformDeployFixture(t *testing.T) *terraformDeployFixture {
 	t.Helper()
 	f := &terraformDeployFixture{terraformFixture: newTerraformFixture(t)}
-	f.viinoID = f.terraformFixture.appID(t, "viino")
+	f.viinoID = f.appID(t, "viino")
 	f.svc.TerraformRoots = terraform.RootOptions{
 		SourceURL:       "ssh://git@github.com/sorenmh/gitops.git",
 		SourceSecret:    "gitops-readonly",
