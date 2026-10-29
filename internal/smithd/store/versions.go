@@ -103,6 +103,39 @@ func (s *VersionStore) GetByVersionID(appID, versionID string) (*models.Version,
 	return &version, nil
 }
 
+// SetSource records where a version was built from
+func (s *VersionStore) SetSource(id string, source models.VersionSource) error {
+	result, err := s.db.Exec(`
+		UPDATE versions SET source_repo = ?, source_sha = ?, source_pr = ? WHERE id = ?
+	`, source.Repository, source.CommitSHA, source.PullRequest, id)
+	if err != nil {
+		return fmt.Errorf("failed to set version source: %w", err)
+	}
+	rows, err := result.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("failed to check rows affected: %w", err)
+	}
+	if rows == 0 {
+		return fmt.Errorf("version not found")
+	}
+	return nil
+}
+
+// GetSource returns where a version was built from, empty if not known
+func (s *VersionStore) GetSource(id string) (models.VersionSource, error) {
+	var source models.VersionSource
+	err := s.db.QueryRow(`
+		SELECT source_repo, source_sha, source_pr FROM versions WHERE id = ?
+	`, id).Scan(&source.Repository, &source.CommitSHA, &source.PullRequest)
+	if err == sql.ErrNoRows {
+		return source, fmt.Errorf("version not found")
+	}
+	if err != nil {
+		return source, fmt.Errorf("failed to get version source: %w", err)
+	}
+	return source, nil
+}
+
 // UpdateStatus updates the version status
 func (s *VersionStore) UpdateStatus(id, status string) error {
 	result, err := s.db.Exec(`

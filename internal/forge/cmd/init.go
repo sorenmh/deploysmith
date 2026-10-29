@@ -19,6 +19,9 @@ var (
 	initGitBranch    string
 	initGitCommitter string
 	initBuildNumber  int
+	initSourceRepo   string
+	initSourceSHA    string
+	initPullRequest  int
 )
 
 var initCmd = &cobra.Command{
@@ -27,6 +30,10 @@ var initCmd = &cobra.Command{
 	Long: `Initialize a new version draft with smithd and get a presigned URL for uploading manifests.
 
 The presigned URL is saved to .forge/upload-url for use by the upload command.
+
+In GitHub Actions the source repository, commit and pull request are detected
+(for pull_request events the PR's head commit, not the merge commit) and sent
+along, so smithd can report deployments as check runs on the commit.
 
 Example:
   forge init --app my-app --version v1.0.0 --git-sha abc123 --git-branch main`,
@@ -42,6 +49,9 @@ func init() {
 	initCmd.Flags().StringVar(&initGitBranch, "git-branch", "", "Git branch name (detected from CI environment or git if omitted)")
 	initCmd.Flags().StringVar(&initGitCommitter, "git-committer", "", "Git committer email")
 	initCmd.Flags().IntVar(&initBuildNumber, "build-number", 0, "CI build number")
+	initCmd.Flags().StringVar(&initSourceRepo, "source-repo", "", "GitHub repository (owner/name) the version is built from (default $GITHUB_REPOSITORY)")
+	initCmd.Flags().StringVar(&initSourceSHA, "source-sha", "", "Full commit SHA to report deployments on (detected in GitHub Actions)")
+	initCmd.Flags().IntVar(&initPullRequest, "pr", 0, "Pull request number (detected in GitHub Actions)")
 
 	initCmd.MarkFlagRequired("version")
 }
@@ -58,8 +68,13 @@ func runInit(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
+	source := resolveSource(detectSource(), initSourceRepo, initSourceSHA, initPullRequest)
+
 	// Set defaults for required fields if not provided
 	gitSHA := initGitSHA
+	if gitSHA == "" && source != nil {
+		gitSHA = source.CommitSHA
+	}
 	if gitSHA == "" {
 		gitSHA = "unknown"
 	}
@@ -88,6 +103,7 @@ func runInit(cmd *cobra.Command, args []string) error {
 	req := client.DraftVersionRequest{
 		VersionID: initVersion,
 		Metadata:  metadata,
+		Source:    source,
 	}
 
 	// Call smithd API

@@ -1,6 +1,10 @@
 package models
 
-import "time"
+import (
+	"fmt"
+	"regexp"
+	"time"
+)
 
 // Version represents an application version
 type Version struct {
@@ -26,10 +30,47 @@ type VersionMetadata struct {
 	Timestamp    string `yaml:"timestamp" json:"timestamp"`
 }
 
+// VersionSource is where a version was built from, sent by forge from the
+// CI environment. smithd reports the version's deployments as check runs on
+// this commit in GitHub.
+type VersionSource struct {
+	Repository  string `json:"repository,omitempty"` // owner/name
+	CommitSHA   string `json:"commitSha,omitempty"`  // a pull request's head, not its merge commit
+	PullRequest int    `json:"pullRequest,omitempty"`
+}
+
+var (
+	repositoryPattern = regexp.MustCompile(`^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$`)
+	commitSHAPattern  = regexp.MustCompile(`^([0-9a-f]{40}|[0-9a-f]{64})$`)
+)
+
+// Validate checks that the fields that are set are well-formed, since they
+// end up in GitHub API paths
+func (s VersionSource) Validate() error {
+	if s.Repository != "" && !repositoryPattern.MatchString(s.Repository) {
+		return fmt.Errorf("source.repository must be owner/name")
+	}
+	if s.CommitSHA != "" && !commitSHAPattern.MatchString(s.CommitSHA) {
+		return fmt.Errorf("source.commitSha must be a full lowercase commit SHA")
+	}
+	if s.PullRequest < 0 {
+		return fmt.Errorf("source.pullRequest must not be negative")
+	}
+	return nil
+}
+
+// Reportable reports whether the repository and commit are known, which
+// reporting to GitHub needs
+func (s VersionSource) Reportable() bool {
+	return s.Repository != "" && s.CommitSHA != ""
+}
+
 // DraftVersionRequest is the request to draft a new version
 type DraftVersionRequest struct {
 	VersionID string          `json:"versionId"`
 	Metadata  VersionMetadata `json:"metadata"`
+	// Source is optional
+	Source *VersionSource `json:"source,omitempty"`
 }
 
 // DraftVersionResponse is the response for drafting a version
@@ -69,6 +110,7 @@ type GetVersionResponse struct {
 	CreatedAt     time.Time       `json:"createdAt"`
 	PublishedAt   *time.Time      `json:"publishedAt,omitempty"`
 	Metadata      VersionMetadata `json:"metadata"`
+	Source        *VersionSource  `json:"source,omitempty"`
 	ManifestFiles []string        `json:"manifestFiles"`
 	DeployedTo    []string        `json:"deployedTo,omitempty"`
 }
