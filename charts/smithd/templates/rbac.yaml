@@ -24,4 +24,19 @@ subjects:
   - kind: ServiceAccount
     name: {{ include "smithd.serviceAccountName" . }}
     namespace: {{ .Release.Namespace }}
+---
+# Bound in each Terraform runner namespace tf-<app> by the RoleBinding
+# smithd-terraform-reader-<env> that smithd commits, so smithd can read the
+# readable plans and events there and nowhere else. The name is fixed: the
+# committed RoleBindings refer to it.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: smithd-terraform-reader
+  labels:
+    {{- include "smithd.labels" . | nindent 4 }}
+rules:
+  - apiGroups: [""]
+    resources: ["configmaps", "events"]
+    verbs: ["get", "list"]
 {{- end }}

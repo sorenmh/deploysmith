@@ -166,7 +166,7 @@ smithctl db import dump.json
 
 Cut-over with minimal downtime: export, then switch the release to PostgreSQL (the new pod starts with an empty database), then import. Deployments requested in between are lost, so do it when nothing is deploying. Keep the old PVC until you have checked the result; setting `persistence.enabled: false` does not delete an existing claim.
 
-Only applications, environments, versions, policies and deployments are moved. Push notification subscriptions are not: re-enable notifications once on each device. PostgreSQL enforces foreign keys, which SQLite (as smithd uses it) does not, so a dump containing rows that point at something deleted is refused, and nothing is written. Fix the rows or delete the orphans from the dump file and import again.
+Only applications, environments, versions, policies, deployments and Terraform environments are moved. Push notification subscriptions are not: re-enable notifications once on each device. PostgreSQL enforces foreign keys, which SQLite (as smithd uses it) does not, so a dump containing rows that point at something deleted is refused, and nothing is written. Fix the rows or delete the orphans from the dump file and import again.
 
 Import requires an empty target database (a freshly-migrated schema with no rows) — it refuses with a clear error otherwise, and does not partially write on failure.
 
@@ -293,6 +293,112 @@ proxy. The chart therefore refuses to enable the UI on the main ingress
 without `uiProxy` or `uiIngress`. If you protect `/ui` with a different proxy, set
 `config.ui.protectedExternally: true`. Consider a NetworkPolicy so that only
 the ingress controller can reach smithd's service.
+
+#### Terraform apps
+
+smithd can run an app's Terraform through tofu-controller (see
+`docs/specs/terraform-controller.md`). Enabling Terraform for an app in an
+environment sets up everything that app's runner needs to run isolated
+from other apps:
+
+```bash
+smithctl app terraform enable viino --env prod      # shared backend
+smithctl app terraform list viino
+smithctl app terraform sync viino                   # provision again; smithd also does it on start
+```
+
+| What | Where | Name |
+|---|---|---|
+| Runner namespace (one per app) | gitops, `environments/<env>/terraform/<app>/namespace.yaml` | `tf-<app>` |
+| ServiceAccounts (apply, plan-only) | same | `tf-runner-<env>`, `tf-runner-<env>-readonly` |
+| RoleBindings, NetworkPolicy, ResourceQuota | same | `tf-runner-<env>`, `smithd-terraform-reader-<env>` |
+| Kubernetes auth roles + ACL policies | OpenBao | `tf-<app>-<env>`, `tf-<app>-<env>-readonly` |
+| Transit key (state encryption) | OpenBao | `tf-<app>`, created once, never changed or deleted |
+| AWS secrets engine roles (`assumed_role`) | OpenBao | `<app>-<env>` → IAM `tf-<app>-<env>`, `<app>-<env>-readonly` |
+| IAM roles | the platform app, `terraform/modules/tf-app` | `tf-<app>-<env>`, `tf-<app>-<env>-readonly` |
+
+App and environment names must be DNS labels (lowercase letters, digits,
+`-`) and together fit IAM's 64 characters. The runner policy allows reading
+`secret/data/apps/<app>/*`, `datakey`/`decrypt`/`encrypt` (no encrypt for
+plan-only) on the app's Transit key and `aws/creds/<app>-<env>`. The
+NetworkPolicy lets tofu-controller in on TCP 30000 and lets the runner out
+to DNS, OpenBao, the Kubernetes API and HTTPS on public addresses (AWS,
+provider registries); private ranges and the cloud metadata endpoint are
+blocked, so it cannot reach smithd, its database or NATS. Set
+`config.terraform.kubeApiCidrs` to your API server addresses, otherwise the
+private ranges are allowed on ports 443 and 6443.
+
+Everything smithd writes is an upsert, so provisioning is safe to repeat.
+A failure (e.g. OpenBao denied a write) is shown by `enable`/`sync` and kept
+on the environment until a sync succeeds.
+
+**Set up once in OpenBao** (Terraform support is off until `config.openbao.addr` is set):
+
+```bash
+# Engines the runners use. OpenBao 2.x has no built-in AWS secrets engine:
+# register the openbao-plugin-secrets-aws plugin first (openbao/openbao-plugins).
+bao secrets enable -path=secret -version=2 kv
+bao secrets enable transit
+bao secrets enable -path=aws openbao-plugin-secrets-aws
+# OpenBao's own AWS identity; it may only sts:AssumeRole on role/tf-*
+# (see terraform/modules/tf-app/README.md)
+bao write aws/config/root access_key=... secret_key=... region=eu-north-1
+
+# Kubernetes auth, used by smithd and by the runners
+bao auth enable kubernetes
+bao write auth/kubernetes/config kubernetes_host=https://kubernetes.default.svc
+
+# smithd's own policy and role
+bao policy write smithd - <<'EOF'
+# Runner policies tf-<app>-<env>[-readonly]
+path "sys/policies/acl/tf-*" {
+  capabilities = ["create", "read", "update"]
+}
+# Runner Kubernetes auth roles
+path "auth/kubernetes/role/tf-*" {
+  capabilities = ["create", "read", "update"]
+}
+# Transit keys: check and create only. "+" is one path segment, so this
+# grants no config, rotate, trim or delete
+path "transit/keys/+" {
+  capabilities = ["create", "read", "update"]
+}
+# AWS secrets engine roles <app>-<env>[-readonly]
+path "aws/roles/*" {
+  capabilities = ["create", "read", "update"]
+}
+EOF
+bao write auth/kubernetes/role/smithd \
+  bound_service_account_names=smithd bound_service_account_namespaces=deploysmith \
+  token_policies=smithd token_ttl=1h
+```
+
+Adjust the mounts if you use other paths (`config.openbao.*Mount`). With a
+static token for development set `secrets.openbaoToken` instead of the
+Kubernetes role.
+
+```yaml
+rbac:
+  create: true          # also creates the ClusterRole smithd-terraform-reader
+config:
+  openbao:
+    addr: https://openbao.openbao.svc:8200
+  terraform:
+    awsAccountId: "123456789012"
+    stateBucket: deploysmith-tfstate
+    stateRegion: eu-north-1
+    lockTable: deploysmith-tflock
+    kubeApiCidrs: "172.18.0.2/32"
+```
+
+An existing app keeps its backend:
+`smithctl app terraform enable legacy --env prod --backend-bucket legacy-tfstate --backend-key prod/terraform.tfstate --backend-region eu-central-1 --backend-lock-table legacy-tflock`.
+Then create the IAM roles with one `tf-app` module block in the platform
+app (`terraform/modules/tf-app/README.md`).
+
+Note that smithd's OpenBao token can write any policy named `tf-*` and bind
+it to a `tf-*` role. Treat it like an OpenBao admin credential: anyone who
+controls smithd can give a runner more than its app's secrets.
 
 #### Using MinIO Instead of AWS S3
 

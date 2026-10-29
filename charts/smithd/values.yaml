@@ -244,6 +244,47 @@ config:
     # Defaults to https://<uiProxy.host> with uiProxy.
     publicUrl: ""
 
+  # OpenBao (optional), where smithd sets up the roles, policies and Transit
+  # keys of Terraform apps. Terraform support is off without addr. See
+  # "Terraform apps" in the README for what to set up in OpenBao first.
+  openbao:
+    # e.g. https://openbao.openbao.svc:8200; runners reach it on this port
+    addr: ""
+    # Path to a CA certificate for addr, e.g. from a mounted volume
+    caCert: ""
+    # Kubernetes auth mount and role smithd logs in with
+    authMount: kubernetes
+    authRole: smithd
+    # Kubernetes auth mount runners log in with; defaults to authMount
+    runnerAuthMount: ""
+    # Audience runner ServiceAccount tokens must have; empty accepts any
+    runnerAudience: ""
+    # Engine mounts
+    kvMount: secret
+    transitMount: transit
+    awsMount: aws
+    # Namespace OpenBao runs in; runners may reach it
+    namespace: openbao
+
+  # Terraform apps (needs openbao.addr)
+  terraform:
+    # AWS account of the tf-<app>-<env> IAM roles (terraform/modules/tf-app)
+    awsAccountId: ""
+    # Shared state backend, the default for new apps
+    stateBucket: ""
+    stateRegion: ""
+    lockTable: ""
+    # Namespace tofu-controller runs in
+    controllerNamespace: flux-system
+    # Kubernetes API server addresses runners may reach (comma-separated
+    # CIDRs, e.g. "172.18.0.2/32"). Empty allows the private ranges on ports
+    # 443 and 6443, which is broader than needed.
+    kubeApiCidrs: ""
+    # Lifetime of a runner's OpenBao token (must cover the longest apply)
+    # and of its AWS credentials
+    runnerTokenTtl: 2h
+    stsTtl: 1h
+
 # Secrets configuration
 secrets:
   # API keys for authentication (comma-separated)
@@ -287,6 +328,10 @@ secrets:
   nats:
     url: ""
 
+  # Static OpenBao token (optional, for development). In a cluster smithd
+  # logs in with Kubernetes auth instead (config.openbao.authRole).
+  openbaoToken: ""
+
   # OAuth app for uiProxy. Generate the cookie secret with:
   #   openssl rand -base64 32 | tr -- '+/' '-_'
   oauth2Proxy:
@@ -309,6 +354,7 @@ secrets:
   #   - flux-webhook-url       (optional)
   #   - flux-webhook-token     (optional)
   #   - nats-url               (optional)
+  #   - openbao-token          (optional, development)
   #   - oauth2-proxy-client-id      (uiProxy)
   #   - oauth2-proxy-client-secret  (uiProxy)
   #   - oauth2-proxy-cookie-secret  (uiProxy)

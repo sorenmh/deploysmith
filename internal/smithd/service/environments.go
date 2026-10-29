@@ -64,13 +64,17 @@ func (s *Service) DeleteEnvironment(id string) error {
 		return err
 	}
 
-	policies, deployments, err := s.Environments.Usage(env.Name)
+	policies, deployments, terraform, err := s.Environments.Usage(env.Name)
 	if err != nil {
 		return fmt.Errorf("failed to check environment usage: %w", err)
 	}
 	if policies > 0 || deployments > 0 {
 		return &Error{Kind: KindConflict, Code: "environment_in_use", Message: fmt.Sprintf(
 			"Environment '%s' is still used by %d auto-deploy policies and %d deployments, so it cannot be deleted", env.Name, policies, deployments)}
+	}
+	if terraform > 0 {
+		return &Error{Kind: KindConflict, Code: "environment_in_use", Message: fmt.Sprintf(
+			"Environment '%s' has Terraform enabled for %d apps, so it cannot be deleted", env.Name, terraform)}
 	}
 
 	if err := s.Environments.Delete(id); err != nil {
