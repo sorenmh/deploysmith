@@ -85,9 +85,10 @@ func ResolveAppID(appName string) (string, string, error) {
 
 // VersionInfo represents the version information stored in .forge/version-info
 type VersionInfo struct {
-	App     string `json:"app"`
-	AppID   string `json:"appId"`
-	Version string `json:"version"`
+	App          string `json:"app"`
+	AppID        string `json:"appId"`
+	Version      string `json:"version"`
+	ArtifactType string `json:"artifactType,omitempty"` // empty for manifests
 }
 
 // LoadVersionInfo loads version information from .forge/version-info

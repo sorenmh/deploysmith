@@ -4,6 +4,10 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
+
+	"github.com/sorenmh/deploysmith/internal/smithd/auth"
+	"github.com/sorenmh/deploysmith/internal/smithd/auth/authtest"
+	"github.com/sorenmh/deploysmith/internal/smithd/db/dbtest"
 )
 
 func TestAuthenticate(t *testing.T) {
@@ -84,5 +88,9 @@ func TestAuthenticateConfigErrors(t *testing.T) {
 	}
 	if _, err := Authenticate(AuthConfig{UserHeader: "X-User", TrustedOrigins: []string{"not a url"}}); err == nil {
 		t.Error("expected error for invalid trusted origin")
+	}
+	login := authtest.NewGitHub(t, authtest.User{ID: 1, Login: "octocat"}).NewLogin(dbtest.Open(t), auth.Config{AllowedUsers: []string{"octocat"}})
+	if _, err := Authenticate(AuthConfig{UserHeader: "X-User", Login: login}); err == nil {
+		t.Error("expected error with both a user header and login with GitHub")
 	}
 }

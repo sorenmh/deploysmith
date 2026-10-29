@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/sorenmh/deploysmith/internal/forge/client"
+	"github.com/sorenmh/deploysmith/internal/shared/tfbundle"
 	"github.com/spf13/cobra"
 )
 
@@ -19,6 +20,7 @@ var (
 	initGitBranch    string
 	initGitCommitter string
 	initBuildNumber  int
+	initArtifactType string
 )
 
 var initCmd = &cobra.Command{
@@ -28,8 +30,12 @@ var initCmd = &cobra.Command{
 
 The presigned URL is saved to .forge/upload-url for use by the upload command.
 
-Example:
-  forge init --app my-app --version v1.0.0 --git-sha abc123 --git-branch main`,
+A version carries Kubernetes manifests, or with --artifact-type terraform an
+OpenTofu bundle, uploaded with 'forge upload --terraform <dir>'.
+
+Examples:
+  forge init --app my-app --version v1.0.0 --git-sha abc123 --git-branch main
+  forge init --version "$GIT_SHA" --git-sha "$GIT_SHA" --artifact-type terraform`,
 	RunE: runInit,
 }
 
@@ -42,6 +48,7 @@ func init() {
 	initCmd.Flags().StringVar(&initGitBranch, "git-branch", "", "Git branch name (detected from CI environment or git if omitted)")
 	initCmd.Flags().StringVar(&initGitCommitter, "git-committer", "", "Git committer email")
 	initCmd.Flags().IntVar(&initBuildNumber, "build-number", 0, "CI build number")
+	initCmd.Flags().StringVar(&initArtifactType, "artifact-type", "manifests", "What the version carries: manifests or terraform")
 
 	initCmd.MarkFlagRequired("version")
 }
@@ -50,6 +57,10 @@ func runInit(cmd *cobra.Command, args []string) error {
 	// Validate required config
 	if err := ValidateConfig(); err != nil {
 		return err
+	}
+
+	if initArtifactType != "manifests" && initArtifactType != tfbundle.ArtifactType {
+		return fmt.Errorf("unknown --artifact-type %q (use manifests or %s)", initArtifactType, tfbundle.ArtifactType)
 	}
 
 	// Resolve app ID
@@ -86,8 +97,9 @@ func runInit(cmd *cobra.Command, args []string) error {
 	}
 
 	req := client.DraftVersionRequest{
-		VersionID: initVersion,
-		Metadata:  metadata,
+		VersionID:    initVersion,
+		Metadata:     metadata,
+		ArtifactType: initArtifactType,
 	}
 
 	// Call smithd API
@@ -111,10 +123,13 @@ func runInit(cmd *cobra.Command, args []string) error {
 
 	// Save version info for later commands
 	versionFile := filepath.Join(forgeDir, "version-info")
-	versionInfo := map[string]string{
-		"app":     appName,
-		"appId":   appID,
-		"version": initVersion,
+	versionInfo := VersionInfo{
+		App:     appName,
+		AppID:   appID,
+		Version: initVersion,
+	}
+	if initArtifactType != "manifests" {
+		versionInfo.ArtifactType = initArtifactType
 	}
 	versionJSON, _ := json.Marshal(versionInfo)
 	if err := os.WriteFile(versionFile, versionJSON, 0644); err != nil {

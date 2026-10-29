@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	"github.com/go-chi/chi/v5"
+	"github.com/sorenmh/deploysmith/internal/smithd/db"
 	"github.com/sorenmh/deploysmith/internal/smithd/db/dbtest"
 	"github.com/sorenmh/deploysmith/internal/smithd/events"
 	"github.com/sorenmh/deploysmith/internal/smithd/service"
@@ -21,7 +22,13 @@ const testUserHeader = "X-Auth-Request-Email"
 // SQLite database
 func newTestServer(t *testing.T) (*httptest.Server, *service.Service) {
 	t.Helper()
-	database := dbtest.Open(t)
+	return newTestServerWithAuth(t, dbtest.Open(t), AuthConfig{UserHeader: testUserHeader})
+}
+
+// newTestServerWithAuth is newTestServer on database, with the given
+// authentication
+func newTestServerWithAuth(t *testing.T, database *db.DB, authCfg AuthConfig) (*httptest.Server, *service.Service) {
+	t.Helper()
 
 	svc := service.New(service.Deps{
 		Apps:         store.NewApplicationStore(database),
@@ -34,7 +41,7 @@ func newTestServer(t *testing.T) (*httptest.Server, *service.Service) {
 		Gitops:       &fakeGitops{},
 	})
 
-	ui, err := New(svc, AuthConfig{UserHeader: testUserHeader})
+	ui, err := New(svc, authCfg)
 	if err != nil {
 		t.Fatal(err)
 	}
