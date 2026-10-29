@@ -1,0 +1,72 @@
+# A hand-written Terraform CR in the shape smithd generates (DEP-18), for
+# checking the cluster setup before smithd deploys anything: app viino,
+# environment dev, root main, shared backend, encrypted state. Needs the
+# namespace tf-viino with ServiceAccount tf-runner-dev
+# (`smithctl app terraform enable viino --env dev`) and a GitRepository
+# tf-viino-dev-main with the root. See docs/terraform-cluster-setup.md.
+apiVersion: infra.contrib.fluxcd.io/v1alpha2
+kind: Terraform
+metadata:
+  name: dev-main
+  namespace: tf-viino
+spec:
+  interval: 6h
+  retryInterval: 5m
+  remediation:
+    retries: 1
+  sourceRef:
+    kind: GitRepository
+    name: tf-viino-dev-main
+    namespace: flux-system
+  path: ./environments/dev/terraform/viino/src/main
+  approvePlan: ""              # set to status.plan.pending to apply
+  storeReadablePlan: human
+  serviceAccountName: tf-runner-dev
+  disableDriftDetection: true
+  destroyResourcesOnDeletion: false
+  alwaysCleanupRunnerPod: true
+  backendConfig:
+    customConfiguration: |
+      backend "s3" {
+        bucket         = "deploysmith-tfstate"
+        key            = "viino/dev/main/terraform.tfstate"
+        region         = "eu-central-1"
+        dynamodb_table = "deploysmith-tflock"
+        encrypt        = true
+      }
+  runnerPodTemplate:
+    spec:
+      image: ghcr.io/sorenmh/deploysmith-tf-runner:v0.16.6-tofu1.13.2
+      env:
+        - name: BAO_ADDR
+          value: https://openbao.openbao.svc:8200
+        - name: SMITH_BAO_AUTH_ROLE
+          value: tf-viino-dev
+        - name: SMITH_BAO_AWS_ROLE
+          value: viino-dev
+        # Existing plaintext state: use the migration config from
+        # docs/terraform-migration.md for the first apply
+        - name: TF_ENCRYPTION
+          value: |
+            key_provider "openbao" "app" {
+              key_name            = "tf-viino"
+              transit_engine_path = "/transit"
+            }
+            method "aes_gcm" "app" {
+              keys = key_provider.openbao.app
+            }
+            state {
+              method   = method.aes_gcm.app
+              enforced = true
+            }
+            plan {
+              method   = method.aes_gcm.app
+              enforced = true
+            }
+      # Requests and a memory limit are required by the namespace's ResourceQuota
+      resources:
+        requests:
+          cpu: 100m
+          memory: 256Mi
+        limits:
+          memory: 1Gi
