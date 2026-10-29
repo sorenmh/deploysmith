@@ -31,6 +31,8 @@ CREATE TABLE IF NOT EXISTS versions (
     app_id TEXT NOT NULL,
     version_id TEXT NOT NULL,
     status TEXT NOT NULL CHECK(status IN ('draft', 'published')),
+    -- What the version carries: Kubernetes manifests, or an OpenTofu bundle
+    artifact_type TEXT NOT NULL DEFAULT 'manifests' CHECK(artifact_type IN ('manifests', 'terraform')),
 
     -- Metadata from version.yml
     git_sha TEXT,

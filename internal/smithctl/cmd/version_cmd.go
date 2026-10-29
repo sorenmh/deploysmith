@@ -68,7 +68,7 @@ Examples:
 		// Print output based on format
 		format := output.Format(GetOutputFormat())
 		return output.Print(format, resp, func() {
-			headers := []string{"VERSION", "STATUS", "BRANCH", "DEPLOYED TO", "CREATED"}
+			headers := []string{"VERSION", "TYPE", "STATUS", "BRANCH", "DEPLOYED TO", "CREATED"}
 			rows := make([][]string, 0, len(resp.Versions))
 
 			for _, ver := range resp.Versions {
@@ -84,6 +84,7 @@ Examples:
 
 				rows = append(rows, []string{
 					ver.Version,
+					artifactType(ver),
 					ver.Status,
 					branch,
 					deployedTo,
@@ -150,6 +151,7 @@ Examples:
 		// Table format
 		fmt.Printf("Version: %s\n\n", ver.Version)
 		fmt.Printf("  Status:   %s\n", ver.Status)
+		fmt.Printf("  Type:     %s\n", artifactType(*ver))
 
 		if ver.GitSHA != nil {
 			fmt.Printf("  Git SHA:  %s\n", *ver.GitSHA)
@@ -185,6 +187,15 @@ Examples:
 
 		return nil
 	},
+}
+
+// artifactType returns what a version carries; smithd versions from before
+// artifact types only carry manifests
+func artifactType(ver client.Version) string {
+	if ver.ArtifactType == "" {
+		return "manifests"
+	}
+	return ver.ArtifactType
 }
 
 func init() {

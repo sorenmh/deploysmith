@@ -76,6 +76,7 @@ type Version struct {
 	AppID        string     `json:"appId"`
 	Version      string     `json:"versionId"`
 	Status       string     `json:"status"`
+	ArtifactType string     `json:"artifactType,omitempty"` // manifests, terraform
 	GitSHA       *string    `json:"gitSha,omitempty"`
 	GitBranch    *string    `json:"gitBranch,omitempty"`
 	GitCommitter *string    `json:"gitCommitter,omitempty"`
