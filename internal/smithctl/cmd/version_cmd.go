@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/sorenmh/deploysmith/internal/smithctl/client"
 	"github.com/sorenmh/deploysmith/internal/smithctl/output"
 	"github.com/spf13/cobra"
 )
