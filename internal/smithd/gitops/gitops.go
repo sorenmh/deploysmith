@@ -103,6 +103,27 @@ func (s *Service) Deploy(appName, environment, message string, manifests map[str
 // rejected, the working copy is reset to the new remote state and write is
 // applied again.
 func (s *Service) change(message string, write func() error) (string, error) {
+	shas, err := s.changeSteps([]step{{message: message, write: func([]string) error { return write() }}})
+	if err != nil {
+		return "", err
+	}
+	return shas[0], nil
+}
+
+// step is one commit of changeSteps. write gets the commit SHAs of the
+// steps before it.
+type step struct {
+	message string
+	write   func(previous []string) error
+}
+
+// changeSteps is change for several commits pushed together: each step's
+// write is applied and committed in turn, and all of them are pushed at
+// once, so the remote gets either all commits or none. It returns each
+// step's commit SHA; a step that changed nothing gets the SHA of the commit
+// before it. When the push is rejected, all steps are applied again to the
+// new remote state.
+func (s *Service) changeSteps(steps []step) ([]string, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
@@ -117,16 +138,21 @@ func (s *Service) change(message string, write func() error) (string, error) {
 			continue
 		}
 
-		if err := write(); err != nil {
-			return "", err
+		shas := make([]string, 0, len(steps))
+		anyChanged := false
+		for _, st := range steps {
+			if err := st.write(shas); err != nil {
+				return nil, err
+			}
+			sha, changed, err := s.commit(st.message)
+			if err != nil {
+				return nil, fmt.Errorf("failed to commit: %w", err)
+			}
+			shas = append(shas, sha)
+			anyChanged = anyChanged || changed
 		}
-
-		sha, changed, err := s.commit(message)
-		if err != nil {
-			return "", fmt.Errorf("failed to commit: %w", err)
-		}
-		if !changed {
-			return sha, nil
+		if !anyChanged {
+			return shas, nil
 		}
 
 		if s.beforePush != nil {
@@ -137,10 +163,22 @@ func (s *Service) change(message string, write func() error) (string, error) {
 			continue
 		}
 
-		return sha, nil
+		return shas, nil
 	}
 
-	return "", fmt.Errorf("gitops deploy failed after %d attempts: %w", s.pushAttempts, lastErr)
+	return nil, fmt.Errorf("gitops deploy failed after %d attempts: %w", s.pushAttempts, lastErr)
+}
+
+// branch returns the branch the working copy is on
+func (s *Service) branch() (string, error) {
+	head, err := s.repo.Reference(plumbing.HEAD, false)
+	if err != nil {
+		return "", fmt.Errorf("failed to read HEAD: %w", err)
+	}
+	if !head.Target().IsBranch() {
+		return "", fmt.Errorf("HEAD is not on a branch")
+	}
+	return head.Target().Short(), nil
 }
 
 // Contains reports whether revision includes commit, i.e. is the commit or

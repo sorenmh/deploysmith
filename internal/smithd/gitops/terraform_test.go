@@ -1,8 +1,13 @@
 package gitops
 
 import (
+	"fmt"
 	"strings"
 	"testing"
+
+	"github.com/go-git/go-git/v5"
+	"github.com/go-git/go-git/v5/plumbing"
+	"github.com/go-git/go-git/v5/plumbing/object"
 )
 
 func TestWriteTerraformFiles(t *testing.T) {
@@ -61,5 +66,251 @@ func TestWriteTerraformFilesRejectsUnsafeNames(t *testing.T) {
 		if _, err := s.WriteTerraformFiles(tc.app, tc.env, "x", map[string][]byte{tc.file: nil}); err == nil {
 			t.Errorf("WriteTerraformFiles(%q, %q, %q) succeeded", tc.app, tc.env, tc.file)
 		}
+	}
+}
+
+func bundle(main string) map[string][]byte {
+	return map[string][]byte{
+		"main.tf":             []byte(main),
+		".terraform.lock.hcl": []byte("# lock\n"),
+		"env/prod.tfvars":     []byte("x = 1\n"),
+		"modules/m/main.tf":   []byte("# module\n"),
+	}
+}
+
+// testDeploy renders the root's file from what DeployTerraform passes in
+func testDeploy(source map[string][]byte) TerraformDeploy {
+	return TerraformDeploy{
+		App:         "viino",
+		Environment: "prod",
+		Root:        "main",
+		Source:      source,
+		Manifest: func(branch, sourceCommit string) ([]byte, error) {
+			return []byte(fmt.Sprintf("branch: %s\ncommit: %s\napprovePlan: \"\"\n", branch, sourceCommit)), nil
+		},
+		SourceMessage:   "source",
+		ManifestMessage: "manifest",
+	}
+}
+
+// remoteCommit returns a commit of the remote, or its HEAD for ""
+func remoteCommit(t *testing.T, remote, sha string) *object.Commit {
+	t.Helper()
+	repo, err := git.PlainClone(t.TempDir(), true, &git.CloneOptions{URL: remote})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if sha == "" {
+		head, err := repo.Head()
+		if err != nil {
+			t.Fatal(err)
+		}
+		sha = head.Hash().String()
+	}
+	commit, err := repo.CommitObject(plumbing.NewHash(sha))
+	if err != nil {
+		t.Fatal(err)
+	}
+	return commit
+}
+
+// fileAt returns a file's content in a commit, or "" if absent
+func fileAt(t *testing.T, commit *object.Commit, name string) string {
+	t.Helper()
+	file, err := commit.File(name)
+	if err == object.ErrFileNotFound {
+		return ""
+	}
+	if err != nil {
+		t.Fatal(err)
+	}
+	content, err := file.Contents()
+	if err != nil {
+		t.Fatal(err)
+	}
+	return content
+}
+
+const testSourcePath = "environments/prod/terraform/viino/src/main/"
+
+func TestDeployTerraformCommitsSourceThenManifest(t *testing.T) {
+	remote := newTestRemote(t)
+	s := newTestService(t, remote)
+
+	commits, err := s.DeployTerraform(testDeploy(bundle("# v1\n")))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if commits.Branch != "master" {
+		t.Errorf("branch = %q, want the remote's master", commits.Branch)
+	}
+
+	// HEAD is the manifest commit, its parent the source commit
+	head := remoteCommit(t, remote, "")
+	if head.Hash.String() != commits.Manifest || head.Message != "manifest" {
+		t.Fatalf("remote HEAD %s %q, want the manifest commit %s", head.Hash, head.Message, commits.Manifest)
+	}
+	if len(head.ParentHashes) != 1 || head.ParentHashes[0].String() != commits.Source {
+		t.Fatalf("manifest commit's parents %v, want the source commit %s", head.ParentHashes, commits.Source)
+	}
+
+	// The source commit has the bundle but not yet the manifest
+	source := remoteCommit(t, remote, commits.Source)
+	if source.Message != "source" {
+		t.Errorf("source commit message %q", source.Message)
+	}
+	for name, content := range bundle("# v1\n") {
+		if got := fileAt(t, source, testSourcePath+name); got != string(content) {
+			t.Errorf("%s = %q in the source commit", name, got)
+		}
+	}
+	if got := fileAt(t, source, "environments/prod/terraform/viino/main.yaml"); got != "" {
+		t.Errorf("manifest already in the source commit:\n%s", got)
+	}
+
+	// The manifest is pinned to the source commit and listed
+	want := fmt.Sprintf("branch: master\ncommit: %s\napprovePlan: \"\"\n", commits.Source)
+	if got := fileAt(t, head, "environments/prod/terraform/viino/main.yaml"); got != want {
+		t.Errorf("main.yaml = %q, want %q", got, want)
+	}
+	if got := fileAt(t, head, "environments/prod/terraform/viino/kustomization.yaml"); !strings.Contains(got, "- main.yaml") || strings.Contains(got, "src") {
+		t.Errorf("app kustomization:\n%s", got)
+	}
+	if got := fileAt(t, head, "environments/prod/terraform/kustomization.yaml"); !strings.Contains(got, "- viino") {
+		t.Errorf("terraform kustomization:\n%s", got)
+	}
+}
+
+func TestDeployTerraformReplacesSource(t *testing.T) {
+	remote := newTestRemote(t)
+	s := newTestService(t, remote)
+	if _, err := s.WriteTerraformFiles("viino", "prod", "namespace", map[string][]byte{"namespace.yaml": []byte("kind: Namespace\n")}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.DeployTerraform(testDeploy(bundle("# v1\n"))); err != nil {
+		t.Fatal(err)
+	}
+
+	// The next bundle drops the module
+	next := bundle("# v2\n")
+	delete(next, "modules/m/main.tf")
+	commits, err := s.DeployTerraform(testDeploy(next))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	source := remoteCommit(t, remote, commits.Source)
+	if got := fileAt(t, source, testSourcePath+"main.tf"); got != "# v2\n" {
+		t.Errorf("main.tf = %q", got)
+	}
+	if got := fileAt(t, source, testSourcePath+"modules/m/main.tf"); got != "" {
+		t.Errorf("file left out of the bundle is still there: %q", got)
+	}
+	head := remoteCommit(t, remote, commits.Manifest)
+	if got := fileAt(t, head, "environments/prod/terraform/viino/kustomization.yaml"); !strings.Contains(got, "- namespace.yaml") || !strings.Contains(got, "- main.yaml") {
+		t.Errorf("app kustomization:\n%s", got)
+	}
+}
+
+func TestDeployTerraformUnchangedSource(t *testing.T) {
+	remote := newTestRemote(t)
+	s := newTestService(t, remote)
+	first, err := s.DeployTerraform(testDeploy(bundle("# v1\n")))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Deploying the same bundle again pins the manifest to the current
+	// commit, which has the same source, and so asks for a new plan
+	second, err := s.DeployTerraform(testDeploy(bundle("# v1\n")))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if second.Source != first.Manifest {
+		t.Errorf("source commit %s, want the previous HEAD %s", second.Source, first.Manifest)
+	}
+	head := remoteCommit(t, remote, "")
+	if head.Hash.String() != second.Manifest || head.ParentHashes[0].String() != first.Manifest {
+		t.Errorf("remote HEAD %s (parent %v), want a manifest commit %s on %s", head.Hash, head.ParentHashes, second.Manifest, first.Manifest)
+	}
+}
+
+func TestDeployTerraformIgnoresGitignore(t *testing.T) {
+	remote := newTestRemote(t)
+	pushFromOtherClone(t, remote, ".gitignore", "*.tfvars\n.terraform*\n")
+	s := newTestService(t, remote)
+
+	commits, err := s.DeployTerraform(testDeploy(bundle("# v1\n")))
+	if err != nil {
+		t.Fatal(err)
+	}
+	source := remoteCommit(t, remote, commits.Source)
+	for _, name := range []string{"env/prod.tfvars", ".terraform.lock.hcl"} {
+		if fileAt(t, source, testSourcePath+name) == "" {
+			t.Errorf("%s was left out", name)
+		}
+	}
+}
+
+func TestDeployTerraformRetriesRejectedPush(t *testing.T) {
+	remote := newTestRemote(t)
+	s := newTestService(t, remote)
+
+	raced := false
+	s.beforePush = func() {
+		if !raced {
+			raced = true
+			pushFromOtherClone(t, remote, "human.txt", "edit")
+		}
+	}
+
+	commits, err := s.DeployTerraform(testDeploy(bundle("# v1\n")))
+	if err != nil {
+		t.Fatalf("deploy failed despite retry: %v", err)
+	}
+
+	// Both commits were made again on top of the other push, and the
+	// manifest is pinned to the new source commit
+	source := remoteCommit(t, remote, commits.Source)
+	if fileAt(t, source, "human.txt") != "edit" {
+		t.Error("source commit is not on top of the concurrent push")
+	}
+	want := fmt.Sprintf("commit: %s\n", commits.Source)
+	if got := fileAt(t, remoteCommit(t, remote, ""), "environments/prod/terraform/viino/main.yaml"); !strings.Contains(got, want) {
+		t.Errorf("main.yaml = %q, want it pinned to %s", got, commits.Source)
+	}
+}
+
+func TestDeployTerraformRejectsUnsafeNames(t *testing.T) {
+	remote := newTestRemote(t)
+	s := newTestService(t, remote)
+	for _, d := range []TerraformDeploy{
+		func() TerraformDeploy { d := testDeploy(bundle("")); d.App = ".."; return d }(),
+		func() TerraformDeploy { d := testDeploy(bundle("")); d.Root = "a/b"; return d }(),
+		testDeploy(map[string][]byte{"../../evil.tf": []byte("")}),
+		testDeploy(map[string][]byte{"/etc/evil.tf": []byte("")}),
+		testDeploy(nil),
+	} {
+		if _, err := s.DeployTerraform(d); err == nil {
+			t.Errorf("DeployTerraform(%s, %s, %v) succeeded", d.App, d.Root, d.Source)
+		}
+	}
+	if head := remoteCommit(t, remote, ""); head.Message != "add README.md" {
+		t.Errorf("something was committed: %q", head.Message)
+	}
+}
+
+func TestDeployTerraformManifestError(t *testing.T) {
+	remote := newTestRemote(t)
+	s := newTestService(t, remote)
+	d := testDeploy(bundle("# v1\n"))
+	d.Manifest = func(string, string) ([]byte, error) { return nil, fmt.Errorf("no image") }
+
+	if _, err := s.DeployTerraform(d); err == nil || !strings.Contains(err.Error(), "no image") {
+		t.Errorf("error = %v", err)
+	}
+	// The source commit is not pushed alone
+	if head := remoteCommit(t, remote, ""); head.Message != "add README.md" {
+		t.Errorf("something was pushed: %q", head.Message)
 	}
 }
