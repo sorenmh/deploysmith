@@ -1,0 +1,62 @@
+# tofu-controller for DeploySmith's Terraform apps, for the gitops repo (e.g.
+# infrastructure/tofu-controller.yaml). See docs/terraform-cluster-setup.md.
+---
+apiVersion: source.toolkit.fluxcd.io/v1
+kind: HelmRepository
+metadata:
+  name: tofu-controller
+  namespace: flux-system
+spec:
+  interval: 24h
+  url: https://flux-iac.github.io/tofu-controller
+---
+apiVersion: helm.toolkit.fluxcd.io/v2
+kind: HelmRelease
+metadata:
+  name: tofu-controller
+  namespace: flux-system
+spec:
+  interval: 1h
+  chart:
+    spec:
+      chart: tofu-controller
+      # Exact: the runner image is built for this version (the controller talks
+      # to the runner over gRPC). Upgrade both together, after re-running the
+      # checks in docs/specs/terraform-controller.md.
+      version: "0.16.6"
+      sourceRef:
+        kind: HelmRepository
+        name: tofu-controller
+  install:
+    crds: Create
+  upgrade:
+    crds: CreateReplace
+  values:
+    # GitRepositories stay in flux-system (with the gitops credentials), the
+    # Terraform CRs live in tf-<app>
+    allowCrossNamespaceRefs: true
+    # Runs started at the same time; a small cluster doesn't need the default 24
+    concurrency: 4
+    resources:
+      requests:
+        cpu: 50m
+        memory: 128Mi
+      limits:
+        memory: 512Mi
+    # No AWS primitive modules: Terraform apps bring their own code
+    awsPackage:
+      install: false
+    runner:
+      # Default runner; smithd sets the image per CR from the bundle's OpenTofu
+      # version, pinned by digest
+      image:
+        repository: ghcr.io/sorenmh/deploysmith-tf-runner
+        tag: v0.16.6-tofu1.13.2
+      serviceAccount:
+        # smithd commits the runner ServiceAccounts and their RoleBindings to
+        # tf-runner-role in each tf-<app> namespace (DEP-17)
+        create: false
+        # Never one ClusterRoleBinding for runners: tf-runner-role can read and
+        # write Secrets, so one app's bundle code could read every Secret in the
+        # cluster
+        namespacedRoleBindings: true

@@ -25,6 +25,7 @@
       </svg>
       deploysmith
     </a>
+    {{if .User}}
     <nav class="nav" aria-label="Main">
       <a href="/ui/apps"{{if eq .Section "apps"}} aria-current="page"{{end}}>Apps</a>
       <a href="/ui/deployments"{{if eq .Section "deployments"}} aria-current="page"{{end}}>Deployments</a>
@@ -32,7 +33,9 @@
     </nav>
     <span class="whoami">Signed in as {{.User}}
       {{if .PushKey}}<button type="button" id="push-toggle" class="push-toggle" data-key="{{.PushKey}}" hidden>Enable notifications</button>{{end}}
+      {{if .Logout}}<form class="signout" method="post" action="/ui/auth/logout"><button type="submit">Sign out</button></form>{{end}}
     </span>
+    {{end}}
     </div>
   </header>
   <main class="page">

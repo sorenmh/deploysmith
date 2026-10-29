@@ -15,12 +15,16 @@ func seed(t *testing.T, d *DB) {
 		`INSERT INTO environments (id, name, description) VALUES ('env-1', 'production', 'Prod')`,
 		`INSERT INTO versions (id, app_id, version_id, status, git_sha, git_branch, build_number, metadata_timestamp, published_at)
 			VALUES ('ver-1', 'app-1', 'v1', 'published', 'abc123', 'master', '7', '2026-10-19 10:00:00', '2026-10-19 10:05:00')`,
+		`INSERT INTO versions (id, app_id, version_id, status, artifact_type, metadata_timestamp)
+			VALUES ('ver-2', 'app-1', 'infra-1', 'draft', 'terraform', '2026-10-19 11:00:00')`,
 		`INSERT INTO policies (id, app_id, name, git_branch_pattern, target_environment, enabled)
 			VALUES ('pol-1', 'app-1', 'master-prod', 'master', 'production', TRUE)`,
 		`INSERT INTO policies (id, app_id, name, git_branch_pattern, target_environment, enabled)
 			VALUES ('pol-2', 'app-1', 'off', 'dev', 'production', FALSE)`,
 		`INSERT INTO deployments (id, app_id, version_id, environment, status, triggered_by, policy_id, gitops_commit_sha, completed_at)
 			VALUES ('dep-1', 'app-1', 'ver-1', 'production', 'success', 'auto-deploy', 'pol-1', 'sha-1', '2026-10-19 10:06:00')`,
+		`INSERT INTO terraform_environments (id, app_id, environment, backend_bucket, backend_key, backend_region, provisioned_at)
+			VALUES ('tf-1', 'app-1', 'production', 'tfstate', 'hello/production/main/terraform.tfstate', 'eu-north-1', '2026-10-19 10:07:00')`,
 	}
 	for _, statement := range statements {
 		if _, err := d.Exec(statement); err != nil {
@@ -59,7 +63,7 @@ func TestDumpLoadSQLiteToPostgres(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() {
-		for _, table := range []string{"deployments", "policies", "versions", "environments", "applications"} {
+		for _, table := range []string{"terraform_environments", "deployments", "policies", "versions", "environments", "applications"} {
 			target.Exec("DELETE FROM " + table)
 		}
 		target.Close()
@@ -93,6 +97,12 @@ func TestDumpLoadSQLiteToPostgres(t *testing.T) {
 	}
 	if n := count(t, target, `SELECT COUNT(*) FROM versions WHERE published_at > metadata_timestamp`); n != 1 {
 		t.Errorf("%d versions with intact timestamps, want 1", n)
+	}
+	if n := count(t, target, `SELECT COUNT(*) FROM versions WHERE artifact_type = 'terraform'`); n != 1 {
+		t.Errorf("%d terraform versions, want 1", n)
+	}
+	if n := count(t, target, `SELECT COUNT(*) FROM terraform_environments WHERE provisioned_at IS NOT NULL`); n != 1 {
+		t.Errorf("%d terraform environments, want 1", n)
 	}
 }
 

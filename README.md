@@ -158,11 +158,28 @@ UI_ALLOWED_USERS=@example.com
 # localhost behind an oauth2-proxy sidecar (the Helm chart's uiProxy)
 UI_LISTEN_ADDR=127.0.0.1:8081
 
+# Login with GitHub (optional), see docs/login-with-github.md. People log
+# in to smithctl and the web UI (which then needs no proxy) with GitHub.
+GITHUB_CLIENT_ID=Iv23liExample
+GITHUB_CLIENT_SECRET=your-client-secret
+GITHUB_ALLOWED_ORG=your-org          # and/or GITHUB_ALLOWED_USERS=octocat
+SESSION_TTL=12h
+
 # Slack notifications (optional), see below
 SLACK_WEBHOOK_URL=https://hooks.slack.com/services/...
 FLUX_KUSTOMIZATION_NAME=apps
 UI_PUBLIC_URL=https://smithui.example.com
 ```
+
+### Login with GitHub
+
+With a GitHub App (or OAuth App) configured, people sign in with their
+GitHub account: `smithctl login` uses the device flow, the web UI GitHub's
+sign-in page, and smithd records who deployed. smithd checks the user
+against `GITHUB_ALLOWED_USERS` and/or membership of `GITHUB_ALLOWED_ORG`
+(and `GITHUB_ALLOWED_TEAM`), then issues its own short-lived session. API
+keys keep working for CI. See [docs/login-with-github.md](docs/login-with-github.md)
+for creating the app and configuring smithd.
 
 ### Slack notifications
 

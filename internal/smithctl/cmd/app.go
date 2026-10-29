@@ -45,7 +45,7 @@ Example:
 		}
 
 		// Create API client
-		c := client.NewClient(GetSmithdURL(), GetSmithdAPIKey())
+		c := newClient()
 
 		// Register application
 		// Note: smithd uses a single global GitOps repo configured at the server level
@@ -91,7 +91,7 @@ var appListCmd = &cobra.Command{
 		}
 
 		// Create API client
-		c := client.NewClient(GetSmithdURL(), GetSmithdAPIKey())
+		c := newClient()
 
 		// List applications
 		resp, err := c.ListApplications(100, 0)
@@ -138,7 +138,7 @@ var appShowCmd = &cobra.Command{
 		appName := args[0]
 
 		// Create API client
-		c := client.NewClient(GetSmithdURL(), GetSmithdAPIKey())
+		c := newClient()
 
 		// Get application
 		app, err := c.GetApplication(appName)

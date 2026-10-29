@@ -89,6 +89,20 @@ func (s *Service) Deploy(appName, environment, message string, manifests map[str
 		return "", err
 	}
 
+	return s.change(message, func() error {
+		if err := s.writeManifests(appName, environment, files); err != nil {
+			return fmt.Errorf("failed to write manifests: %w", err)
+		}
+		return nil
+	})
+}
+
+// change applies write to a fresh copy of the remote, commits and pushes
+// it, and returns the resulting commit SHA. If nothing changed, nothing is
+// committed and the current remote SHA is returned. When a push is
+// rejected, the working copy is reset to the new remote state and write is
+// applied again.
+func (s *Service) change(message string, write func() error) (string, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
@@ -103,8 +117,8 @@ func (s *Service) Deploy(appName, environment, message string, manifests map[str
 			continue
 		}
 
-		if err := s.writeManifests(appName, environment, files); err != nil {
-			return "", fmt.Errorf("failed to write manifests: %w", err)
+		if err := write(); err != nil {
+			return "", err
 		}
 
 		sha, changed, err := s.commit(message)

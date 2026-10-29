@@ -54,7 +54,9 @@ type VersionSource struct {
 type DraftVersionRequest struct {
 	VersionID string          `json:"versionId"`
 	Metadata  VersionMetadata `json:"metadata"`
-	Source    *VersionSource  `json:"source,omitempty"`
+	// ArtifactType is manifests (the default) or terraform
+	ArtifactType string         `json:"artifactType,omitempty"`
+	Source       *VersionSource `json:"source,omitempty"`
 }
 
 // DraftVersionResponse is the response from creating a draft version
@@ -62,6 +64,7 @@ type DraftVersionResponse struct {
 	VersionID     string    `json:"versionId"`
 	UploadURL     string    `json:"uploadUrl"`
 	UploadExpires time.Time `json:"uploadExpires"`
+	ArtifactType  string    `json:"artifactType"`
 }
 
 // CreateDraftVersion creates a new draft version

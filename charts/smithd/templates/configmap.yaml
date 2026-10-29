@@ -32,6 +32,44 @@ data:
   {{- with (default (ternary (printf "https://%s" .Values.uiProxy.host) "" .Values.uiProxy.enabled) .Values.config.ui.publicUrl) }}
   UI_PUBLIC_URL: {{ . | quote }}
   {{- end }}
+  SMITHD_NAMESPACE: {{ .Release.Namespace | quote }}
+  SMITHD_SERVICE_ACCOUNT: {{ include "smithd.serviceAccountName" . | quote }}
+  {{- with .Values.config.openbao }}
+  {{- if .addr }}
+  OPENBAO_ADDR: {{ .addr | quote }}
+  {{- if .caCert }}
+  OPENBAO_CACERT: {{ .caCert | quote }}
+  {{- end }}
+  OPENBAO_AUTH_MOUNT: {{ .authMount | quote }}
+  OPENBAO_AUTH_ROLE: {{ .authRole | quote }}
+  {{- if .runnerAuthMount }}
+  OPENBAO_RUNNER_AUTH_MOUNT: {{ .runnerAuthMount | quote }}
+  {{- end }}
+  {{- if .runnerAudience }}
+  OPENBAO_RUNNER_AUDIENCE: {{ .runnerAudience | quote }}
+  {{- end }}
+  OPENBAO_KV_MOUNT: {{ .kvMount | quote }}
+  OPENBAO_TRANSIT_MOUNT: {{ .transitMount | quote }}
+  OPENBAO_AWS_MOUNT: {{ .awsMount | quote }}
+  OPENBAO_K8S_NAMESPACE: {{ .namespace | quote }}
+  {{- end }}
+  {{- end }}
+  {{- with .Values.config.terraform }}
+  {{- if .awsAccountId }}
+  TERRAFORM_AWS_ACCOUNT_ID: {{ .awsAccountId | quote }}
+  {{- end }}
+  {{- if .stateBucket }}
+  TERRAFORM_STATE_BUCKET: {{ .stateBucket | quote }}
+  TERRAFORM_STATE_REGION: {{ .stateRegion | quote }}
+  TERRAFORM_LOCK_TABLE: {{ .lockTable | quote }}
+  {{- end }}
+  TERRAFORM_CONTROLLER_NAMESPACE: {{ .controllerNamespace | quote }}
+  {{- if .kubeApiCidrs }}
+  TERRAFORM_KUBE_API_CIDRS: {{ .kubeApiCidrs | quote }}
+  {{- end }}
+  TERRAFORM_RUNNER_TOKEN_TTL: {{ .runnerTokenTtl | quote }}
+  TERRAFORM_STS_TTL: {{ .stsTtl | quote }}
+  {{- end }}
   {{- with .Values.config.ui }}
   {{- if .allowedUsers }}
   UI_ALLOWED_USERS: {{ .allowedUsers | quote }}
@@ -40,6 +78,35 @@ data:
   UI_TRUSTED_ORIGINS: {{ .trustedOrigins | quote }}
   {{- end }}
   {{- end }}
-  {{- if .Values.config.github.appId }}
-  GITHUB_APP_ID: {{ .Values.config.github.appId | quote }}
+  {{- with .Values.config.github }}
+  {{- if .appId }}
+  GITHUB_APP_ID: {{ .appId | quote }}
+  {{- end }}
+  {{- if .clientId }}
+  {{- if or $.Values.uiProxy.enabled $.Values.uiIngress.enabled $.Values.config.ui.userHeader }}
+  {{- fail "config.github signs people in to the web UI itself; it can't be combined with uiProxy, uiIngress or config.ui.userHeader" }}
+  {{- end }}
+  {{- if not (or .allowedOrg .allowedUsers) }}
+  {{- fail "config.github needs allowedOrg or allowedUsers, or anyone with a GitHub account could sign in" }}
+  {{- end }}
+  GITHUB_CLIENT_ID: {{ .clientId | quote }}
+  {{- if .allowedOrg }}
+  GITHUB_ALLOWED_ORG: {{ .allowedOrg | quote }}
+  {{- end }}
+  {{- if .allowedTeam }}
+  GITHUB_ALLOWED_TEAM: {{ .allowedTeam | quote }}
+  {{- end }}
+  {{- if .allowedUsers }}
+  GITHUB_ALLOWED_USERS: {{ .allowedUsers | quote }}
+  {{- end }}
+  {{- if .sessionTtl }}
+  SESSION_TTL: {{ .sessionTtl | quote }}
+  {{- end }}
+  {{- if .url }}
+  GITHUB_URL: {{ .url | quote }}
+  {{- end }}
+  {{- if .apiUrl }}
+  GITHUB_API_URL: {{ .apiUrl | quote }}
+  {{- end }}
+  {{- end }}
   {{- end }}

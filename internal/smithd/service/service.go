@@ -10,9 +10,11 @@ import (
 	"github.com/sorenmh/deploysmith/internal/smithd/events"
 	"github.com/sorenmh/deploysmith/internal/smithd/flux"
 	"github.com/sorenmh/deploysmith/internal/smithd/github"
+	"github.com/sorenmh/deploysmith/internal/smithd/models"
 	"github.com/sorenmh/deploysmith/internal/smithd/push"
 	"github.com/sorenmh/deploysmith/internal/smithd/slack"
 	"github.com/sorenmh/deploysmith/internal/smithd/store"
+	"github.com/sorenmh/deploysmith/internal/smithd/terraform"
 )
 
 // ManifestStorage provides the manifest files of a version
@@ -57,6 +59,14 @@ type Deps struct {
 	// UIBaseURL is the web UI's public URL, used to link to deployments
 	// from notifications. Empty if there is none.
 	UIBaseURL string
+
+	// Terraform apps. Terraform support is off while Terraform (the
+	// OpenBao provisioner) is nil, i.e. when OpenBao is not configured.
+	TerraformEnvironments  *store.TerraformStore
+	Terraform              *terraform.Provisioner
+	TerraformGitops        TerraformGitops
+	TerraformManifests     terraform.ManifestOptions
+	TerraformSharedBackend models.TerraformBackend // default backend of new apps; Key is unused
 }
 
 // Service implements smithd's operations

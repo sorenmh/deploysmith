@@ -1,0 +1,5 @@
+# AWS config of DeploySmith's tofu-controller runner (Dockerfile.tf-runner). The SDK
+# runs the helper whenever it needs credentials and again shortly before they expire;
+# the helper reads aws/creds/$SMITH_BAO_AWS_ROLE from OpenBao.
+[default]
+credential_process = /usr/local/bin/tf-runner-auth aws-credentials

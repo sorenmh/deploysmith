@@ -1,0 +1,11 @@
+{{define "content"}}
+<h1 class="page-title">Sign in</h1>
+{{with .Data}}
+<div class="signin">
+  {{with .Error}}<div class="error" role="alert"><p>{{.}}</p></div>{{end}}
+  <p class="lede">Sign in with your GitHub account to deploy and manage apps.</p>
+  <!-- Not boosted: GitHub's sign-in page must load as a full page -->
+  <a class="button" href="/ui/auth/github?next={{.Next}}" hx-boost="false">Sign in with GitHub</a>
+</div>
+{{end}}
+{{end}}

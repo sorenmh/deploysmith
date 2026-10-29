@@ -15,7 +15,7 @@ func TestVersionSource(t *testing.T) {
 		t.Fatal(err)
 	}
 	versions := NewVersionStore(database)
-	version, err := versions.Create(app.ID, "v1", models.VersionMetadata{Timestamp: time.Now().UTC().Format(time.RFC3339)})
+	version, err := versions.Create(app.ID, "v1", "", models.VersionMetadata{Timestamp: time.Now().UTC().Format(time.RFC3339)})
 	if err != nil {
 		t.Fatal(err)
 	}

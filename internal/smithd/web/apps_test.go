@@ -29,7 +29,7 @@ func seed(t *testing.T, svc *service.Service) *models.Application {
 		id      string
 		publish bool
 	}{{"v1", true}, {"v2-draft", false}} {
-		version, err := svc.Versions.Create(app.ID, v.id, models.VersionMetadata{
+		version, err := svc.Versions.Create(app.ID, v.id, "", models.VersionMetadata{
 			GitBranch: "main",
 			GitSHA:    "abcdef1234567890",
 			Timestamp: time.Now().UTC().Format(time.RFC3339),

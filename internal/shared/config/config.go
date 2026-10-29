@@ -84,10 +84,18 @@ func GetSmithdAPIKey() string {
 	return viper.GetString("apiKey")
 }
 
-// ValidateConfig validates that required configuration is present
-func ValidateConfig() error {
+// ValidateURL validates that the smithd URL is configured
+func ValidateURL() error {
 	if GetSmithdURL() == "" {
 		return fmt.Errorf("smithd URL is required (set SMITHD_URL env var, --url flag, or url in config file)")
+	}
+	return nil
+}
+
+// ValidateConfig validates that required configuration is present
+func ValidateConfig() error {
+	if err := ValidateURL(); err != nil {
+		return err
 	}
 	if GetSmithdAPIKey() == "" {
 		return fmt.Errorf("smithd API key is required (set SMITHD_API_KEY env var, --api-key flag, or apiKey in config file)")

@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/sorenmh/deploysmith/internal/smithctl/client"
 	"github.com/sorenmh/deploysmith/internal/smithctl/output"
 	"github.com/spf13/cobra"
 )
@@ -27,7 +26,7 @@ var exportDBCmd = &cobra.Command{
 		}
 
 		// Create API client
-		c := client.NewClient(GetSmithdURL(), GetSmithdAPIKey())
+		c := newClient()
 
 		data, err := c.ExportDB()
 		if err != nil {
@@ -67,7 +66,7 @@ var importDBCmd = &cobra.Command{
 		}
 
 		// Create API client
-		c := client.NewClient(GetSmithdURL(), GetSmithdAPIKey())
+		c := newClient()
 
 		if err := c.ImportDB(data); err != nil {
 			return err

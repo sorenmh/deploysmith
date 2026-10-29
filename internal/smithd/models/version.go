@@ -6,12 +6,26 @@ import (
 	"time"
 )
 
+// Artifact types: what a version carries
+const (
+	// ArtifactManifests is Kubernetes manifests, committed to the gitops repo
+	ArtifactManifests = "manifests"
+	// ArtifactTerraform is an OpenTofu bundle (see internal/shared/tfbundle)
+	ArtifactTerraform = "terraform"
+)
+
+// ValidArtifactType reports whether t is a known artifact type
+func ValidArtifactType(t string) bool {
+	return t == ArtifactManifests || t == ArtifactTerraform
+}
+
 // Version represents an application version
 type Version struct {
 	ID                string     `json:"id"`
 	AppID             string     `json:"appId"`
 	VersionID         string     `json:"versionId"`
-	Status            string     `json:"status"` // draft, published
+	Status            string     `json:"status"`       // draft, published
+	ArtifactType      string     `json:"artifactType"` // manifests, terraform
 	GitSHA            string     `json:"gitSha,omitempty"`
 	GitBranch         string     `json:"gitBranch,omitempty"`
 	GitCommitter      string     `json:"gitCommitter,omitempty"`
@@ -69,6 +83,8 @@ func (s VersionSource) Reportable() bool {
 type DraftVersionRequest struct {
 	VersionID string          `json:"versionId"`
 	Metadata  VersionMetadata `json:"metadata"`
+	// ArtifactType defaults to manifests
+	ArtifactType string `json:"artifactType,omitempty"`
 	// Source is optional
 	Source *VersionSource `json:"source,omitempty"`
 }
@@ -79,14 +95,18 @@ type DraftVersionResponse struct {
 	UploadURL     string    `json:"uploadUrl"`
 	UploadExpires time.Time `json:"uploadExpires"`
 	Status        string    `json:"status"`
+	ArtifactType  string    `json:"artifactType"`
 }
 
 // PublishVersionResponse is the response for publishing a version
 type PublishVersionResponse struct {
-	VersionID     string    `json:"versionId"`
-	Status        string    `json:"status"`
-	PublishedAt   time.Time `json:"publishedAt"`
-	ManifestFiles []string  `json:"manifestFiles"`
+	VersionID    string    `json:"versionId"`
+	Status       string    `json:"status"`
+	ArtifactType string    `json:"artifactType"`
+	PublishedAt  time.Time `json:"publishedAt"`
+	// ManifestFiles are the version's files: the manifests, or the files
+	// of a terraform bundle
+	ManifestFiles []string `json:"manifestFiles"`
 }
 
 // ListVersionsResponse is the response for listing versions
@@ -107,6 +127,7 @@ type VersionWithDeployment struct {
 type GetVersionResponse struct {
 	VersionID     string          `json:"versionId"`
 	Status        string          `json:"status"`
+	ArtifactType  string          `json:"artifactType"`
 	CreatedAt     time.Time       `json:"createdAt"`
 	PublishedAt   *time.Time      `json:"publishedAt,omitempty"`
 	Metadata      VersionMetadata `json:"metadata"`

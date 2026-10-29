@@ -89,7 +89,7 @@ func newFixture(t *testing.T) *fixture {
 
 func (f *fixture) createVersion(t *testing.T, versionID, branch string, publish bool) *models.Version {
 	t.Helper()
-	version, err := f.svc.Versions.Create(f.app.ID, versionID, models.VersionMetadata{
+	version, err := f.svc.Versions.Create(f.app.ID, versionID, "", models.VersionMetadata{
 		GitBranch: branch,
 		Timestamp: time.Now().UTC().Format(time.RFC3339),
 	})
@@ -102,6 +102,23 @@ func (f *fixture) createVersion(t *testing.T, versionID, branch string, publish 
 		}
 		version.Status = "published"
 	}
+	return version
+}
+
+// createTerraformVersion creates a published terraform version
+func (f *fixture) createTerraformVersion(t *testing.T, versionID, branch string) *models.Version {
+	t.Helper()
+	version, err := f.svc.Versions.Create(f.app.ID, versionID, models.ArtifactTerraform, models.VersionMetadata{
+		GitBranch: branch,
+		Timestamp: time.Now().UTC().Format(time.RFC3339),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := f.svc.Versions.UpdateStatus(version.ID, "published"); err != nil {
+		t.Fatal(err)
+	}
+	version.Status = "published"
 	return version
 }
 
@@ -162,6 +179,7 @@ func TestDeployVersionRecordsFailure(t *testing.T) {
 func TestDeployVersionValidation(t *testing.T) {
 	f := newFixture(t)
 	f.createVersion(t, "draft", "main", false)
+	f.createTerraformVersion(t, "tf1", "main")
 
 	tests := []struct {
 		name        string
@@ -175,6 +193,7 @@ func TestDeployVersionValidation(t *testing.T) {
 		{"unknown app", "nope", "v1", "production", KindNotFound},
 		{"unknown version", f.app.ID, "nope", "production", KindNotFound},
 		{"unpublished version", f.app.ID, "draft", "production", KindInvalid},
+		{"terraform version", f.app.ID, "tf1", "production", KindInvalid},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -227,6 +246,40 @@ func TestTriggerAutoDeploys(t *testing.T) {
 	time.Sleep(50 * time.Millisecond)
 	if calls := f.gitops.Calls(); len(calls) != 1 || calls[0].message != "Auto-deploy hello version v1 to production (policy: main-to-prod)" {
 		t.Errorf("unexpected gitops calls: %+v", calls)
+	}
+}
+
+func TestTerraformVersionsAreNotDeployed(t *testing.T) {
+	f := newFixture(t)
+	version := f.createTerraformVersion(t, "tf1", "main")
+
+	if _, err := f.svc.CreatePolicy(f.app.ID, models.CreatePolicyRequest{Name: "main-to-prod", GitBranchPattern: "main", TargetEnvironment: "production"}); err != nil {
+		t.Fatal(err)
+	}
+	f.svc.TriggerAutoDeploys(context.Background(), f.app, version)
+
+	// A deployment that reaches execute anyway, e.g. resumed after a restart,
+	// fails before touching the gitops repo
+	deployment, err := f.svc.Deployments.Create(f.app.ID, version.ID, "production", "auto-deploy", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	err = f.svc.execute(context.Background(), deployment, f.app, version, nil)
+	requireKind(t, err, KindInvalid)
+	if deployment.Status != "failed" {
+		t.Errorf("deployment status = %s, want failed", deployment.Status)
+	}
+
+	time.Sleep(50 * time.Millisecond)
+	if calls := f.gitops.Calls(); len(calls) != 0 {
+		t.Errorf("terraform version reached gitops: %+v", calls)
+	}
+	list, _, err := f.svc.Deployments.ListDetailed(store.DeploymentFilter{}, 10, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(list) != 1 {
+		t.Errorf("%d deployments, want only the one created by the test", len(list))
 	}
 }
 
