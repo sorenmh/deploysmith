@@ -11,6 +11,7 @@ SHA, runner image).
 make docker-lint     # gofmt, go vet, golangci-lint (Dockerfile.smithd, lint stage)
 make docker-test     # go test against a throwaway PostgreSQL (test stage)
 make docker-build    # build the smithd, forge and smithctl images, tagged :local
+make docker-build-tf-runner TOFU_VERSION=1.13.2   # tofu-controller runner for one OpenTofu version
 ```
 
 Lint and test cover the whole repository (one Go module), so they live in
@@ -24,6 +25,7 @@ Lint and test cover the whole repository (one Go module), so they live in
 | `lint` | every push and PR | `make docker-lint` |
 | `test` | every push and PR | `make docker-test` |
 | `build` | push to master, after lint and test | builds the three images, pushes `ghcr.io/sorenmh/<image>:<sha7>-<run number>` |
+| `tf-runner` | every push and PR, after lint and test | builds `Dockerfile.tf-runner` for each supported OpenTofu version (matrix); on master pushes `ghcr.io/sorenmh/deploysmith-tf-runner:v0.16.6-tofu<version>` and `:v0.16.6-tofu<version>-<sha7>-<run number>` |
 | `release` | push of a `v*` tag, after lint and test | GoReleaser (GitHub release with binaries), then pushes `ghcr.io/sorenmh/<image>:vX.Y.Z` and `:latest` |
 
 ## Creating a release
