@@ -114,3 +114,15 @@ X-Forwarded-User, which oauth2-proxy sets.
 X-Forwarded-User
 {{- end -}}
 {{- end -}}
+
+{{/*
+TERRAFORM_RUNNER_IMAGES from config.terraform.runnerImages: comma-separated
+<OpenTofu version>=<image> pairs
+*/}}
+{{- define "smithd.runnerImages" -}}
+{{- $pairs := list -}}
+{{- range $version, $image := . -}}
+{{- $pairs = append $pairs (printf "%s=%s" $version $image) -}}
+{{- end -}}
+{{- join "," $pairs -}}
+{{- end -}}

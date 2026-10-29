@@ -389,10 +389,25 @@ config:
     stateRegion: eu-north-1
     lockTable: deploysmith-tflock
     kubeApiCidrs: "172.18.0.2/32"
+    sourceSecret: gitops-readonly   # read-only deploy key in flux-system
 ```
 
+**Deploying** a terraform version (`smithctl deploy`) commits the bundle to
+`environments/<env>/terraform/<app>/src/main/` and then `main.yaml` next to
+it: a GitRepository in the Flux namespace pinned to that commit and the
+`Terraform` CR with `approvePlan: ""`. tofu-controller plans it and waits for
+approval; nothing is applied until then. The runner image follows the
+bundle's pinned OpenTofu version (`config.terraform.runnerImages`). Auto-deploy
+policies never deploy terraform versions. A new deploy replaces a plan that is
+still planning or awaiting approval (that deployment becomes `stale`); while
+a run is applying, deploys are refused until it has finished.
+
 An existing app keeps its backend:
-`smithctl app terraform enable legacy --env prod --backend-bucket legacy-tfstate --backend-key prod/terraform.tfstate --backend-region eu-central-1 --backend-lock-table legacy-tflock`.
+`smithctl app terraform enable legacy --env prod --backend-bucket legacy-tfstate --backend-key prod/terraform.tfstate --backend-region eu-central-1 --backend-lock-table legacy-tflock --encryption-fallback`.
+`--encryption-fallback` lets the first apply read the plaintext state and
+write it back encrypted; turn it off afterwards with
+`smithctl app terraform update legacy --env prod --encryption-fallback=false`
+(`docs/terraform-migration.md`).
 Then create the IAM roles with one `tf-app` module block in the platform
 app (`terraform/modules/tf-app/README.md`).
 

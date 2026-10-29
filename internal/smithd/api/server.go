@@ -106,6 +106,7 @@ func NewServer(cfg *config.Config, database *db.DB) *Server {
 	if deps.TerraformManifests, err = terraformManifestOptions(cfg); err != nil {
 		log.Fatalf("Failed to configure Terraform support: %v", err)
 	}
+	deps.TerraformRoots = terraformRootOptions(cfg)
 	if deps.Terraform, err = newTerraformProvisioner(cfg); err != nil {
 		log.Fatalf("Failed to configure OpenBao: %v", err)
 	}
@@ -168,6 +169,7 @@ func (s *Server) setupRoutes() {
 		// Terraform routes
 		r.Post("/apps/{appId}/terraform/environments", s.handleEnableTerraform)
 		r.Get("/apps/{appId}/terraform/environments", s.handleListTerraformEnvironments)
+		r.Patch("/apps/{appId}/terraform/environments/{environment}", s.handleUpdateTerraform)
 		r.Post("/apps/{appId}/terraform/sync", s.handleSyncTerraform)
 
 		// Admin routes (DB migration between drivers)
@@ -806,6 +808,7 @@ func (s *Server) handleDeployVersion(w http.ResponseWriter, r *http.Request) {
 		Status:          deployment.Status,
 		GitopsCommitSHA: deployment.GitopsCommitSHA,
 		StartedAt:       deployment.StartedAt,
+		Terraform:       deployment.Terraform,
 	}
 
 	writeJSON(w, http.StatusAccepted, resp)

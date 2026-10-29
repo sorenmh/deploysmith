@@ -135,8 +135,8 @@ Create a new draft version and get a pre-signed S3 URL for uploading manifests.
 OpenTofu bundle. The upload URL is for `manifests.tar.gz` or
 `terraform.tar.gz`. Publishing a terraform version validates the bundle (see
 [forge](../forge.md#terraform-bundles)) and returns `400 validation_failed`
-listing every problem. Deploying a terraform version is not supported yet and
-returns `400 unsupported_artifact_type`. Versions in all responses carry their
+listing every problem. Deploying a terraform version commits it for
+tofu-controller to plan (see [Deploy Version](#8-deploy-version)). Versions in all responses carry their
 `artifactType`.
 
 **Response:** `201 Created`
@@ -314,6 +314,42 @@ Deploy a specific version to an environment.
 }
 ```
 
+**Terraform versions** are committed to
+`environments/<env>/terraform/<app>/` in two commits: the bundle source in
+`src/main/`, then `main.yaml` with a GitRepository pinned to the source commit
+and the `Terraform` CR with `approvePlan: ""` (see
+[terraform-controller.md](terraform-controller.md)). The deployment is then
+`planning` and carries the plan id the controller will report:
+
+```json
+{
+  "deploymentId": "deploy-457",
+  "versionId": "42540c4-123",
+  "environment": "production",
+  "status": "planning",
+  "gitopsCommitSha": "1c0ffee...",
+  "startedAt": "2025-01-15T10:40:00Z",
+  "terraform": {
+    "root": "main",
+    "sourceCommitSha": "8fa3d36e98b07c3fa4aa308bfd6992f75e1f38f7",
+    "planId": "plan-main-8fa3d36e98"
+  }
+}
+```
+
+Terraform deployments go `pending` → `planning` → `awaiting_approval` →
+`applying` → `applied`, or end as `failed`, `stale` or `rejected`. Only one
+per app, environment and root is active (`pending` to `applying`). A new deploy
+replaces a plan that is `planning` or `awaiting_approval`: that deployment
+becomes `stale`, and the rewritten CR makes the controller plan the new
+version. While a deployment is `applying` or still `pending`, a new deploy is
+refused with `409 terraform_applying` or `409 terraform_deploying`; deploy
+again once it has finished. Other refusals are `400`: `terraform_disabled`
+(no OpenBao), `terraform_not_enabled`, `terraform_not_provisioned`,
+`unsupported_opentofu_version` (no runner image for the bundle's pinned
+version) and `validation_failed`. Auto-deploy policies never deploy terraform
+versions.
+
 **Acceptance Test:**
 - [ ] Returns 202 when deployment is initiated
 - [ ] Returns 404 if app or version doesn't exist
@@ -339,7 +375,7 @@ List deployments, newest first, across all apps or filtered.
 **Query Parameters:**
 - `appId` (optional): Only deployments of this application
 - `environment` (optional): Only deployments to this environment
-- `status` (optional): `pending`, `success` or `failed`
+- `status` (optional): `pending`, `success` or `failed`; for terraform deployments also `planning`, `awaiting_approval`, `applying`, `applied`, `stale` or `rejected`
 - `limit` (optional, default 50, max 100): Number of results
 - `offset` (optional, default 0): Pagination offset
 
@@ -368,7 +404,7 @@ List deployments, newest first, across all apps or filtered.
 }
 ```
 
-`errorMessage` is included for failed deployments; `policyId`/`policyName` only for auto-deploys.
+`errorMessage` is included for failed deployments (and says which deployment replaced a `stale` one); `policyId`/`policyName` only for auto-deploys; `terraform` only for terraform deployments.
 
 ---
 

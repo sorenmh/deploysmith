@@ -30,10 +30,16 @@ another one. Plan-only runs use the same ARN with a -readonly suffix.
 
 You can specify the app by name or ID, or omit it if you've run 'forge app-bind' in this directory.
 
+An existing app whose state is not encrypted yet passes --encryption-fallback,
+so its first apply can read the plaintext state and write it back encrypted
+(docs/terraform-migration.md). Turn it off afterwards with
+'smithctl app terraform update --encryption-fallback=false'.
+
 Example:
   smithctl app terraform enable viino --env prod
   smithctl app terraform enable legacy --env prod --backend-bucket legacy-tfstate \
-    --backend-key prod/terraform.tfstate --backend-region eu-central-1 --backend-lock-table legacy-tflock`,
+    --backend-key prod/terraform.tfstate --backend-region eu-central-1 --backend-lock-table legacy-tflock \
+    --encryption-fallback`,
 	Args: cobra.MaximumNArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		// Validate configuration
@@ -60,6 +66,7 @@ Example:
 		req.Backend.Region, _ = cmd.Flags().GetString("backend-region")
 		req.Backend.LockTable, _ = cmd.Flags().GetString("backend-lock-table")
 		req.AWSRoleARN, _ = cmd.Flags().GetString("aws-role-arn")
+		req.EncryptionFallback, _ = cmd.Flags().GetBool("encryption-fallback")
 
 		c := client.NewClient(GetSmithdURL(), GetSmithdAPIKey())
 		env, err := c.EnableTerraform(appID, req)
@@ -71,6 +78,60 @@ Example:
 		fmt.Println()
 		printTerraformEnvironment(env)
 		return provisionResult([]client.TerraformEnvironment{*env})
+	},
+}
+
+var appTerraformUpdateCmd = &cobra.Command{
+	Use:   "update [app-name]",
+	Short: "Change the settings of an application's Terraform environment",
+	Long: `Change the settings of an application's Terraform environment. They
+apply from the next deploy on.
+
+--encryption-fallback lets runs read plaintext state and write it back
+encrypted, for the first apply of an existing app. Turn it off once that apply
+is done, so plaintext state is refused again (docs/terraform-migration.md).
+
+Example:
+  smithctl app terraform update legacy --env prod --encryption-fallback=false`,
+	Args: cobra.MaximumNArgs(1),
+	RunE: func(cmd *cobra.Command, args []string) error {
+		// Validate configuration
+		if err := ValidateConfig(); err != nil {
+			return err
+		}
+
+		appIdentifier, _ := cmd.Flags().GetString("app")
+		if len(args) > 0 {
+			appIdentifier = args[0]
+		}
+		appID, _, err := ResolveAppID(appIdentifier)
+		if err != nil {
+			return err
+		}
+
+		environment, _ := cmd.Flags().GetString("env")
+		if environment == "" {
+			return fmt.Errorf("--env is required")
+		}
+		var req client.UpdateTerraformRequest
+		if cmd.Flags().Changed("encryption-fallback") {
+			fallback, _ := cmd.Flags().GetBool("encryption-fallback")
+			req.EncryptionFallback = &fallback
+		}
+		if req.EncryptionFallback == nil {
+			return fmt.Errorf("nothing to change; pass --encryption-fallback")
+		}
+
+		c := client.NewClient(GetSmithdURL(), GetSmithdAPIKey())
+		env, err := c.UpdateTerraform(appID, environment, req)
+		if err != nil {
+			return err
+		}
+
+		output.Success(fmt.Sprintf("Terraform updated for %s in %s", env.AppName, env.Environment))
+		fmt.Println()
+		printTerraformEnvironment(env)
+		return nil
 	},
 }
 
@@ -165,6 +226,9 @@ func printTerraformEnvironment(env *client.TerraformEnvironment) {
 	if env.AWSRoleARN != "" {
 		fmt.Printf("  AWS role:   %s\n", env.AWSRoleARN)
 	}
+	if env.EncryptionFallback {
+		fmt.Printf("  Encryption: fallback to plaintext state on\n")
+	}
 }
 
 func printTerraformTable(envs []client.TerraformEnvironment) {
@@ -203,10 +267,11 @@ func provisionResult(envs []client.TerraformEnvironment) error {
 func init() {
 	appCmd.AddCommand(appTerraformCmd)
 	appTerraformCmd.AddCommand(appTerraformEnableCmd)
+	appTerraformCmd.AddCommand(appTerraformUpdateCmd)
 	appTerraformCmd.AddCommand(appTerraformListCmd)
 	appTerraformCmd.AddCommand(appTerraformSyncCmd)
 
-	for _, c := range []*cobra.Command{appTerraformEnableCmd, appTerraformListCmd, appTerraformSyncCmd} {
+	for _, c := range []*cobra.Command{appTerraformEnableCmd, appTerraformUpdateCmd, appTerraformListCmd, appTerraformSyncCmd} {
 		c.Flags().String("app", "", "Application name or ID")
 	}
 
@@ -216,6 +281,10 @@ func init() {
 	appTerraformEnableCmd.Flags().String("backend-region", "", "Region of the bucket (default: the shared backend's)")
 	appTerraformEnableCmd.Flags().String("backend-lock-table", "", "DynamoDB lock table (default with the shared bucket: the shared table)")
 	appTerraformEnableCmd.Flags().String("aws-role-arn", "", "IAM role OpenBao assumes (default: tf-<app>-<env> in smithd's AWS account)")
+	appTerraformEnableCmd.Flags().Bool("encryption-fallback", false, "Read plaintext state until the first apply has encrypted it (existing apps)")
+
+	appTerraformUpdateCmd.Flags().String("env", "", "Environment (required)")
+	appTerraformUpdateCmd.Flags().Bool("encryption-fallback", false, "Read plaintext state until the first apply has encrypted it")
 
 	appTerraformSyncCmd.Flags().String("env", "", "Only this environment")
 }

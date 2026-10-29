@@ -7,14 +7,19 @@ import (
 	"strings"
 
 	"github.com/sorenmh/deploysmith/internal/shared/logging"
+	"github.com/sorenmh/deploysmith/internal/smithd/gitops"
 	"github.com/sorenmh/deploysmith/internal/smithd/models"
 	"github.com/sorenmh/deploysmith/internal/smithd/terraform"
 )
 
 // TerraformGitops writes a Terraform app's files to the gitops repository
-// and returns the resulting commit SHA
 type TerraformGitops interface {
+	// WriteTerraformFiles writes files next to the app's roots and returns
+	// the commit SHA
 	WriteTerraformFiles(appName, environment, message string, files map[string][]byte) (string, error)
+	// DeployTerraform commits a root's source and then its CR, pinned to
+	// the source commit
+	DeployTerraform(d gitops.TerraformDeploy) (gitops.TerraformCommits, error)
 }
 
 // defaultTerraformRoot is the root of the default state key; one root per
@@ -60,11 +65,39 @@ func (s *Service) EnableTerraform(ctx context.Context, appID string, req models.
 		return nil, invalid("invalid_request", err.Error())
 	}
 
-	tfEnv, err := s.TerraformEnvironments.Create(app.ID, environment, backend, roleARN)
+	tfEnv, err := s.TerraformEnvironments.Create(app.ID, environment, backend, roleARN, req.EncryptionFallback)
 	if err != nil {
 		return nil, err
 	}
 	return s.provisionTerraform(ctx, tfEnv)
+}
+
+// UpdateTerraform changes the settings of an app's Terraform environment.
+// They apply from the next deploy on.
+func (s *Service) UpdateTerraform(appID, environment string, req models.UpdateTerraformRequest) (*models.TerraformEnvironment, error) {
+	if _, err := s.getApp(appID); err != nil {
+		return nil, err
+	}
+	tfEnv, err := s.TerraformEnvironments.Get(appID, environment)
+	if err != nil {
+		return nil, err
+	}
+	if tfEnv == nil {
+		return nil, &Error{Kind: KindNotFound, Code: "terraform_not_enabled", Message: fmt.Sprintf("Terraform is not enabled in %s", environment)}
+	}
+	if req.EncryptionFallback != nil {
+		if err := s.TerraformEnvironments.SetEncryptionFallback(tfEnv.ID, *req.EncryptionFallback); err != nil {
+			return nil, err
+		}
+	}
+	updated, err := s.TerraformEnvironments.Get(appID, environment)
+	if err != nil {
+		return nil, err
+	}
+	if updated == nil {
+		return nil, fmt.Errorf("terraform environment %s/%s disappeared", tfEnv.AppName, environment)
+	}
+	return updated, nil
 }
 
 // ListTerraformEnvironments lists the environments an app has Terraform

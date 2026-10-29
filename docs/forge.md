@@ -328,8 +328,9 @@ forge publish --app "$APP_NAME" --version "$VERSION"
 Besides Kubernetes manifests, a version can carry an OpenTofu root module: a
 version of type `terraform`. CI builds and uploads the bundle without any
 cloud credentials; smithd stores it in S3 like every other version.
-Deploying terraform versions is not supported yet: smithd refuses to deploy
-them and auto-deploy policies skip them.
+Deploying a terraform version (`smithctl deploy`) commits it to the gitops
+repo, where tofu-controller plans it and waits for approval. Auto-deploy
+policies never deploy terraform versions.
 
 ### Bundle layout
 
@@ -339,12 +340,16 @@ them and auto-deploy policies skip them.
 ```
 infra/
   versions.tf             # terraform block with the pinned OpenTofu version
-  main.tf, ...            # *.tf files, including local modules in subdirectories
+  main.tf, ...            # *.tf and *.tofu files, including local modules in subdirectories
+  templates/*.tftpl       # templates for templatefile(), anywhere
   .terraform.lock.hcl     # provider lock file, from tofu init (required)
   env/
     staging.tfvars        # non-secret variables per environment
     production.tfvars
 ```
+
+Other files (`README.md`, `file()` inputs such as `*.json` policies) are left
+out; give templates the `.tftpl` extension.
 
 The OpenTofu version is pinned with an exact `required_version` in the root
 module's `terraform` block. OpenTofu enforces it itself, so the bundle can't
@@ -367,9 +372,12 @@ publish. A bundle is rejected, with every problem listed, if:
 - the `backend` block has settings, or there is a `cloud` block
 - it contains state (`*.tfstate*`), `*.auto.tfvars` or `terraform.tfvars`, which
   OpenTofu would load automatically; use `env/<env>.tfvars` instead
-- it contains override files (`override.tf`, `*_override.tf` or their `.tf.json`
-  variants) anywhere: the controller writes `backend_override.tf` with smithd's
-  backend configuration, and a bundle must not be able to replace it
+- it contains override files (`override.tf`, `*_override.tf` or their `.tofu`
+  and JSON variants) anywhere: the controller writes `backend_override.tf` with
+  smithd's backend configuration, and a bundle must not be able to replace it
+- it contains JSON configuration (`*.tf.json`, `*.tofu.json`), which is not
+  supported; leaving it out would plan the destruction of what it declares
+- it contains symbolic links
 - a file is not valid HCL
 
 The `.terraform` directory that `tofu init` creates (and any other hidden
@@ -396,6 +404,24 @@ forge publish --version "$VERSION"
 
 The version id is the git SHA, as for manifests. `smithctl version list`
 shows the type of each version.
+
+### Deploying
+
+The app must have Terraform enabled in the environment (`smithctl app
+terraform enable`, chart README "Terraform apps"), and smithd must have a
+runner image for the bundle's OpenTofu version. Then:
+
+```bash
+smithctl deploy --app infra --version "$VERSION" --env production
+```
+
+smithd commits the bundle to `environments/production/terraform/infra/src/main/`
+and the `Terraform` CR to `main.yaml`, with the state backend, the state
+encryption key and `env/production.tfvars` filled in by smithd. The deployment
+is `planning` until tofu-controller has planned it; the plan then waits for
+approval and nothing is applied until someone approves it. Deploying another
+version while the plan waits replaces it (the earlier deployment becomes
+`stale`).
 
 ## CI/CD Examples
 

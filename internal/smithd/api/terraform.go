@@ -73,6 +73,21 @@ func terraformManifestOptions(cfg *config.Config) (terraform.ManifestOptions, er
 	return opts, nil
 }
 
+// terraformRootOptions configures the Terraform CRs from the config
+func terraformRootOptions(cfg *config.Config) terraform.RootOptions {
+	return terraform.RootOptions{
+		SourceURL:       cfg.TerraformSourceURL,
+		SourceSecret:    cfg.TerraformSourceSecret,
+		SourceNamespace: cfg.FluxNamespace,
+		RunnerImages:    cfg.TerraformRunnerImages,
+		OpenBaoAddr:     cfg.OpenBaoAddr,
+		AuthMount:       cfg.OpenBaoRunnerAuthMount,
+		AWSMount:        cfg.OpenBaoAWSMount,
+		TransitMount:    cfg.OpenBaoTransitMount,
+		Audience:        cfg.OpenBaoRunnerAudience,
+	}
+}
+
 func (s *Server) handleEnableTerraform(w http.ResponseWriter, r *http.Request) {
 	var req models.EnableTerraformRequest
 	if err := decodeJSON(r, &req); err != nil {
@@ -97,6 +112,22 @@ func (s *Server) handleListTerraformEnvironments(w http.ResponseWriter, r *http.
 	}
 
 	writeJSON(w, http.StatusOK, models.ListTerraformEnvironmentsResponse{Environments: envs})
+}
+
+func (s *Server) handleUpdateTerraform(w http.ResponseWriter, r *http.Request) {
+	var req models.UpdateTerraformRequest
+	if err := decodeJSON(r, &req); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid_request", "Invalid request body")
+		return
+	}
+
+	tfEnv, err := s.svc.UpdateTerraform(chi.URLParam(r, "appId"), chi.URLParam(r, "environment"), req)
+	if err != nil {
+		writeServiceError(w, err, "Failed to update Terraform")
+		return
+	}
+
+	writeJSON(w, http.StatusOK, tfEnv)
 }
 
 func (s *Server) handleSyncTerraform(w http.ResponseWriter, r *http.Request) {

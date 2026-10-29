@@ -23,13 +23,13 @@ In the app's repository:
 
 ## 3. Register the app in smithd with its existing backend
 
-- [ ] `smithctl app terraform enable <app> --env <env> --backend-bucket <bucket> --backend-key <key> --backend-region <region> --backend-lock-table <table>`
+- [ ] `smithctl app terraform enable <app> --env <env> --backend-bucket <bucket> --backend-key <key> --backend-region <region> --backend-lock-table <table> --encryption-fallback`
 - [ ] In the platform app, add the `tf-app` module block with `state = { bucket, lock_table, region, key_prefixes }` matching that backend (`terraform/modules/tf-app/README.md`) and the policies the app's Terraform needs, and apply it.
 - [ ] `smithctl app terraform list <app>` shows the environment provisioned without errors.
 
 ## 4. Turn on encryption with a fallback
 
-The first apply has to read plaintext state and write it back encrypted. Until smithd can do this itself (DEP-18 decides how it is switched on, e.g. a per-environment "migrate" flag), the CR's `TF_ENCRYPTION` for that environment is:
+The first apply has to read plaintext state and write it back encrypted. `--encryption-fallback` in step 3 turns this on for the environment (later: `smithctl app terraform update <app> --env <env> --encryption-fallback`); `smithctl app terraform list` and the CR show it. smithd then writes this `TF_ENCRYPTION` into the environment's CR:
 
 ```hcl
 key_provider "openbao" "app" {
@@ -73,7 +73,7 @@ resource "terraform_data" "deploysmith_migration" {}
 
 ## 6. Remove the fallback
 
-- [ ] Switch `TF_ENCRYPTION` back to the normal config (`enforced = true`, no `unencrypted` method; [terraform-cluster-setup.md](terraform-cluster-setup.md#state-encryption)).
+- [ ] Switch `TF_ENCRYPTION` back to the normal config (`enforced = true`, no `unencrypted` method; [terraform-cluster-setup.md](terraform-cluster-setup.md#state-encryption)): `smithctl app terraform update <app> --env <env> --encryption-fallback=false`. It applies from the next deploy on, i.e. the one below.
 - [ ] Remove the marker resource and deploy. The plan must show only its removal. With `enforced = true`, plaintext state is refused, so a missed environment fails instead of being read unencrypted.
 - [ ] Delete the old plaintext versions of the state object from the bucket, or let them expire, and delete the local backup once you are confident.
 

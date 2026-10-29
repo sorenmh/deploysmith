@@ -247,12 +247,12 @@ func TestTerraformVersionAPI(t *testing.T) {
 		}
 	})
 
-	t.Run("deploy is refused", func(t *testing.T) {
+	t.Run("deploy without Terraform support is refused", func(t *testing.T) {
 		rec := do(http.MethodPost, "/apps/"+app.ID+"/versions/abc123/deploy", models.DeployVersionRequest{Environment: "production"})
 		if rec.Code != http.StatusBadRequest {
 			t.Fatalf("status = %d, want 400: %s", rec.Code, rec.Body)
 		}
-		if code, message := errorCode(rec); code != "unsupported_artifact_type" || !strings.Contains(message, "terraform") {
+		if code, message := errorCode(rec); code != "terraform_disabled" || !strings.Contains(message, "OPENBAO_ADDR") {
 			t.Errorf("error = %s: %q", code, message)
 		}
 	})

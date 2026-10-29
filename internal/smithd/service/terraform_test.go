@@ -8,6 +8,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/sorenmh/deploysmith/internal/smithd/gitops"
 	"github.com/sorenmh/deploysmith/internal/smithd/models"
 	"github.com/sorenmh/deploysmith/internal/smithd/openbao"
 	"github.com/sorenmh/deploysmith/internal/smithd/store"
@@ -23,6 +24,43 @@ type fakeTerraformGitops struct {
 	mu     sync.Mutex
 	writes []terraformWrite
 	err    error
+
+	// deploys are the rendered root files of DeployTerraform
+	deploys   []terraformDeployCall
+	deployErr error
+}
+
+type terraformDeployCall struct {
+	deploy   gitops.TerraformDeploy
+	manifest string
+	commits  gitops.TerraformCommits
+}
+
+// DeployTerraform renders the root's file for made-up commits
+func (f *fakeTerraformGitops) DeployTerraform(d gitops.TerraformDeploy) (gitops.TerraformCommits, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.deployErr != nil {
+		return gitops.TerraformCommits{}, f.deployErr
+	}
+	n := len(f.deploys) + 1
+	commits := gitops.TerraformCommits{
+		Branch:   "main",
+		Source:   strings.Repeat(string(rune('a'+n)), 40),
+		Manifest: strings.Repeat(string(rune('0'+n)), 40),
+	}
+	manifest, err := d.Manifest(commits.Branch, commits.Source)
+	if err != nil {
+		return gitops.TerraformCommits{}, err
+	}
+	f.deploys = append(f.deploys, terraformDeployCall{deploy: d, manifest: string(manifest), commits: commits})
+	return commits, nil
+}
+
+func (f *fakeTerraformGitops) Deploys() []terraformDeployCall {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return append([]terraformDeployCall(nil), f.deploys...)
 }
 
 func (f *fakeTerraformGitops) WriteTerraformFiles(appName, environment, message string, files map[string][]byte) (string, error) {

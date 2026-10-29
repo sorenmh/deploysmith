@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"time"
 )
 
@@ -20,16 +21,18 @@ type TerraformBackend struct {
 
 // TerraformEnvironment is an environment an app has Terraform enabled in
 type TerraformEnvironment struct {
-	ID             string           `json:"id"`
-	AppID          string           `json:"appId"`
-	AppName        string           `json:"appName"`
-	Environment    string           `json:"environment"`
-	Backend        TerraformBackend `json:"backend"`
-	AWSRoleARN     string           `json:"awsRoleArn,omitempty"`
-	ProvisionedAt  *time.Time       `json:"provisionedAt,omitempty"`
-	ProvisionError *string          `json:"provisionError,omitempty"`
-	CreatedAt      time.Time        `json:"createdAt"`
-	UpdatedAt      time.Time        `json:"updatedAt"`
+	ID          string           `json:"id"`
+	AppID       string           `json:"appId"`
+	AppName     string           `json:"appName"`
+	Environment string           `json:"environment"`
+	Backend     TerraformBackend `json:"backend"`
+	AWSRoleARN  string           `json:"awsRoleArn,omitempty"`
+	// EncryptionFallback lets runs read plaintext state (migration only)
+	EncryptionFallback bool       `json:"encryptionFallback"`
+	ProvisionedAt      *time.Time `json:"provisionedAt,omitempty"`
+	ProvisionError     *string    `json:"provisionError,omitempty"`
+	CreatedAt          time.Time  `json:"createdAt"`
+	UpdatedAt          time.Time  `json:"updatedAt"`
 }
 
 // EnableTerraformRequest is the request body for enabling Terraform for an
@@ -39,6 +42,14 @@ type EnableTerraformRequest struct {
 	Environment string           `json:"environment"`
 	Backend     TerraformBackend `json:"backend"`
 	AWSRoleARN  string           `json:"awsRoleArn,omitempty"`
+	// EncryptionFallback is for existing apps with plaintext state
+	EncryptionFallback bool `json:"encryptionFallback,omitempty"`
+}
+
+// UpdateTerraformRequest is the request body for changing a Terraform
+// environment; nil fields are kept
+type UpdateTerraformRequest struct {
+	EncryptionFallback *bool `json:"encryptionFallback,omitempty"`
 }
 
 // ListTerraformEnvironmentsResponse is the response from listing or syncing
@@ -75,6 +86,20 @@ func (c *Client) ListTerraformEnvironments(appNameOrID string) (*ListTerraformEn
 		return nil, err
 	}
 	return &resp, nil
+}
+
+// UpdateTerraform changes the settings of an app's Terraform environment
+func (c *Client) UpdateTerraform(appNameOrID, environment string, req UpdateTerraformRequest) (*TerraformEnvironment, error) {
+	appID, err := c.resolveToAppID(appNameOrID)
+	if err != nil {
+		return nil, err
+	}
+
+	var env TerraformEnvironment
+	if err := c.doJSON(http.MethodPatch, fmt.Sprintf("api/v1/apps/%s/terraform/environments/%s", appID, url.PathEscape(environment)), req, http.StatusOK, &env); err != nil {
+		return nil, err
+	}
+	return &env, nil
 }
 
 // SyncTerraform provisions an app's Terraform environment again, or all of

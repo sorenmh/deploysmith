@@ -23,16 +23,16 @@ func NewTerraformStore(db *db.DB) *TerraformStore {
 const terraformColumns = `
 	t.id, t.app_id, a.name, t.environment,
 	t.backend_bucket, t.backend_key, t.backend_region, t.backend_lock_table,
-	t.aws_role_arn, t.provisioned_at, t.provision_error, t.created_at, t.updated_at`
+	t.aws_role_arn, t.encryption_fallback, t.provisioned_at, t.provision_error, t.created_at, t.updated_at`
 
 // Create enables Terraform for an app in an environment
-func (s *TerraformStore) Create(appID, environment string, backend models.TerraformBackend, awsRoleARN string) (*models.TerraformEnvironment, error) {
+func (s *TerraformStore) Create(appID, environment string, backend models.TerraformBackend, awsRoleARN string, encryptionFallback bool) (*models.TerraformEnvironment, error) {
 	id := uuid.New().String()
 	now := time.Now().UTC()
 	_, err := s.db.Exec(`
-		INSERT INTO terraform_environments (id, app_id, environment, backend_bucket, backend_key, backend_region, backend_lock_table, aws_role_arn, created_at, updated_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-	`, id, appID, environment, backend.Bucket, backend.Key, backend.Region, backend.LockTable, awsRoleARN, now, now)
+		INSERT INTO terraform_environments (id, app_id, environment, backend_bucket, backend_key, backend_region, backend_lock_table, aws_role_arn, encryption_fallback, created_at, updated_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+	`, id, appID, environment, backend.Bucket, backend.Key, backend.Region, backend.LockTable, awsRoleARN, encryptionFallback, now, now)
 	if err != nil {
 		return nil, fmt.Errorf("failed to enable terraform: %w", err)
 	}
@@ -87,6 +87,18 @@ func (s *TerraformStore) ListAll() ([]models.TerraformEnvironment, error) {
 	return scanTerraformEnvironments(rows)
 }
 
+// SetEncryptionFallback turns the unencrypted state fallback of an
+// environment on or off
+func (s *TerraformStore) SetEncryptionFallback(id string, fallback bool) error {
+	_, err := s.db.Exec(`
+		UPDATE terraform_environments SET encryption_fallback = ?, updated_at = ? WHERE id = ?
+	`, fallback, time.Now().UTC(), id)
+	if err != nil {
+		return fmt.Errorf("failed to update terraform environment: %w", err)
+	}
+	return nil
+}
+
 // SetProvisioned records the outcome of provisioning an environment: on
 // success (provisionErr nil) the time, otherwise the error. A failure keeps
 // the time of the last success.
@@ -118,7 +130,7 @@ func scanTerraformEnvironments(rows *sql.Rows) ([]models.TerraformEnvironment, e
 		var provisionError sql.NullString
 		err := rows.Scan(&env.ID, &env.AppID, &env.AppName, &env.Environment,
 			&env.Backend.Bucket, &env.Backend.Key, &env.Backend.Region, &env.Backend.LockTable,
-			&env.AWSRoleARN, &provisionedAt, &provisionError, &env.CreatedAt, &env.UpdatedAt)
+			&env.AWSRoleARN, &env.EncryptionFallback, &provisionedAt, &provisionError, &env.CreatedAt, &env.UpdatedAt)
 		if err != nil {
 			return nil, fmt.Errorf("failed to scan terraform environment: %w", err)
 		}

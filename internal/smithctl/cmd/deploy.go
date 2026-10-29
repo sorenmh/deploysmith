@@ -168,6 +168,7 @@ Examples:
 		if resp.GitopsCommitSHA != "" {
 			fmt.Printf("  GitOps Commit: %s\n", resp.GitopsCommitSHA)
 		}
+		printTerraformRun(resp)
 
 		return nil
 	},
@@ -293,9 +294,22 @@ Examples:
 		if deployResp.GitopsCommitSHA != "" {
 			fmt.Printf("  GitOps Commit: %s\n", deployResp.GitopsCommitSHA)
 		}
+		printTerraformRun(deployResp)
 
 		return nil
 	},
+}
+
+// printTerraformRun shows the plan a terraform deployment waits for
+func printTerraformRun(resp *client.DeployVersionResponse) {
+	if resp.Terraform == nil {
+		return
+	}
+	fmt.Printf("  Status:        %s\n", resp.Status)
+	fmt.Printf("  Root:          %s\n", resp.Terraform.Root)
+	fmt.Printf("  Plan:          %s\n", resp.Terraform.PlanID)
+	fmt.Println()
+	output.Info("Terraform plans the change and waits for approval; nothing is applied until then")
 }
 
 func init() {
