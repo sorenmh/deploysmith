@@ -105,6 +105,14 @@ spec:
               name: {{ include "smithd.secretName" . }}
               key: nats-url
               optional: true
+        # Static OpenBao token for development; without it smithd logs in to
+        # OpenBao with Kubernetes auth as its ServiceAccount
+        - name: OPENBAO_TOKEN
+          valueFrom:
+            secretKeyRef:
+              name: {{ include "smithd.secretName" . }}
+              key: openbao-token
+              optional: true
         livenessProbe:
           {{- toYaml .Values.livenessProbe | nindent 12 }}
         readinessProbe:
