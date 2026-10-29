@@ -2,7 +2,9 @@ package store
 
 import (
 	"database/sql"
+	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -20,18 +22,61 @@ func NewDeploymentStore(db *db.DB) *DeploymentStore {
 	return &DeploymentStore{db: db}
 }
 
+// deployedStatuses are the states of a deployment whose version runs in its
+// environment: a committed manifest deployment or an applied terraform one
+const deployedStatuses = "('success', 'applied')"
+
+// activeTerraformStatuses is models.ActiveTerraformStatuses as an SQL list
+var activeTerraformStatuses = "('" + strings.Join(models.ActiveTerraformStatuses, "', '") + "')"
+
+// deploymentColumns are scanned by scanDeployment
+const deploymentColumns = `id, app_id, version_id, environment, status, triggered_by, policy_id, COALESCE(gitops_commit_sha, ''), COALESCE(error_message, ''), started_at, completed_at,
+	COALESCE(terraform_root, ''), COALESCE(terraform_source_sha, ''), COALESCE(terraform_plan_id, '')`
+
+func scanDeployment(scanner interface{ Scan(...any) error }) (*models.Deployment, error) {
+	var deployment models.Deployment
+	var completedAt sql.NullTime
+	var policyID sql.NullString
+	var run models.TerraformRun
+
+	err := scanner.Scan(&deployment.ID, &deployment.AppID, &deployment.VersionID, &deployment.Environment, &deployment.Status, &deployment.TriggeredBy, &policyID, &deployment.GitopsCommitSHA, &deployment.ErrorMessage, &deployment.StartedAt, &completedAt,
+		&run.Root, &run.SourceCommitSHA, &run.PlanID)
+	if err != nil {
+		return nil, err
+	}
+
+	if completedAt.Valid {
+		deployment.CompletedAt = &completedAt.Time
+	}
+	if policyID.Valid {
+		deployment.PolicyID = &policyID.String
+	}
+	if run.Root != "" {
+		deployment.Terraform = &run
+	}
+	return &deployment, nil
+}
+
+func scanDeployments(rows *sql.Rows) ([]models.Deployment, error) {
+	defer rows.Close()
+
+	deployments := []models.Deployment{}
+	for rows.Next() {
+		deployment, err := scanDeployment(rows)
+		if err != nil {
+			return nil, fmt.Errorf("failed to scan deployment: %w", err)
+		}
+		deployments = append(deployments, *deployment)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("failed to read deployments: %w", err)
+	}
+	return deployments, nil
+}
+
 // Create creates a new deployment record
 func (s *DeploymentStore) Create(appID, versionID, environment, triggeredBy string, policyID *string) (*models.Deployment, error) {
-	deployment := &models.Deployment{
-		ID:          uuid.New().String(),
-		AppID:       appID,
-		VersionID:   versionID,
-		Environment: environment,
-		Status:      "pending",
-		TriggeredBy: triggeredBy,
-		PolicyID:    policyID,
-		StartedAt:   time.Now().UTC(),
-	}
+	deployment := newDeployment(appID, versionID, environment, triggeredBy, policyID)
 
 	_, err := s.db.Exec(`
 		INSERT INTO deployments (id, app_id, version_id, environment, status, triggered_by, policy_id, started_at)
@@ -45,17 +90,124 @@ func (s *DeploymentStore) Create(appID, versionID, environment, triggeredBy stri
 	return deployment, nil
 }
 
+func newDeployment(appID, versionID, environment, triggeredBy string, policyID *string) *models.Deployment {
+	return &models.Deployment{
+		ID:          uuid.New().String(),
+		AppID:       appID,
+		VersionID:   versionID,
+		Environment: environment,
+		Status:      models.DeploymentPending,
+		TriggeredBy: triggeredBy,
+		PolicyID:    policyID,
+		StartedAt:   time.Now().UTC(),
+	}
+}
+
+// TerraformBusyError is returned by CreateTerraform when the root has a run
+// that must not be replaced
+type TerraformBusyError struct {
+	// Active is the running deployment
+	Active models.Deployment
+}
+
+func (e *TerraformBusyError) Error() string {
+	return fmt.Sprintf("deployment %s of the root is %s", e.Active.ID, e.Active.Status)
+}
+
+// CreateTerraform creates the pending deployment of a terraform version to
+// a root and replaces the root's active run, if any: a run that is planning
+// or awaiting approval becomes stale, and is returned as replaced. A run
+// that is pending (being committed) or applying is not replaced; that is a
+// *TerraformBusyError. Both happen in one transaction, and the unique index
+// on active runs makes concurrent deploys of the same root fail rather than
+// both become active.
+func (s *DeploymentStore) CreateTerraform(appID, versionID, environment, root, triggeredBy string) (created, replaced *models.Deployment, err error) {
+	tx, err := s.db.Begin()
+	if err != nil {
+		return nil, nil, fmt.Errorf("failed to begin transaction: %w", err)
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	active, err := scanDeployment(tx.QueryRow(`
+		SELECT `+deploymentColumns+`
+		FROM deployments
+		WHERE app_id = ? AND environment = ? AND terraform_root = ? AND status IN `+activeTerraformStatuses+`
+	`, appID, environment, root))
+	switch {
+	case errors.Is(err, sql.ErrNoRows):
+		active = nil
+	case err != nil:
+		return nil, nil, fmt.Errorf("failed to get active terraform deployment: %w", err)
+	}
+
+	deployment := newDeployment(appID, versionID, environment, triggeredBy, nil)
+	deployment.Terraform = &models.TerraformRun{Root: root}
+
+	if active != nil {
+		if active.Status != models.DeploymentPlanning && active.Status != models.DeploymentAwaitingApproval {
+			return nil, nil, &TerraformBusyError{Active: *active}
+		}
+		// Only if it is still in the state read above
+		now := time.Now().UTC()
+		result, err := tx.Exec(`
+			UPDATE deployments
+			SET status = ?, error_message = ?, completed_at = ?
+			WHERE id = ? AND status = ?
+		`, models.DeploymentStale, "Replaced by deployment "+deployment.ID, now, active.ID, active.Status)
+		if err != nil {
+			return nil, nil, fmt.Errorf("failed to mark deployment stale: %w", err)
+		}
+		if rows, err := result.RowsAffected(); err != nil || rows != 1 {
+			return nil, nil, fmt.Errorf("deployment %s changed while it was being replaced", active.ID)
+		}
+		active.Status = models.DeploymentStale
+		active.ErrorMessage = "Replaced by deployment " + deployment.ID
+		active.CompletedAt = &now
+	}
+
+	_, err = tx.Exec(`
+		INSERT INTO deployments (id, app_id, version_id, environment, status, triggered_by, policy_id, terraform_root, started_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+	`, deployment.ID, deployment.AppID, deployment.VersionID, deployment.Environment, deployment.Status, deployment.TriggeredBy, deployment.PolicyID, root, deployment.StartedAt)
+	if err != nil {
+		return nil, nil, fmt.Errorf("failed to create deployment (is another deploy of the root running?): %w", err)
+	}
+
+	if err := tx.Commit(); err != nil {
+		return nil, nil, fmt.Errorf("failed to create deployment: %w", err)
+	}
+	return deployment, active, nil
+}
+
+// SetTerraformCommitted records that a pending terraform deployment was
+// committed: the commit of the CR, of the source and the plan id to expect.
+// The deployment moves to status (planning) and is not completed.
+func (s *DeploymentStore) SetTerraformCommitted(id, status, commitSHA, sourceSHA, planID string) error {
+	result, err := s.db.Exec(`
+		UPDATE deployments
+		SET status = ?, gitops_commit_sha = ?, terraform_source_sha = ?, terraform_plan_id = ?
+		WHERE id = ? AND status = ?
+	`, status, commitSHA, sourceSHA, planID, id, models.DeploymentPending)
+	if err != nil {
+		return fmt.Errorf("failed to update deployment: %w", err)
+	}
+	rows, err := result.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("failed to check rows affected: %w", err)
+	}
+	if rows == 0 {
+		return fmt.Errorf("deployment %s is no longer pending", id)
+	}
+	return nil
+}
+
 // GetByID gets a deployment by ID
 func (s *DeploymentStore) GetByID(id string) (*models.Deployment, error) {
-	var deployment models.Deployment
-	var completedAt sql.NullTime
-	var policyID sql.NullString
-
-	err := s.db.QueryRow(`
-		SELECT id, app_id, version_id, environment, status, triggered_by, policy_id, COALESCE(gitops_commit_sha, ''), COALESCE(error_message, ''), started_at, completed_at
+	deployment, err := scanDeployment(s.db.QueryRow(`
+		SELECT `+deploymentColumns+`
 		FROM deployments
 		WHERE id = ?
-	`, id).Scan(&deployment.ID, &deployment.AppID, &deployment.VersionID, &deployment.Environment, &deployment.Status, &deployment.TriggeredBy, &policyID, &deployment.GitopsCommitSHA, &deployment.ErrorMessage, &deployment.StartedAt, &completedAt)
+	`, id))
 
 	if err == sql.ErrNoRows {
 		return nil, fmt.Errorf("deployment not found")
@@ -64,14 +216,7 @@ func (s *DeploymentStore) GetByID(id string) (*models.Deployment, error) {
 		return nil, fmt.Errorf("failed to get deployment: %w", err)
 	}
 
-	if completedAt.Valid {
-		deployment.CompletedAt = &completedAt.Time
-	}
-	if policyID.Valid {
-		deployment.PolicyID = &policyID.String
-	}
-
-	return &deployment, nil
+	return deployment, nil
 }
 
 // List lists deployments with optional filtering by app and environment
@@ -97,7 +242,7 @@ func (s *DeploymentStore) List(appID, environment string, limit, offset int) ([]
 	}
 
 	// Get deployments
-	query = `SELECT id, app_id, version_id, environment, status, triggered_by, policy_id, COALESCE(gitops_commit_sha, ''), COALESCE(error_message, ''), started_at, completed_at
+	query = `SELECT ` + deploymentColumns + `
 		FROM deployments WHERE 1=1`
 
 	if appID != "" {
@@ -114,29 +259,11 @@ func (s *DeploymentStore) List(appID, environment string, limit, offset int) ([]
 	if err != nil {
 		return nil, 0, fmt.Errorf("failed to list deployments: %w", err)
 	}
-	defer rows.Close()
 
-	deployments := []models.Deployment{}
-	for rows.Next() {
-		var deployment models.Deployment
-		var completedAt sql.NullTime
-		var policyID sql.NullString
-
-		err := rows.Scan(&deployment.ID, &deployment.AppID, &deployment.VersionID, &deployment.Environment, &deployment.Status, &deployment.TriggeredBy, &policyID, &deployment.GitopsCommitSHA, &deployment.ErrorMessage, &deployment.StartedAt, &completedAt)
-		if err != nil {
-			return nil, 0, fmt.Errorf("failed to scan deployment: %w", err)
-		}
-
-		if completedAt.Valid {
-			deployment.CompletedAt = &completedAt.Time
-		}
-		if policyID.Valid {
-			deployment.PolicyID = &policyID.String
-		}
-
-		deployments = append(deployments, deployment)
+	deployments, err := scanDeployments(rows)
+	if err != nil {
+		return nil, 0, err
 	}
-
 	return deployments, total, nil
 }
 
@@ -150,7 +277,8 @@ type DeploymentFilter struct {
 const deploymentDetailSelect = `
 	SELECT d.id, d.app_id, COALESCE(a.name, ''), COALESCE(v.version_id, ''), d.environment, d.status,
 		COALESCE(d.triggered_by, ''), COALESCE(d.policy_id, ''), COALESCE(p.name, ''),
-		COALESCE(d.gitops_commit_sha, ''), COALESCE(d.error_message, ''), d.started_at, d.completed_at
+		COALESCE(d.gitops_commit_sha, ''), COALESCE(d.error_message, ''), d.started_at, d.completed_at,
+		COALESCE(d.terraform_root, ''), COALESCE(d.terraform_source_sha, ''), COALESCE(d.terraform_plan_id, '')
 	FROM deployments d
 	LEFT JOIN applications a ON a.id = d.app_id
 	LEFT JOIN versions v ON v.id = d.version_id
@@ -159,16 +287,21 @@ const deploymentDetailSelect = `
 func scanDeploymentDetail(scanner interface{ Scan(...any) error }) (models.DeploymentDetail, error) {
 	var detail models.DeploymentDetail
 	var completedAt sql.NullTime
+	var run models.TerraformRun
 
 	err := scanner.Scan(&detail.ID, &detail.AppID, &detail.AppName, &detail.VersionID, &detail.Environment, &detail.Status,
 		&detail.TriggeredBy, &detail.PolicyID, &detail.PolicyName,
-		&detail.GitopsCommitSHA, &detail.ErrorMessage, &detail.StartedAt, &completedAt)
+		&detail.GitopsCommitSHA, &detail.ErrorMessage, &detail.StartedAt, &completedAt,
+		&run.Root, &run.SourceCommitSHA, &run.PlanID)
 	if err != nil {
 		return detail, err
 	}
 
 	if completedAt.Valid {
 		detail.CompletedAt = &completedAt.Time
+	}
+	if run.Root != "" {
+		detail.Terraform = &run
 	}
 	return detail, nil
 }
@@ -243,9 +376,9 @@ func (s *DeploymentStore) LatestPerTarget() ([]models.DeploymentDetail, error) {
 // every app to every environment, i.e. what is currently running there
 func (s *DeploymentStore) LatestSuccessPerTarget() ([]models.DeploymentDetail, error) {
 	return s.queryDetails(deploymentDetailSelect + `
-		WHERE d.status = 'success' AND d.completed_at = (
+		WHERE d.status IN ` + deployedStatuses + ` AND d.completed_at = (
 			SELECT MAX(d2.completed_at) FROM deployments d2
-			WHERE d2.app_id = d.app_id AND d2.environment = d.environment AND d2.status = 'success'
+			WHERE d2.app_id = d.app_id AND d2.environment = d.environment AND d2.status IN ` + deployedStatuses + `
 		)`)
 }
 
@@ -271,7 +404,7 @@ func (s *DeploymentStore) queryDetails(query string, args ...any) ([]models.Depl
 // started before cutoff, i.e. deployments whose worker most likely died
 func (s *DeploymentStore) ListStalePending(cutoff time.Time) ([]models.Deployment, error) {
 	rows, err := s.db.Query(`
-		SELECT id, app_id, version_id, environment, status, triggered_by, policy_id, COALESCE(gitops_commit_sha, ''), COALESCE(error_message, ''), started_at, completed_at
+		SELECT `+deploymentColumns+`
 		FROM deployments
 		WHERE status = 'pending' AND started_at < ?
 		ORDER BY started_at ASC
@@ -279,30 +412,7 @@ func (s *DeploymentStore) ListStalePending(cutoff time.Time) ([]models.Deploymen
 	if err != nil {
 		return nil, fmt.Errorf("failed to list stale deployments: %w", err)
 	}
-	defer rows.Close()
-
-	deployments := []models.Deployment{}
-	for rows.Next() {
-		var deployment models.Deployment
-		var completedAt sql.NullTime
-		var policyID sql.NullString
-
-		err := rows.Scan(&deployment.ID, &deployment.AppID, &deployment.VersionID, &deployment.Environment, &deployment.Status, &deployment.TriggeredBy, &policyID, &deployment.GitopsCommitSHA, &deployment.ErrorMessage, &deployment.StartedAt, &completedAt)
-		if err != nil {
-			return nil, fmt.Errorf("failed to scan deployment: %w", err)
-		}
-
-		if completedAt.Valid {
-			deployment.CompletedAt = &completedAt.Time
-		}
-		if policyID.Valid {
-			deployment.PolicyID = &policyID.String
-		}
-
-		deployments = append(deployments, deployment)
-	}
-
-	return deployments, nil
+	return scanDeployments(rows)
 }
 
 // HasNewer reports whether the app was deployed to the same environment
@@ -328,7 +438,7 @@ func (s *DeploymentStore) PreviousSuccessVersion(deployment *models.Deployment) 
 	var versionID string
 	err := s.db.QueryRow(`
 		SELECT version_id FROM deployments
-		WHERE app_id = ? AND environment = ? AND status = 'success' AND id != ? AND started_at < ?
+		WHERE app_id = ? AND environment = ? AND status IN `+deployedStatuses+` AND id != ? AND started_at < ?
 		ORDER BY started_at DESC LIMIT 1
 	`, deployment.AppID, deployment.Environment, deployment.ID, deployment.StartedAt.UTC()).Scan(&versionID)
 	if err == sql.ErrNoRows {

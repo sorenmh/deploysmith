@@ -180,7 +180,7 @@ func (s *VersionStore) GetDeployedEnvironments(versionID string) ([]string, erro
 		SELECT DISTINCT d.environment
 		FROM deployments d
 		JOIN versions v ON d.version_id = v.id
-		WHERE v.id = ? AND d.status = 'success'
+		WHERE v.id = ? AND d.status IN `+deployedStatuses+`
 		ORDER BY d.environment
 	`, versionID)
 

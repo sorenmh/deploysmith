@@ -126,3 +126,33 @@ func (db *DB) Query(query string, args ...any) (*sql.Rows, error) {
 func (db *DB) QueryRow(query string, args ...any) *sql.Row {
 	return db.DB.QueryRow(db.rebind(query), args...)
 }
+
+// Tx wraps sql.Tx and rebinds placeholders like DB
+type Tx struct {
+	*sql.Tx
+	db *DB
+}
+
+// Begin starts a transaction
+func (db *DB) Begin() (*Tx, error) {
+	tx, err := db.DB.Begin()
+	if err != nil {
+		return nil, err
+	}
+	return &Tx{Tx: tx, db: db}, nil
+}
+
+// Exec overrides sql.Tx.Exec to rebind placeholders.
+func (tx *Tx) Exec(query string, args ...any) (sql.Result, error) {
+	return tx.Tx.Exec(tx.db.rebind(query), args...)
+}
+
+// Query overrides sql.Tx.Query to rebind placeholders.
+func (tx *Tx) Query(query string, args ...any) (*sql.Rows, error) {
+	return tx.Tx.Query(tx.db.rebind(query), args...)
+}
+
+// QueryRow overrides sql.Tx.QueryRow to rebind placeholders.
+func (tx *Tx) QueryRow(query string, args ...any) *sql.Row {
+	return tx.Tx.QueryRow(tx.db.rebind(query), args...)
+}

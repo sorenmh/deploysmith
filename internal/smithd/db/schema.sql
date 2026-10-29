@@ -78,7 +78,10 @@ CREATE TABLE IF NOT EXISTS deployments (
     app_id TEXT NOT NULL,
     version_id TEXT NOT NULL,
     environment TEXT NOT NULL,
-    status TEXT NOT NULL CHECK(status IN ('pending', 'success', 'failed')),
+    -- pending, success and failed for manifests; terraform deployments go
+    -- pending -> planning -> awaiting_approval -> applying -> applied, or end
+    -- as failed, stale (replaced by a newer deploy) or rejected
+    status TEXT NOT NULL CHECK(status IN ('pending', 'success', 'failed', 'planning', 'awaiting_approval', 'applying', 'applied', 'stale', 'rejected')),
 
     -- Deployment details
     triggered_by TEXT,
@@ -89,6 +92,12 @@ CREATE TABLE IF NOT EXISTS deployments (
 
     -- Error details (if failed)
     error_message TEXT,
+
+    -- Terraform deployments only: the root, the gitops commit holding its
+    -- source and the id of the plan the controller makes for that commit
+    terraform_root TEXT,
+    terraform_source_sha TEXT,
+    terraform_plan_id TEXT,
 
     -- Timestamps
     started_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
@@ -103,6 +112,10 @@ CREATE TABLE IF NOT EXISTS deployments (
 CREATE INDEX IF NOT EXISTS idx_deployments_app_id ON deployments(app_id);
 CREATE INDEX IF NOT EXISTS idx_deployments_environment ON deployments(environment);
 CREATE INDEX IF NOT EXISTS idx_deployments_started_at ON deployments(started_at DESC);
+
+-- One active run per app, environment and root
+CREATE UNIQUE INDEX IF NOT EXISTS idx_deployments_active_terraform_root ON deployments(app_id, environment, terraform_root)
+    WHERE terraform_root IS NOT NULL AND status IN ('pending', 'planning', 'awaiting_approval', 'applying');
 
 -- Record schema version
 INSERT OR IGNORE INTO schema_version (version) VALUES (2);
@@ -134,6 +147,10 @@ CREATE TABLE IF NOT EXISTS terraform_environments (
     -- IAM role OpenBao assumes for apply runs; empty means the convention
     -- arn:aws:iam::<account>:role/tf-<app>-<env>
     aws_role_arn TEXT NOT NULL DEFAULT '',
+
+    -- Existing plaintext state is read through an unencrypted fallback until
+    -- its first apply has written it back encrypted
+    encryption_fallback BOOLEAN NOT NULL DEFAULT FALSE,
 
     -- Outcome of the last provisioning (namespace in gitops, OpenBao roles)
     provisioned_at TIMESTAMP,

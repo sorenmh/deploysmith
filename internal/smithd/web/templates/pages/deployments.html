@@ -20,6 +20,8 @@
       <option value="pending"{{if eq .Filter.Status "pending"}} selected{{end}}>Deploying</option>
       <option value="success"{{if eq .Filter.Status "success"}} selected{{end}}>Deployed</option>
       <option value="failed"{{if eq .Filter.Status "failed"}} selected{{end}}>Failed</option>
+      <option value="awaiting_approval"{{if eq .Filter.Status "awaiting_approval"}} selected{{end}}>Awaiting approval</option>
+      <option value="applied"{{if eq .Filter.Status "applied"}} selected{{end}}>Applied</option>
     </select>
   </label>
   <button type="submit" class="button button--quiet">Filter</button>
