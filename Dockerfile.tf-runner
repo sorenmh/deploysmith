@@ -1,0 +1,35 @@
+# Build context is the repo root. tofu-controller runner with a chosen OpenTofu
+# version and tf-runner-auth, which logs in to OpenBao and provides AWS credentials
+# before the runner starts (docs/terraform-cluster-setup.md). One image per OpenTofu
+# version: `make docker-build-tf-runner TOFU_VERSION=1.13.2`; CI builds the supported
+# versions. Tagged <tofu-controller version>-tofu<OpenTofu version>.
+
+# The OpenTofu image varies with the build arg, so its exact version tag is the pin;
+# the version check in the runtime stage fails the build if the tag ever moved.
+ARG TOFU_VERSION=1.13.2
+
+# --- OpenTofu -----------------------------------------------------------------
+FROM ghcr.io/opentofu/opentofu:${TOFU_VERSION}-minimal AS tofu
+
+# --- build --------------------------------------------------------------------
+FROM golang:1.27.3-alpine3.24@sha256:d200d2dd76b03a99b52651fd1325aff7dcd35422c35c01bac56571b0507f3deb AS build
+WORKDIR /src
+COPY go.mod go.sum ./
+RUN go mod download
+COPY cmd/tf-runner-auth ./cmd/tf-runner-auth
+COPY internal/tfrunnerauth ./internal/tfrunnerauth
+RUN CGO_ENABLED=0 go build -trimpath -ldflags "-s -w" -o /out/tf-runner-auth ./cmd/tf-runner-auth
+
+# --- runtime ------------------------------------------------------------------
+# Upstream's runner without OpenTofu; it must match the controller's version, since
+# the controller talks to the runner over gRPC.
+FROM ghcr.io/flux-iac/tf-runner:v0.16.6-base@sha256:66961a41237240863edd6a9a3ba0889529db2ae998d0544700aec02919a0a7e1
+ARG TOFU_VERSION
+COPY --from=tofu /usr/local/bin/tofu /usr/local/bin/tofu
+COPY --from=build /out/tf-runner-auth /usr/local/bin/tf-runner-auth
+# credential_process profile for the S3 backend and the aws provider; tf-runner-auth
+# points AWS_CONFIG_FILE here when SMITH_BAO_AWS_ROLE is set
+COPY docker/tf-runner/aws-config /etc/deploysmith/aws-config
+RUN tofu version | grep -qx "OpenTofu v${TOFU_VERSION}"
+# The controller only sets args, so they are appended to this entrypoint
+ENTRYPOINT ["/sbin/tini", "--", "/usr/local/bin/tf-runner-auth", "exec", "tf-runner"]

@@ -1,4 +1,4 @@
-.PHONY: build build-smithd build-forge build-smithctl test lint clean help docker-lint docker-test docker-build docker-build-smithd docker-build-forge docker-build-smithctl
+.PHONY: build build-smithd build-forge build-smithctl test lint clean help docker-lint docker-test docker-build docker-build-smithd docker-build-forge docker-build-smithctl docker-build-tf-runner print-tf-runner-tag
 
 # Default target
 .DEFAULT_GOAL := help
@@ -49,6 +49,19 @@ docker-build-forge: ## Build the forge image
 
 docker-build-smithctl: ## Build the smithctl image
 	docker build -f Dockerfile.smithctl --build-arg VERSION=$(VERSION) --build-arg COMMIT=$(COMMIT) -t $(REGISTRY)/smithctl:local .
+
+# tofu-controller runner, one image per OpenTofu version. Not part of docker-build: CI
+# builds it for each supported version (.github/workflows/ci.yml).
+TF_CONTROLLER_VERSION ?= v0.16.6
+TOFU_VERSION ?= 1.13.2
+
+TF_RUNNER_TAG = $(TF_CONTROLLER_VERSION)-tofu$(TOFU_VERSION)
+
+docker-build-tf-runner: ## Build the tofu-controller runner image for TOFU_VERSION
+	docker build -f Dockerfile.tf-runner --build-arg TOFU_VERSION=$(TOFU_VERSION) -t $(REGISTRY)/deploysmith-tf-runner:$(TF_RUNNER_TAG) .
+
+print-tf-runner-tag:
+	@echo $(TF_RUNNER_TAG)
 
 # Testing
 test: ## Run tests
