@@ -38,23 +38,23 @@ func (f *fakeServer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	var body map[string]any
 	if r.Body != nil {
-		json.NewDecoder(r.Body).Decode(&body)
+		_ = json.NewDecoder(r.Body).Decode(&body) // empty for GET
 	}
 
 	if path == "auth/kubernetes/login" {
 		if body["role"] != "smithd" || body["jwt"] != "sa-jwt" {
 			w.WriteHeader(http.StatusBadRequest)
-			w.Write([]byte(`{"errors":["invalid role or jwt"]}`))
+			_, _ = w.Write([]byte(`{"errors":["invalid role or jwt"]}`))
 			return
 		}
 		f.logins++
-		w.Write([]byte(`{"auth":{"client_token":"login-token","lease_duration":3600}}`))
+		_, _ = w.Write([]byte(`{"auth":{"client_token":"login-token","lease_duration":3600}}`))
 		return
 	}
 
 	if token != "static-token" && token != "login-token" {
 		w.WriteHeader(http.StatusForbidden)
-		w.Write([]byte(`{"errors":["permission denied"]}`))
+		_, _ = w.Write([]byte(`{"errors":["permission denied"]}`))
 		return
 	}
 
@@ -62,10 +62,10 @@ func (f *fakeServer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	case http.MethodGet:
 		if _, ok := f.data[path]; !ok {
 			w.WriteHeader(http.StatusNotFound)
-			w.Write([]byte(`{"errors":[]}`))
+			_, _ = w.Write([]byte(`{"errors":[]}`))
 			return
 		}
-		json.NewEncoder(w).Encode(map[string]any{"data": f.data[path]})
+		_ = json.NewEncoder(w).Encode(map[string]any{"data": f.data[path]})
 	case http.MethodPut, http.MethodPost:
 		f.data[path] = body
 		w.WriteHeader(http.StatusNoContent)
