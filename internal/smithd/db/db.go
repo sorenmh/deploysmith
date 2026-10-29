@@ -56,9 +56,22 @@ func Open(driver, dsn string) (*DB, error) {
 }
 
 func (db *DB) runMigrations() error {
+	m, err := db.migrator()
+	if err != nil {
+		return err
+	}
+
+	if err := m.Up(); err != nil && err != migrate.ErrNoChange {
+		return fmt.Errorf("migration failed: %w", err)
+	}
+	return nil
+}
+
+// migrator returns a migrator for the database's driver
+func (db *DB) migrator() (*migrate.Migrate, error) {
 	sourceDriver, err := iofs.New(migrationsFS, "migrations")
 	if err != nil {
-		return fmt.Errorf("failed to load migration source: %w", err)
+		return nil, fmt.Errorf("failed to load migration source: %w", err)
 	}
 
 	var m *migrate.Migrate
@@ -66,27 +79,23 @@ func (db *DB) runMigrations() error {
 	case "sqlite3":
 		dbDriver, err := migrateSQLite.WithInstance(db.DB, &migrateSQLite.Config{})
 		if err != nil {
-			return fmt.Errorf("failed to create sqlite migrate driver: %w", err)
+			return nil, fmt.Errorf("failed to create sqlite migrate driver: %w", err)
 		}
 		m, err = migrate.NewWithInstance("iofs", sourceDriver, "sqlite3", dbDriver)
 		if err != nil {
-			return fmt.Errorf("failed to create migrator: %w", err)
+			return nil, fmt.Errorf("failed to create migrator: %w", err)
 		}
 	case "postgres":
 		dbDriver, err := migratePostgres.WithInstance(db.DB, &migratePostgres.Config{})
 		if err != nil {
-			return fmt.Errorf("failed to create postgres migrate driver: %w", err)
+			return nil, fmt.Errorf("failed to create postgres migrate driver: %w", err)
 		}
 		m, err = migrate.NewWithInstance("iofs", sourceDriver, "postgres", dbDriver)
 		if err != nil {
-			return fmt.Errorf("failed to create migrator: %w", err)
+			return nil, fmt.Errorf("failed to create migrator: %w", err)
 		}
 	}
-
-	if err := m.Up(); err != nil && err != migrate.ErrNoChange {
-		return fmt.Errorf("migration failed: %w", err)
-	}
-	return nil
+	return m, nil
 }
 
 // rebind converts SQLite-style `?` placeholders to PostgreSQL `$N` placeholders.

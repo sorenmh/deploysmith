@@ -8,13 +8,17 @@ import (
 	"fmt"
 	"io"
 	"log"
+	"maps"
 	"net/http"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/sorenmh/deploysmith/internal/shared/logging"
+	"github.com/sorenmh/deploysmith/internal/shared/tfbundle"
+	"github.com/sorenmh/deploysmith/internal/smithd/auth"
 	"github.com/sorenmh/deploysmith/internal/smithd/config"
 	"github.com/sorenmh/deploysmith/internal/smithd/db"
 	"github.com/sorenmh/deploysmith/internal/smithd/events"
@@ -47,7 +51,8 @@ type Server struct {
 	storage          *storage.S3Storage
 	publisher        events.Publisher
 	svc              *service.Service
-	uiRouter         *chi.Mux // set when the UI has its own listener
+	login            *auth.Login // nil unless login with GitHub is configured
+	uiRouter         *chi.Mux    // set when the UI has its own listener
 }
 
 // NewServer creates a new HTTP server
@@ -113,6 +118,7 @@ func NewServer(cfg *config.Config, database *db.DB) *Server {
 		log.Printf("Terraform support disabled: OPENBAO_ADDR is not set")
 	}
 	s.svc = service.New(deps)
+	s.login = newLogin(cfg, database)
 
 	s.setupRoutes()
 	return s
@@ -130,70 +136,116 @@ func (s *Server) setupRoutes() {
 	s.router.Route("/api/v1", func(r chi.Router) {
 		r.Use(CORS)
 		r.Use(ContentType)
-		r.Use(Auth(s.cfg.APIKeys))
 
-		// Application routes
-		r.Post("/apps", s.handleRegisterApp)
-		r.Get("/apps", s.handleListApps)
-		r.Get("/apps/{appId}", s.handleGetApp)
+		// Signing in to smithctl, before there is a session
+		r.Post("/auth/device", s.handleStartDeviceLogin)
+		r.Post("/auth/device/token", s.handleDeviceToken)
 
-		// Version routes
-		r.Post("/apps/{appId}/versions/draft", s.handleDraftVersion)
-		r.Post("/apps/{appId}/versions/{versionId}/publish", s.handlePublishVersion)
-		r.Get("/apps/{appId}/versions", s.handleListVersions)
-		r.Get("/apps/{appId}/versions/{versionId}", s.handleGetVersion)
-
-		// Deployment routes
-		r.Post("/apps/{appId}/versions/{versionId}/deploy", s.handleDeployVersion)
-		r.Get("/deployments", s.handleListDeployments)
-		r.Get("/deployments/{deploymentId}", s.handleGetDeployment)
-		r.Get("/overview", s.handleOverview)
-
-		// Environment routes
-		r.Post("/environments", s.handleCreateEnvironment)
-		r.Get("/environments", s.handleListEnvironments)
-		r.Get("/environments/{environmentId}", s.handleGetEnvironment)
-		r.Put("/environments/{environmentId}", s.handleUpdateEnvironment)
-		r.Delete("/environments/{environmentId}", s.handleDeleteEnvironment)
-
-		// Policy routes
-		r.Post("/apps/{appId}/policies", s.handleCreatePolicy)
-		r.Get("/apps/{appId}/policies", s.handleListPolicies)
-		r.Patch("/apps/{appId}/policies/{policyId}", s.handleUpdatePolicy)
-		r.Delete("/apps/{appId}/policies/{policyId}", s.handleDeletePolicy)
-
-		// Terraform routes
-		r.Post("/apps/{appId}/terraform/environments", s.handleEnableTerraform)
-		r.Get("/apps/{appId}/terraform/environments", s.handleListTerraformEnvironments)
-		r.Post("/apps/{appId}/terraform/sync", s.handleSyncTerraform)
-
-		// Admin routes (DB migration between drivers)
-		r.Get("/admin/db-export", s.handleDBExport)
-		r.Post("/admin/db-import", s.handleDBImport)
+		r.Group(func(r chi.Router) {
+			r.Use(Auth(s.cfg.APIKeys, s.login))
+			s.setupAuthenticatedRoutes(r)
+		})
 	})
 
-	// Web UI, only when an authenticating proxy is configured
-	if s.cfg.UIUserHeader != "" {
-		ui, err := web.New(s.svc, web.AuthConfig{
-			UserHeader:     s.cfg.UIUserHeader,
-			AllowedUsers:   s.cfg.UIAllowedUsers,
-			TrustedOrigins: s.cfg.UITrustedOrigins,
-		})
-		if err != nil {
-			log.Fatalf("Failed to set up web UI: %v", err)
-		}
-		router := s.router
-		if s.cfg.UIListenAddr != "" {
-			s.uiRouter = chi.NewRouter()
-			s.uiRouter.Use(Logger)
-			router = s.uiRouter
-		}
-		router.Mount(web.Prefix, ui)
-		router.Get("/", func(w http.ResponseWriter, r *http.Request) {
-			http.Redirect(w, r, web.Prefix+"/", http.StatusFound)
-		})
+	s.setupUI()
+}
+
+// setupAuthenticatedRoutes configures the API routes that need an API key
+// or a session
+func (s *Server) setupAuthenticatedRoutes(r chi.Router) {
+	// Who am I, and logging out of a session
+	r.Get("/auth/whoami", s.handleWhoAmI)
+	r.Post("/auth/logout", s.handleLogout)
+
+	// Application routes
+	r.Post("/apps", s.handleRegisterApp)
+	r.Get("/apps", s.handleListApps)
+	r.Get("/apps/{appId}", s.handleGetApp)
+
+	// Version routes
+	r.Post("/apps/{appId}/versions/draft", s.handleDraftVersion)
+	r.Post("/apps/{appId}/versions/{versionId}/publish", s.handlePublishVersion)
+	r.Get("/apps/{appId}/versions", s.handleListVersions)
+	r.Get("/apps/{appId}/versions/{versionId}", s.handleGetVersion)
+
+	// Deployment routes
+	r.Post("/apps/{appId}/versions/{versionId}/deploy", s.handleDeployVersion)
+	r.Get("/deployments", s.handleListDeployments)
+	r.Get("/deployments/{deploymentId}", s.handleGetDeployment)
+	r.Get("/overview", s.handleOverview)
+
+	// Environment routes
+	r.Post("/environments", s.handleCreateEnvironment)
+	r.Get("/environments", s.handleListEnvironments)
+	r.Get("/environments/{environmentId}", s.handleGetEnvironment)
+	r.Put("/environments/{environmentId}", s.handleUpdateEnvironment)
+	r.Delete("/environments/{environmentId}", s.handleDeleteEnvironment)
+
+	// Policy routes
+	r.Post("/apps/{appId}/policies", s.handleCreatePolicy)
+	r.Get("/apps/{appId}/policies", s.handleListPolicies)
+	r.Patch("/apps/{appId}/policies/{policyId}", s.handleUpdatePolicy)
+	r.Delete("/apps/{appId}/policies/{policyId}", s.handleDeletePolicy)
+
+	// Terraform routes
+	r.Post("/apps/{appId}/terraform/environments", s.handleEnableTerraform)
+	r.Get("/apps/{appId}/terraform/environments", s.handleListTerraformEnvironments)
+	r.Post("/apps/{appId}/terraform/sync", s.handleSyncTerraform)
+
+	// Admin routes (DB migration between drivers)
+	r.Get("/admin/db-export", s.handleDBExport)
+	r.Post("/admin/db-import", s.handleDBImport)
+}
+
+// setupUI mounts the web UI, served when it signs people in with GitHub or
+// when an authenticating proxy is configured
+func (s *Server) setupUI() {
+	authCfg := web.AuthConfig{
+		UserHeader:     s.cfg.UIUserHeader,
+		AllowedUsers:   s.cfg.UIAllowedUsers,
+		TrustedOrigins: s.cfg.UITrustedOrigins,
+		Login:          s.login,
+		PublicURL:      s.cfg.UIPublicURL,
+	}
+	if authCfg.UserHeader == "" && authCfg.Login == nil {
+		return
+	}
+
+	ui, err := web.New(s.svc, authCfg)
+	if err != nil {
+		log.Fatalf("Failed to set up web UI: %v", err)
+	}
+	router := s.router
+	if s.cfg.UIListenAddr != "" {
+		s.uiRouter = chi.NewRouter()
+		s.uiRouter.Use(Logger)
+		router = s.uiRouter
+	}
+	router.Mount(web.Prefix, ui)
+	router.Get("/", func(w http.ResponseWriter, r *http.Request) {
+		http.Redirect(w, r, web.Prefix+"/", http.StatusFound)
+	})
+	if s.login != nil {
+		log.Printf("Web UI enabled at %s (login with GitHub)", web.Prefix)
+	} else {
 		log.Printf("Web UI enabled at %s (user header: %s)", web.Prefix, s.cfg.UIUserHeader)
 	}
+}
+
+// newLogin returns the login with GitHub service, or nil if it is not
+// configured
+func newLogin(cfg *config.Config, database *db.DB) *auth.Login {
+	if !cfg.GitHubLoginEnabled() {
+		return nil
+	}
+	log.Printf("Login with GitHub enabled (%s)", cfg.GitHubURL)
+	return auth.NewLogin(auth.Config{
+		GitHub:       auth.NewGitHub(cfg.GitHubClientID, cfg.GitHubClientSecret, cfg.GitHubURL, cfg.GitHubAPIURL),
+		AllowedOrg:   cfg.GitHubAllowedOrg,
+		AllowedTeam:  cfg.GitHubAllowedTeam,
+		AllowedUsers: cfg.GitHubAllowedUsers,
+		SessionTTL:   cfg.SessionTTL,
+	}, store.NewUserStore(database), store.NewSessionStore(database))
 }
 
 // Start starts the HTTP server
@@ -351,6 +403,14 @@ func (s *Server) handleDraftVersion(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	if req.ArtifactType == "" {
+		req.ArtifactType = models.ArtifactManifests
+	}
+	if !models.ValidArtifactType(req.ArtifactType) {
+		writeError(w, http.StatusBadRequest, "invalid_request", fmt.Sprintf("Unknown artifactType '%s' (supported: %s, %s)", req.ArtifactType, models.ArtifactManifests, models.ArtifactTerraform))
+		return
+	}
+
 	// Check if version already exists
 	existing, _ := s.versionStore.GetByVersionID(appID, req.VersionID)
 	if existing != nil {
@@ -359,15 +419,15 @@ func (s *Server) handleDraftVersion(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Create version record
-	version, err := s.versionStore.Create(appID, req.VersionID, req.Metadata)
+	version, err := s.versionStore.Create(appID, req.VersionID, req.ArtifactType, req.Metadata)
 	if err != nil {
 		log.Printf("Failed to create version: %v", err)
 		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to create version")
 		return
 	}
 
-	// Generate presigned URL for manifest upload
-	uploadURL, err := s.storage.GeneratePresignedURL(app.Name, req.VersionID, "manifests.tar.gz")
+	// Generate presigned URL for the archive upload
+	uploadURL, err := s.storage.GeneratePresignedURL(app.Name, req.VersionID, archiveName(version.ArtifactType))
 	if err != nil {
 		log.Printf("Failed to generate presigned URL: %v", err)
 		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to generate upload URL")
@@ -379,6 +439,7 @@ func (s *Server) handleDraftVersion(w http.ResponseWriter, r *http.Request) {
 		UploadURL:     uploadURL,
 		UploadExpires: version.CreatedAt.Add(5 * 60 * 1000000000), // 5 minutes
 		Status:        version.Status,
+		ArtifactType:  version.ArtifactType,
 	}
 
 	writeJSON(w, http.StatusCreated, resp)
@@ -420,119 +481,14 @@ func (s *Server) handlePublishVersion(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// List files in draft location
-	files, err := s.storage.ListFiles(app.Name, versionID, false)
-	if err != nil {
-		logging.LogErrorCtx(r.Context(), "Failed to list draft files: "+err.Error(), err)
-		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to access draft files")
-		return
-	}
-
-	logging.LogInfoCtx(r.Context(), fmt.Sprintf("Found %d files in draft location for version %s: %v", len(files), versionID, files))
-
-	if len(files) == 0 {
-		writeError(w, http.StatusBadRequest, "invalid_request", "No manifest files uploaded")
-		return
-	}
-
-	// Check if we have a tarball that needs to be extracted
-	manifestFiles := []string{}
-	var tarballFiles map[string][]byte
-
-	// Look for manifests.tar.gz
-	hasTarball := false
-	for _, file := range files {
-		if file == "manifests.tar.gz" {
-			hasTarball = true
-			logging.LogInfoCtx(r.Context(), "Found tarball, extracting files...")
-
-			// Get and extract tarball
-			reader, err := s.storage.GetFile(app.Name, versionID, file, false)
-			if err != nil {
-				logging.LogErrorCtx(r.Context(), "Failed to get tarball "+file+": "+err.Error(), err)
-				writeError(w, http.StatusInternalServerError, "internal_error", "Failed to read manifest files")
-				return
-			}
-			defer reader.Close()
-
-			tarballFiles, err = s.extractTarball(reader)
-			if err != nil {
-				logging.LogErrorCtx(r.Context(), "Failed to extract tarball: "+err.Error(), err)
-				writeError(w, http.StatusInternalServerError, "internal_error", "Failed to extract manifest files")
-				return
-			}
-
-			logging.LogInfoCtx(r.Context(), fmt.Sprintf("Extracted %d files from tarball: %v", len(tarballFiles), getKeys(tarballFiles)))
-			break
-		}
-	}
-
-	// Process files (either from tarball or individual uploads)
-	if hasTarball {
-		// Validate files from tarball
-		for filename, content := range tarballFiles {
-			logging.LogDebugCtx(r.Context(), fmt.Sprintf("Processing extracted file: %s", filename))
-			if strings.HasSuffix(filename, ".yaml") || strings.HasSuffix(filename, ".yml") {
-				logging.LogInfoCtx(r.Context(), fmt.Sprintf("File %s is a YAML file, validating...", filename))
-				logging.LogInfoCtx(r.Context(), fmt.Sprintf("Read %d bytes from file %s", len(content), filename))
-
-				// Validate YAML syntax
-				var yamlContent interface{}
-				if err := yaml.Unmarshal(content, &yamlContent); err != nil {
-					logging.LogErrorCtx(r.Context(), fmt.Sprintf("YAML validation failed for file %s: %v", filename, err), err)
-					writeError(w, http.StatusBadRequest, "validation_failed", fmt.Sprintf("Invalid YAML in %s: %v", filename, err))
-					return
-				}
-
-				logging.LogDebugCtx(r.Context(), fmt.Sprintf("File %s validated successfully", filename))
-				manifestFiles = append(manifestFiles, filename)
-			} else {
-				logging.LogInfoCtx(r.Context(), fmt.Sprintf("Skipping non-YAML file: %s", filename))
-			}
-		}
+	var manifestFiles []string
+	var ok bool
+	if version.ArtifactType == models.ArtifactTerraform {
+		manifestFiles, ok = s.validateTerraformDraft(w, r, app, versionID)
 	} else {
-		// Validate individual files
-		for _, file := range files {
-			logging.LogDebugCtx(r.Context(), fmt.Sprintf("Processing file: %s", file))
-			if strings.HasSuffix(file, ".yaml") || strings.HasSuffix(file, ".yml") {
-				logging.LogInfoCtx(r.Context(), fmt.Sprintf("File %s is a YAML file, validating...", file))
-				// Get file content
-				reader, err := s.storage.GetFile(app.Name, versionID, file, false)
-				if err != nil {
-					logging.LogErrorCtx(r.Context(), fmt.Sprintf("Failed to get file %s: %v", file, err), err)
-					writeError(w, http.StatusInternalServerError, "internal_error", "Failed to read manifest files")
-					return
-				}
-				defer reader.Close()
-
-				// Read content
-				content, err := io.ReadAll(reader)
-				if err != nil {
-					logging.LogErrorCtx(r.Context(), fmt.Sprintf("Failed to read file %s: %v", file, err), err)
-					writeError(w, http.StatusInternalServerError, "internal_error", "Failed to read manifest files")
-					return
-				}
-
-				logging.LogInfoCtx(r.Context(), fmt.Sprintf("Read %d bytes from file %s", len(content), file))
-
-				// Validate YAML syntax
-				var yamlContent interface{}
-				if err := yaml.Unmarshal(content, &yamlContent); err != nil {
-					logging.LogErrorCtx(r.Context(), fmt.Sprintf("YAML validation failed for file %s: %v", file, err), err)
-					writeError(w, http.StatusBadRequest, "validation_failed", fmt.Sprintf("Invalid YAML in %s: %v", file, err))
-					return
-				}
-
-				logging.LogDebugCtx(r.Context(), fmt.Sprintf("File %s validated successfully", file))
-				manifestFiles = append(manifestFiles, file)
-			} else {
-				logging.LogInfoCtx(r.Context(), fmt.Sprintf("Skipping non-YAML file: %s", file))
-			}
-		}
+		manifestFiles, ok = s.validateManifestDraft(w, r, app, versionID)
 	}
-
-	if len(manifestFiles) == 0 {
-		writeError(w, http.StatusBadRequest, "invalid_request", "No valid YAML manifest files found")
+	if !ok {
 		return
 	}
 
@@ -567,11 +523,182 @@ func (s *Server) handlePublishVersion(w http.ResponseWriter, r *http.Request) {
 	resp := models.PublishVersionResponse{
 		VersionID:     version.VersionID,
 		Status:        version.Status,
+		ArtifactType:  version.ArtifactType,
 		PublishedAt:   *version.PublishedAt,
 		ManifestFiles: manifestFiles,
 	}
 
 	writeJSON(w, http.StatusOK, resp)
+}
+
+// validateManifestDraft validates the manifests uploaded for a draft version
+// and returns their names. It writes the error response and returns false
+// if they are invalid.
+func (s *Server) validateManifestDraft(w http.ResponseWriter, r *http.Request, app *models.Application, versionID string) ([]string, bool) {
+	// List files in draft location
+	files, err := s.storage.ListFiles(app.Name, versionID, false)
+	if err != nil {
+		logging.LogErrorCtx(r.Context(), "Failed to list draft files: "+err.Error(), err)
+		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to access draft files")
+		return nil, false
+	}
+
+	logging.LogInfoCtx(r.Context(), fmt.Sprintf("Found %d files in draft location for version %s: %v", len(files), versionID, files))
+
+	if len(files) == 0 {
+		writeError(w, http.StatusBadRequest, "invalid_request", "No manifest files uploaded")
+		return nil, false
+	}
+
+	// Check if we have a tarball that needs to be extracted
+	manifestFiles := []string{}
+	var tarballFiles map[string][]byte
+
+	// Look for manifests.tar.gz
+	hasTarball := false
+	for _, file := range files {
+		if file == "manifests.tar.gz" {
+			hasTarball = true
+			logging.LogInfoCtx(r.Context(), "Found tarball, extracting files...")
+
+			// Get and extract tarball
+			reader, err := s.storage.GetFile(app.Name, versionID, file, false)
+			if err != nil {
+				logging.LogErrorCtx(r.Context(), "Failed to get tarball "+file+": "+err.Error(), err)
+				writeError(w, http.StatusInternalServerError, "internal_error", "Failed to read manifest files")
+				return nil, false
+			}
+			defer reader.Close()
+
+			tarballFiles, err = s.extractTarball(reader)
+			if err != nil {
+				logging.LogErrorCtx(r.Context(), "Failed to extract tarball: "+err.Error(), err)
+				writeError(w, http.StatusInternalServerError, "internal_error", "Failed to extract manifest files")
+				return nil, false
+			}
+
+			logging.LogInfoCtx(r.Context(), fmt.Sprintf("Extracted %d files from tarball: %v", len(tarballFiles), getKeys(tarballFiles)))
+			break
+		}
+	}
+
+	// Process files (either from tarball or individual uploads)
+	if hasTarball {
+		// Validate files from tarball
+		for filename, content := range tarballFiles {
+			logging.LogDebugCtx(r.Context(), fmt.Sprintf("Processing extracted file: %s", filename))
+			if strings.HasSuffix(filename, ".yaml") || strings.HasSuffix(filename, ".yml") {
+				logging.LogInfoCtx(r.Context(), fmt.Sprintf("File %s is a YAML file, validating...", filename))
+				logging.LogInfoCtx(r.Context(), fmt.Sprintf("Read %d bytes from file %s", len(content), filename))
+
+				// Validate YAML syntax
+				var yamlContent interface{}
+				if err := yaml.Unmarshal(content, &yamlContent); err != nil {
+					logging.LogErrorCtx(r.Context(), fmt.Sprintf("YAML validation failed for file %s: %v", filename, err), err)
+					writeError(w, http.StatusBadRequest, "validation_failed", fmt.Sprintf("Invalid YAML in %s: %v", filename, err))
+					return nil, false
+				}
+
+				logging.LogDebugCtx(r.Context(), fmt.Sprintf("File %s validated successfully", filename))
+				manifestFiles = append(manifestFiles, filename)
+			} else {
+				logging.LogInfoCtx(r.Context(), fmt.Sprintf("Skipping non-YAML file: %s", filename))
+			}
+		}
+	} else {
+		// Validate individual files
+		for _, file := range files {
+			logging.LogDebugCtx(r.Context(), fmt.Sprintf("Processing file: %s", file))
+			if strings.HasSuffix(file, ".yaml") || strings.HasSuffix(file, ".yml") {
+				logging.LogInfoCtx(r.Context(), fmt.Sprintf("File %s is a YAML file, validating...", file))
+				// Get file content
+				reader, err := s.storage.GetFile(app.Name, versionID, file, false)
+				if err != nil {
+					logging.LogErrorCtx(r.Context(), fmt.Sprintf("Failed to get file %s: %v", file, err), err)
+					writeError(w, http.StatusInternalServerError, "internal_error", "Failed to read manifest files")
+					return nil, false
+				}
+				defer reader.Close()
+
+				// Read content
+				content, err := io.ReadAll(reader)
+				if err != nil {
+					logging.LogErrorCtx(r.Context(), fmt.Sprintf("Failed to read file %s: %v", file, err), err)
+					writeError(w, http.StatusInternalServerError, "internal_error", "Failed to read manifest files")
+					return nil, false
+				}
+
+				logging.LogInfoCtx(r.Context(), fmt.Sprintf("Read %d bytes from file %s", len(content), file))
+
+				// Validate YAML syntax
+				var yamlContent interface{}
+				if err := yaml.Unmarshal(content, &yamlContent); err != nil {
+					logging.LogErrorCtx(r.Context(), fmt.Sprintf("YAML validation failed for file %s: %v", file, err), err)
+					writeError(w, http.StatusBadRequest, "validation_failed", fmt.Sprintf("Invalid YAML in %s: %v", file, err))
+					return nil, false
+				}
+
+				logging.LogDebugCtx(r.Context(), fmt.Sprintf("File %s validated successfully", file))
+				manifestFiles = append(manifestFiles, file)
+			} else {
+				logging.LogInfoCtx(r.Context(), fmt.Sprintf("Skipping non-YAML file: %s", file))
+			}
+		}
+	}
+
+	if len(manifestFiles) == 0 {
+		writeError(w, http.StatusBadRequest, "invalid_request", "No valid YAML manifest files found")
+		return nil, false
+	}
+
+	return manifestFiles, true
+}
+
+// validateTerraformDraft validates the OpenTofu bundle uploaded for a draft
+// version, with the same rules forge applies before uploading, and returns
+// its file names. It writes the error response and returns false if the
+// bundle is missing or invalid.
+func (s *Server) validateTerraformDraft(w http.ResponseWriter, r *http.Request, app *models.Application, versionID string) ([]string, bool) {
+	files, err := s.storage.ListFiles(app.Name, versionID, false)
+	if err != nil {
+		logging.LogErrorCtx(r.Context(), "Failed to list draft files: "+err.Error(), err)
+		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to access draft files")
+		return nil, false
+	}
+	if !slices.Contains(files, tfbundle.ArchiveName) {
+		writeError(w, http.StatusBadRequest, "invalid_request", fmt.Sprintf("No %s uploaded (upload it with forge upload --terraform)", tfbundle.ArchiveName))
+		return nil, false
+	}
+
+	reader, err := s.storage.GetFile(app.Name, versionID, tfbundle.ArchiveName, false)
+	if err != nil {
+		logging.LogErrorCtx(r.Context(), "Failed to get terraform bundle: "+err.Error(), err)
+		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to read terraform bundle")
+		return nil, false
+	}
+	defer reader.Close()
+
+	bundleFiles, err := tfbundle.Read(reader)
+	if err == nil {
+		_, err = tfbundle.Validate(bundleFiles)
+	}
+	if err != nil {
+		logging.LogInfoCtx(r.Context(), "Rejected terraform bundle: "+err.Error())
+		writeError(w, http.StatusBadRequest, "validation_failed", err.Error())
+		return nil, false
+	}
+
+	names := slices.Sorted(maps.Keys(bundleFiles))
+	logging.LogInfoCtx(r.Context(), fmt.Sprintf("Validated terraform bundle with %d files: %v", len(names), names))
+	return names, true
+}
+
+// archiveName is the file a draft version's artifact is uploaded as
+func archiveName(artifactType string) string {
+	if artifactType == models.ArtifactTerraform {
+		return tfbundle.ArchiveName
+	}
+	return "manifests.tar.gz"
 }
 
 func (s *Server) handleListVersions(w http.ResponseWriter, r *http.Request) {
@@ -686,10 +813,11 @@ func (s *Server) handleGetVersion(w http.ResponseWriter, r *http.Request) {
 	}
 
 	resp := models.GetVersionResponse{
-		VersionID:   version.VersionID,
-		Status:      version.Status,
-		CreatedAt:   version.CreatedAt,
-		PublishedAt: version.PublishedAt,
+		VersionID:    version.VersionID,
+		Status:       version.Status,
+		ArtifactType: version.ArtifactType,
+		CreatedAt:    version.CreatedAt,
+		PublishedAt:  version.PublishedAt,
 		Metadata: models.VersionMetadata{
 			GitSHA:       version.GitSHA,
 			GitBranch:    version.GitBranch,
@@ -714,7 +842,14 @@ func (s *Server) handleDeployVersion(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	deployment, err := s.svc.DeployVersion(r.Context(), appID, versionID, req.Environment, req.TriggeredBy)
+	// A signed-in user is who triggered it, whatever the client says; API
+	// key clients name themselves
+	triggeredBy := req.TriggeredBy
+	if id, ok := auth.FromContext(r.Context()); ok && id.Kind == auth.KindUser {
+		triggeredBy = id.Login
+	}
+
+	deployment, err := s.svc.DeployVersion(r.Context(), appID, versionID, req.Environment, triggeredBy)
 	if err != nil {
 		writeServiceError(w, err, "Deployment failed")
 		return

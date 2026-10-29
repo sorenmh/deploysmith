@@ -17,6 +17,11 @@ func (s *Service) VersionPublished(ctx context.Context, app *models.Application,
 // TriggerAutoDeploys starts an auto-deploy, in the background, for every
 // enabled policy of the app that matches the version's branch
 func (s *Service) TriggerAutoDeploys(ctx context.Context, app *models.Application, version *models.Version) {
+	if requireDeployable(version) != nil {
+		logging.LogInfoCtx(ctx, "Skipping auto-deploy: "+version.ArtifactType+" versions cannot be deployed yet")
+		return
+	}
+
 	if version.GitBranch == "" || version.GitBranch == "unknown" {
 		logging.LogInfoCtx(ctx, "Skipping auto-deploy: no git branch metadata on version")
 		s.warnIfPoliciesSkipped(ctx, app.ID, version.GitBranch)

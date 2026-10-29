@@ -15,6 +15,8 @@ func seed(t *testing.T, d *DB) {
 		`INSERT INTO environments (id, name, description) VALUES ('env-1', 'production', 'Prod')`,
 		`INSERT INTO versions (id, app_id, version_id, status, git_sha, git_branch, build_number, metadata_timestamp, published_at)
 			VALUES ('ver-1', 'app-1', 'v1', 'published', 'abc123', 'master', '7', '2026-10-19 10:00:00', '2026-10-19 10:05:00')`,
+		`INSERT INTO versions (id, app_id, version_id, status, artifact_type, metadata_timestamp)
+			VALUES ('ver-2', 'app-1', 'infra-1', 'draft', 'terraform', '2026-10-19 11:00:00')`,
 		`INSERT INTO policies (id, app_id, name, git_branch_pattern, target_environment, enabled)
 			VALUES ('pol-1', 'app-1', 'master-prod', 'master', 'production', TRUE)`,
 		`INSERT INTO policies (id, app_id, name, git_branch_pattern, target_environment, enabled)
@@ -95,6 +97,9 @@ func TestDumpLoadSQLiteToPostgres(t *testing.T) {
 	}
 	if n := count(t, target, `SELECT COUNT(*) FROM versions WHERE published_at > metadata_timestamp`); n != 1 {
 		t.Errorf("%d versions with intact timestamps, want 1", n)
+	}
+	if n := count(t, target, `SELECT COUNT(*) FROM versions WHERE artifact_type = 'terraform'`); n != 1 {
+		t.Errorf("%d terraform versions, want 1", n)
 	}
 	if n := count(t, target, `SELECT COUNT(*) FROM terraform_environments WHERE provisioned_at IS NOT NULL`); n != 1 {
 		t.Errorf("%d terraform environments, want 1", n)

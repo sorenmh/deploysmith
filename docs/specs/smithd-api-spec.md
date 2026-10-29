@@ -126,9 +126,18 @@ Create a new draft version and get a pre-signed S3 URL for uploading manifests.
     "gitCommitter": "john@example.com",
     "buildNumber": "123",
     "timestamp": "2025-01-15T10:30:00Z"
-  }
+  },
+  "artifactType": "manifests"
 }
 ```
+
+`artifactType` is optional: `manifests` (the default) or `terraform` for an
+OpenTofu bundle. The upload URL is for `manifests.tar.gz` or
+`terraform.tar.gz`. Publishing a terraform version validates the bundle (see
+[forge](../forge.md#terraform-bundles)) and returns `400 validation_failed`
+listing every problem. Deploying a terraform version is not supported yet and
+returns `400 unsupported_artifact_type`. Versions in all responses carry their
+`artifactType`.
 
 **Response:** `201 Created`
 ```json
@@ -136,7 +145,8 @@ Create a new draft version and get a pre-signed S3 URL for uploading manifests.
   "versionId": "42540c4-123",
   "uploadUrl": "https://s3.amazonaws.com/bucket/drafts/my-api-service/42540c4-123?X-Amz-Signature=...",
   "uploadExpires": "2025-01-15T10:35:00Z",
-  "status": "draft"
+  "status": "draft",
+  "artifactType": "manifests"
 }
 ```
 

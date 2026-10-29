@@ -78,3 +78,32 @@ data:
   UI_TRUSTED_ORIGINS: {{ .trustedOrigins | quote }}
   {{- end }}
   {{- end }}
+  {{- with .Values.config.github }}
+  {{- if .clientId }}
+  {{- if or $.Values.uiProxy.enabled $.Values.uiIngress.enabled $.Values.config.ui.userHeader }}
+  {{- fail "config.github signs people in to the web UI itself; it can't be combined with uiProxy, uiIngress or config.ui.userHeader" }}
+  {{- end }}
+  {{- if not (or .allowedOrg .allowedUsers) }}
+  {{- fail "config.github needs allowedOrg or allowedUsers, or anyone with a GitHub account could sign in" }}
+  {{- end }}
+  GITHUB_CLIENT_ID: {{ .clientId | quote }}
+  {{- if .allowedOrg }}
+  GITHUB_ALLOWED_ORG: {{ .allowedOrg | quote }}
+  {{- end }}
+  {{- if .allowedTeam }}
+  GITHUB_ALLOWED_TEAM: {{ .allowedTeam | quote }}
+  {{- end }}
+  {{- if .allowedUsers }}
+  GITHUB_ALLOWED_USERS: {{ .allowedUsers | quote }}
+  {{- end }}
+  {{- if .sessionTtl }}
+  SESSION_TTL: {{ .sessionTtl | quote }}
+  {{- end }}
+  {{- if .url }}
+  GITHUB_URL: {{ .url | quote }}
+  {{- end }}
+  {{- if .apiUrl }}
+  GITHUB_API_URL: {{ .apiUrl | quote }}
+  {{- end }}
+  {{- end }}
+  {{- end }}
