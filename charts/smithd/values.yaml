@@ -244,6 +244,14 @@ config:
     # Defaults to https://<uiProxy.host> with uiProxy.
     publicUrl: ""
 
+  # GitHub App (optional, see docs/github-checks.md). smithd reports each
+  # deployment as a check run (deploysmith/deploy-<env>) on the commit the
+  # version was built from. Needs the app's private key in
+  # secrets.github.privateKey; the check runs link to config.ui.publicUrl.
+  github:
+    # The App ID from the app's settings page. Setting it enables reporting.
+    appId: ""
+
 # Secrets configuration
 secrets:
   # API keys for authentication (comma-separated)
@@ -278,6 +286,10 @@ secrets:
     publicKey: ""
     privateKey: ""
 
+  # Private key (PEM) of the GitHub App for config.github.appId
+  github:
+    privateKey: ""
+
   # Flux webhook receiver (optional)
   flux:
     webhookUrl: ""
@@ -309,6 +321,7 @@ secrets:
   #   - flux-webhook-url       (optional)
   #   - flux-webhook-token     (optional)
   #   - nats-url               (optional)
+  #   - github-app-private-key (config.github.appId)
   #   - oauth2-proxy-client-id      (uiProxy)
   #   - oauth2-proxy-client-secret  (uiProxy)
   #   - oauth2-proxy-cookie-secret  (uiProxy)

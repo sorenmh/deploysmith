@@ -40,3 +40,6 @@ data:
   UI_TRUSTED_ORIGINS: {{ .trustedOrigins | quote }}
   {{- end }}
   {{- end }}
+  {{- if .Values.config.github.appId }}
+  GITHUB_APP_ID: {{ .Values.config.github.appId | quote }}
+  {{- end }}
