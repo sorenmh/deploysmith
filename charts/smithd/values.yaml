@@ -240,9 +240,34 @@ config:
     # UI through the main ingress without uiIngress, since anyone could then
     # forge the user header.
     protectedExternally: false
-    # Public URL of the UI, used to link to deployments from Slack messages.
-    # Defaults to https://<uiProxy.host> with uiProxy.
+    # Public URL of the UI, used to link to deployments from Slack messages
+    # and, with login with GitHub, for the callback URL
+    # (<publicUrl>/ui/auth/callback). Defaults to https://<uiProxy.host> with
+    # uiProxy.
     publicUrl: ""
+
+  # Login with GitHub (optional, see docs/login-with-github.md). People log in
+  # to smithctl (device flow) and the web UI with a GitHub App or OAuth App;
+  # the UI is then served on the main ingress and requires signing in, so
+  # don't combine it with uiProxy, uiIngress or ui.userHeader. The client
+  # secret goes in secrets.github.clientSecret. API keys keep working.
+  github:
+    # Client ID of the GitHub App / OAuth App. Setting it enables login.
+    clientId: ""
+    # Who may sign in; at least one of allowedOrg and allowedUsers.
+    # Members of this organization (the app needs Members: read and must be
+    # installed on it)
+    allowedOrg: ""
+    # Only the members of this team (slug) of allowedOrg
+    allowedTeam: ""
+    # Comma-separated GitHub logins, allowed whether or not in allowedOrg
+    allowedUsers: ""
+    # How long a smithd session lasts
+    sessionTtl: 12h
+    # GitHub Enterprise Server only, e.g. https://github.example.com (the
+    # API defaults to <url>/api/v3)
+    url: ""
+    apiUrl: ""
 
 # Secrets configuration
 secrets:
@@ -278,6 +303,10 @@ secrets:
     publicKey: ""
     privateKey: ""
 
+  # Client secret of the GitHub App / OAuth App for config.github
+  github:
+    clientSecret: ""
+
   # Flux webhook receiver (optional)
   flux:
     webhookUrl: ""
@@ -309,6 +338,7 @@ secrets:
   #   - flux-webhook-url       (optional)
   #   - flux-webhook-token     (optional)
   #   - nats-url               (optional)
+  #   - github-client-secret   (config.github)
   #   - oauth2-proxy-client-id      (uiProxy)
   #   - oauth2-proxy-client-secret  (uiProxy)
   #   - oauth2-proxy-cookie-secret  (uiProxy)

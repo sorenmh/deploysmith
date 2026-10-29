@@ -50,7 +50,7 @@ Examples:
 		skipConfirm, _ := cmd.Flags().GetBool("confirm")
 
 		// Create API client
-		c := client.NewClient(GetSmithdURL(), GetSmithdAPIKey())
+		c := newClient()
 
 		// If no environment provided, show interactive environment selection
 		if environment == "" {
@@ -213,7 +213,7 @@ Examples:
 		}
 
 		// Create API client
-		c := client.NewClient(GetSmithdURL(), GetSmithdAPIKey())
+		c := newClient()
 
 		// Get application to find current version
 		app, err := c.GetApplication(appID)

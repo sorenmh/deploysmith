@@ -30,6 +30,7 @@ const Prefix = "/ui"
 // UI serves the web interface
 type UI struct {
 	svc   *service.Service
+	auth  AuthConfig
 	pages map[string]*template.Template
 }
 
@@ -38,13 +39,14 @@ type page struct {
 	Title   string
 	Section string // highlighted navigation entry
 	User    string
+	Logout  bool   // the user can sign out (signed in with GitHub)
 	PushKey string // VAPID public key; empty if push is not configured
 	Data    any
 }
 
 // New returns the UI handler, to be mounted at Prefix
-func New(svc *service.Service, auth AuthConfig) (http.Handler, error) {
-	authenticate, err := Authenticate(auth)
+func New(svc *service.Service, authCfg AuthConfig) (http.Handler, error) {
+	authenticate, err := Authenticate(authCfg)
 	if err != nil {
 		return nil, err
 	}
@@ -54,7 +56,7 @@ func New(svc *service.Service, auth AuthConfig) (http.Handler, error) {
 		return nil, err
 	}
 
-	ui := &UI{svc: svc, pages: pages}
+	ui := &UI{svc: svc, auth: authCfg, pages: pages}
 
 	static, err := fs.Sub(assets, "static")
 	if err != nil {
@@ -84,8 +86,18 @@ func New(svc *service.Service, auth AuthConfig) (http.Handler, error) {
 		http.ServeFileFS(w, req, static, "sw.js")
 	})
 
+	// Signing in with GitHub, before there is a session
+	if authCfg.Login != nil {
+		r.Get("/auth/login", ui.handleLogin)
+		r.Get("/auth/github", ui.handleLoginGitHub)
+		r.Get("/auth/callback", ui.handleCallback)
+	}
+
 	r.Group(func(r chi.Router) {
 		r.Use(authenticate)
+		if authCfg.Login != nil {
+			r.Post("/auth/logout", ui.handleLogout)
+		}
 		r.Post("/push/subscribe", ui.handlePushSubscribe)
 		r.Post("/push/unsubscribe", ui.handlePushUnsubscribe)
 		r.Get("/", ui.handleHome)
@@ -174,6 +186,7 @@ func (ui *UI) render(w http.ResponseWriter, r *http.Request, status int, name st
 	}
 
 	p.User = UserFromContext(r.Context())
+	p.Logout = ui.auth.Login != nil && p.User != ""
 	p.PushKey = ui.svc.PushPublicKey()
 
 	var buf bytes.Buffer

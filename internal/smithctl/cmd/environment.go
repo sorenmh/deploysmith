@@ -32,7 +32,7 @@ var createEnvironmentCmd = &cobra.Command{
 		description, _ := cmd.Flags().GetString("description")
 
 		// Create API client
-		c := client.NewClient(GetSmithdURL(), GetSmithdAPIKey())
+		c := newClient()
 
 		req := client.CreateEnvironmentRequest{
 			Name: name,
@@ -69,7 +69,7 @@ var listEnvironmentsCmd = &cobra.Command{
 		}
 
 		// Create API client
-		c := client.NewClient(GetSmithdURL(), GetSmithdAPIKey())
+		c := newClient()
 
 		resp, err := c.ListEnvironments()
 		if err != nil {
@@ -117,7 +117,7 @@ var updateEnvironmentCmd = &cobra.Command{
 		description, _ := cmd.Flags().GetString("description")
 
 		// Create API client
-		c := client.NewClient(GetSmithdURL(), GetSmithdAPIKey())
+		c := newClient()
 
 		// First, get the environment by name to find its ID
 		listResp, err := c.ListEnvironments()
@@ -174,7 +174,7 @@ var deleteEnvironmentCmd = &cobra.Command{
 		confirm, _ := cmd.Flags().GetBool("confirm")
 
 		// Create API client
-		c := client.NewClient(GetSmithdURL(), GetSmithdAPIKey())
+		c := newClient()
 
 		// First, get the environment by name to find its ID
 		listResp, err := c.ListEnvironments()

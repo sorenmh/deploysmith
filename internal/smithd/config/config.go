@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"strings"
+	"time"
 )
 
 // Config holds the application configuration
@@ -48,9 +49,9 @@ type Config struct {
 	FluxNamespace         string
 	FluxKustomizationName string
 
-	// Web UI. The UI is only served when UIUserHeader is set; it must then
-	// only be reachable through an authenticating proxy (e.g. oauth2-proxy)
-	// that sets this header.
+	// Web UI. The UI is only served when UIUserHeader is set or GitHub login
+	// is configured. With UIUserHeader it must only be reachable through an
+	// authenticating proxy (e.g. oauth2-proxy) that sets this header.
 	UIUserHeader     string
 	UIAllowedUsers   []string // emails, or "@domain" entries; empty allows all authenticated users
 	UITrustedOrigins []string // extra origins allowed to submit UI forms
@@ -61,6 +62,25 @@ type Config struct {
 	// UIPublicURL is where users reach the UI, e.g. https://smithui.example.com,
 	// used to link to deployments from Slack messages
 	UIPublicURL string
+
+	// Login with GitHub (a GitHub App or OAuth App), off without a client id.
+	// People then sign in to smithctl (device flow) and the web UI (which
+	// then requires it) and get short-lived smithd sessions; API keys keep
+	// working for machines. Who may sign in: GitHubAllowedUsers, and the
+	// members of GitHubAllowedOrg (narrowed to GitHubAllowedTeam if set).
+	GitHubClientID     string
+	GitHubClientSecret string
+	GitHubURL          string // https://github.com, or a GitHub Enterprise Server URL
+	GitHubAPIURL       string // defaults to the API of GitHubURL
+	GitHubAllowedOrg   string
+	GitHubAllowedTeam  string   // team slug in GitHubAllowedOrg
+	GitHubAllowedUsers []string // GitHub logins
+	SessionTTL         time.Duration
+}
+
+// GitHubLoginEnabled reports whether people can sign in with GitHub
+func (c *Config) GitHubLoginEnabled() bool {
+	return c.GitHubClientID != ""
 }
 
 // Load loads configuration from environment variables
@@ -93,6 +113,31 @@ func Load() (*Config, error) {
 		UITrustedOrigins:      splitList(getEnv("UI_TRUSTED_ORIGINS", "")),
 		UIListenAddr:          getEnv("UI_LISTEN_ADDR", ""),
 		UIPublicURL:           getEnv("UI_PUBLIC_URL", ""),
+		GitHubClientID:        getEnv("GITHUB_CLIENT_ID", ""),
+		GitHubClientSecret:    getEnv("GITHUB_CLIENT_SECRET", ""),
+		GitHubURL:             strings.TrimRight(getEnv("GITHUB_URL", "https://github.com"), "/"),
+		GitHubAPIURL:          strings.TrimRight(getEnv("GITHUB_API_URL", ""), "/"),
+		GitHubAllowedOrg:      getEnv("GITHUB_ALLOWED_ORG", ""),
+		GitHubAllowedTeam:     getEnv("GITHUB_ALLOWED_TEAM", ""),
+		GitHubAllowedUsers:    splitList(getEnv("GITHUB_ALLOWED_USERS", "")),
+	}
+
+	ttl, err := time.ParseDuration(getEnv("SESSION_TTL", "12h"))
+	if err != nil || ttl <= 0 {
+		return nil, fmt.Errorf("SESSION_TTL must be a positive duration such as 12h")
+	}
+	cfg.SessionTTL = ttl
+
+	if cfg.GitHubAPIURL == "" {
+		if cfg.GitHubURL == "https://github.com" {
+			cfg.GitHubAPIURL = "https://api.github.com"
+		} else {
+			cfg.GitHubAPIURL = cfg.GitHubURL + "/api/v3"
+		}
+	}
+
+	if err := cfg.validateGitHubLogin(); err != nil {
+		return nil, err
 	}
 
 	// Validate required fields
@@ -109,6 +154,27 @@ func Load() (*Config, error) {
 	}
 
 	return cfg, nil
+}
+
+// validateGitHubLogin checks the GitHub login settings. Anyone has a GitHub
+// account, so login without a restriction to an org or users is refused.
+func (c *Config) validateGitHubLogin() error {
+	if !c.GitHubLoginEnabled() {
+		return nil
+	}
+	if c.GitHubClientSecret == "" {
+		return fmt.Errorf("GITHUB_CLIENT_SECRET is required with GITHUB_CLIENT_ID")
+	}
+	if c.GitHubAllowedOrg == "" && len(c.GitHubAllowedUsers) == 0 {
+		return fmt.Errorf("GITHUB_ALLOWED_ORG or GITHUB_ALLOWED_USERS is required with GITHUB_CLIENT_ID")
+	}
+	if c.GitHubAllowedTeam != "" && c.GitHubAllowedOrg == "" {
+		return fmt.Errorf("GITHUB_ALLOWED_TEAM needs GITHUB_ALLOWED_ORG")
+	}
+	if c.UIUserHeader != "" {
+		return fmt.Errorf("UI_USER_HEADER and GITHUB_CLIENT_ID can't both be set: the web UI either trusts a proxy or signs people in with GitHub")
+	}
+	return nil
 }
 
 // splitList splits a comma-separated list, dropping empty entries

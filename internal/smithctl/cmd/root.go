@@ -1,7 +1,10 @@
 package cmd
 
 import (
+	"fmt"
+
 	"github.com/sorenmh/deploysmith/internal/shared/config"
+	"github.com/sorenmh/deploysmith/internal/smithctl/client"
 	"github.com/spf13/cobra"
 )
 
@@ -24,13 +27,16 @@ It allows you to:
 Configuration:
   Environment variables:
     SMITHD_URL          - smithd API endpoint (required)
-    SMITHD_API_KEY      - smithd API authentication key (required)
+    SMITHD_API_KEY      - smithd API authentication key (unless logged in)
 
   Config file (~/.deploysmith/config.yaml):
     url: https://smithd.example.com
     apiKey: sk_live_abc123
 
   CLI flags override environment variables and config file.
+
+  Or log in with GitHub, if smithd has it configured: smithctl login. The
+  session (~/.deploysmith/sessions.json) is then used instead of the API key.
 
 Example usage:
   smithctl app register my-api-service
@@ -65,7 +71,23 @@ func GetOutputFormat() string {
 	return outputFormat
 }
 
-// ValidateConfig validates that required configuration is present
+// ValidateConfig validates that required configuration is present: the
+// URL, and a session from `smithctl login` or an API key
 func ValidateConfig() error {
-	return config.ValidateConfig()
+	if err := config.ValidateURL(); err != nil {
+		return err
+	}
+	if config.GetSessionToken() != "" {
+		return nil
+	}
+	if err := config.ValidateConfig(); err != nil {
+		return fmt.Errorf("%w, or log in with `smithctl login`", err)
+	}
+	return nil
+}
+
+// newClient returns a smithd client that authenticates as the logged-in
+// user if there is a session, else with the API key
+func newClient() *client.Client {
+	return client.NewClient(GetSmithdURL(), GetSmithdAPIKey()).WithSessionToken(config.GetSessionToken())
 }

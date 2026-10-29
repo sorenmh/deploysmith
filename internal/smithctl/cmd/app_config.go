@@ -6,7 +6,6 @@ import (
 	"os"
 	"path/filepath"
 
-	"github.com/sorenmh/deploysmith/internal/smithctl/client"
 	"gopkg.in/yaml.v3"
 )
 
@@ -112,7 +111,7 @@ func ResolveAppID(appIdentifier string) (string, string, error) {
 		}
 
 		// If not found in config files, treat as app name and resolve via API
-		c := client.NewClient(GetSmithdURL(), GetSmithdAPIKey())
+		c := newClient()
 		appID, err := c.GetAppIDByName(appIdentifier)
 		if err != nil {
 			return "", "", fmt.Errorf("failed to resolve app '%s': %w", appIdentifier, err)
