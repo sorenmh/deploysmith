@@ -51,6 +51,40 @@ jobs:
             docker push ghcr.io/sorenmh/$image:$version
           done
 
+  tf-runner:
+    # tofu-controller runner, one image per supported OpenTofu version (exact
+    # versions; smithd maps a bundle's pinned version to the tag). Built on every
+    # push and PR, pushed from master only. Tags: <controller>-tofu<version>, plus
+    # an immutable one with the commit for pinning.
+    runs-on: ubuntu-26.04
+    needs: [lint, test]
+    strategy:
+      matrix:
+        tofu: ["1.12.9", "1.13.2"]
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Build
+        run: make docker-build-tf-runner TOFU_VERSION=${{ matrix.tofu }}
+      - name: Log in to ghcr.io
+        if: github.event_name == 'push' && github.ref == 'refs/heads/master'
+        uses: docker/login-action@81c6f93d4bc991e510b342a00b419b3bb4efc5c6 # v4.7.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Push
+        if: github.event_name == 'push' && github.ref == 'refs/heads/master'
+        run: |
+          image="ghcr.io/sorenmh/deploysmith-tf-runner"
+          tag="$(make -s print-tf-runner-tag TOFU_VERSION=${{ matrix.tofu }})"
+          short="$(echo "${{ github.sha }}" | cut -c1-7)"
+          docker tag "$image:$tag" "$image:$tag-$short-${{ github.run_number }}"
+          docker push "$image:$tag"
+          docker push "$image:$tag-$short-${{ github.run_number }}"
+
   release:
     # Tagged releases: GitHub release with binaries, and the vX.Y.Z / latest images.
     if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
