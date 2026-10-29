@@ -59,7 +59,7 @@ func TestDeploymentsAPI(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	version, err := s.versionStore.Create(app.ID, "v1.2.3", models.VersionMetadata{Timestamp: time.Now().UTC().Format(time.RFC3339)})
+	version, err := s.versionStore.Create(app.ID, "v1.2.3", "", models.VersionMetadata{Timestamp: time.Now().UTC().Format(time.RFC3339)})
 	if err != nil {
 		t.Fatal(err)
 	}

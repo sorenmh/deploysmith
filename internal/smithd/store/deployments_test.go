@@ -18,7 +18,7 @@ func TestClaimStaleDeployment(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	version, err := NewVersionStore(database).Create(app.ID, "v1", models.VersionMetadata{Timestamp: time.Now().UTC().Format(time.RFC3339)})
+	version, err := NewVersionStore(database).Create(app.ID, "v1", "", models.VersionMetadata{Timestamp: time.Now().UTC().Format(time.RFC3339)})
 	if err != nil {
 		t.Fatal(err)
 	}

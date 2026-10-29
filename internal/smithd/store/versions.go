@@ -20,8 +20,13 @@ func NewVersionStore(db *db.DB) *VersionStore {
 	return &VersionStore{db: db}
 }
 
-// Create creates a new version in draft status
-func (s *VersionStore) Create(appID, versionID string, metadata models.VersionMetadata) (*models.Version, error) {
+// Create creates a new version in draft status. An empty artifactType means
+// manifests.
+func (s *VersionStore) Create(appID, versionID, artifactType string, metadata models.VersionMetadata) (*models.Version, error) {
+	if artifactType == "" {
+		artifactType = models.ArtifactManifests
+	}
+
 	// Parse metadata timestamp
 	metadataTimestamp, err := time.Parse(time.RFC3339, metadata.Timestamp)
 	if err != nil {
@@ -33,6 +38,7 @@ func (s *VersionStore) Create(appID, versionID string, metadata models.VersionMe
 		AppID:             appID,
 		VersionID:         versionID,
 		Status:            "draft",
+		ArtifactType:      artifactType,
 		GitSHA:            metadata.GitSHA,
 		GitBranch:         NormalizeBranch(metadata.GitBranch),
 		GitCommitter:      metadata.GitCommitter,
@@ -42,9 +48,9 @@ func (s *VersionStore) Create(appID, versionID string, metadata models.VersionMe
 	}
 
 	_, err = s.db.Exec(`
-		INSERT INTO versions (id, app_id, version_id, status, git_sha, git_branch, git_committer, build_number, metadata_timestamp, created_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-	`, version.ID, version.AppID, version.VersionID, version.Status, version.GitSHA, version.GitBranch, version.GitCommitter, version.BuildNumber, version.MetadataTimestamp, version.CreatedAt)
+		INSERT INTO versions (id, app_id, version_id, status, artifact_type, git_sha, git_branch, git_committer, build_number, metadata_timestamp, created_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+	`, version.ID, version.AppID, version.VersionID, version.Status, version.ArtifactType, version.GitSHA, version.GitBranch, version.GitCommitter, version.BuildNumber, version.MetadataTimestamp, version.CreatedAt)
 
 	if err != nil {
 		return nil, fmt.Errorf("failed to create version: %w", err)
@@ -59,10 +65,10 @@ func (s *VersionStore) GetByID(id string) (*models.Version, error) {
 	var publishedAt sql.NullTime
 
 	err := s.db.QueryRow(`
-		SELECT id, app_id, version_id, status, git_sha, git_branch, git_committer, build_number, metadata_timestamp, created_at, published_at
+		SELECT id, app_id, version_id, status, artifact_type, git_sha, git_branch, git_committer, build_number, metadata_timestamp, created_at, published_at
 		FROM versions
 		WHERE id = ?
-	`, id).Scan(&version.ID, &version.AppID, &version.VersionID, &version.Status, &version.GitSHA, &version.GitBranch, &version.GitCommitter, &version.BuildNumber, &version.MetadataTimestamp, &version.CreatedAt, &publishedAt)
+	`, id).Scan(&version.ID, &version.AppID, &version.VersionID, &version.Status, &version.ArtifactType, &version.GitSHA, &version.GitBranch, &version.GitCommitter, &version.BuildNumber, &version.MetadataTimestamp, &version.CreatedAt, &publishedAt)
 
 	if err == sql.ErrNoRows {
 		return nil, fmt.Errorf("version not found")
@@ -84,10 +90,10 @@ func (s *VersionStore) GetByVersionID(appID, versionID string) (*models.Version,
 	var publishedAt sql.NullTime
 
 	err := s.db.QueryRow(`
-		SELECT id, app_id, version_id, status, git_sha, git_branch, git_committer, build_number, metadata_timestamp, created_at, published_at
+		SELECT id, app_id, version_id, status, artifact_type, git_sha, git_branch, git_committer, build_number, metadata_timestamp, created_at, published_at
 		FROM versions
 		WHERE app_id = ? AND version_id = ?
-	`, appID, versionID).Scan(&version.ID, &version.AppID, &version.VersionID, &version.Status, &version.GitSHA, &version.GitBranch, &version.GitCommitter, &version.BuildNumber, &version.MetadataTimestamp, &version.CreatedAt, &publishedAt)
+	`, appID, versionID).Scan(&version.ID, &version.AppID, &version.VersionID, &version.Status, &version.ArtifactType, &version.GitSHA, &version.GitBranch, &version.GitCommitter, &version.BuildNumber, &version.MetadataTimestamp, &version.CreatedAt, &publishedAt)
 
 	if err == sql.ErrNoRows {
 		return nil, fmt.Errorf("version not found")
@@ -137,7 +143,7 @@ func (s *VersionStore) List(appID string, limit, offset int) ([]models.Version, 
 
 	// Get versions
 	rows, err := s.db.Query(`
-		SELECT id, app_id, version_id, status, git_sha, git_branch, git_committer, build_number, metadata_timestamp, created_at, published_at
+		SELECT id, app_id, version_id, status, artifact_type, git_sha, git_branch, git_committer, build_number, metadata_timestamp, created_at, published_at
 		FROM versions
 		WHERE app_id = ?
 		ORDER BY created_at DESC
@@ -153,7 +159,7 @@ func (s *VersionStore) List(appID string, limit, offset int) ([]models.Version, 
 		var version models.Version
 		var publishedAt sql.NullTime
 
-		err := rows.Scan(&version.ID, &version.AppID, &version.VersionID, &version.Status, &version.GitSHA, &version.GitBranch, &version.GitCommitter, &version.BuildNumber, &version.MetadataTimestamp, &version.CreatedAt, &publishedAt)
+		err := rows.Scan(&version.ID, &version.AppID, &version.VersionID, &version.Status, &version.ArtifactType, &version.GitSHA, &version.GitBranch, &version.GitCommitter, &version.BuildNumber, &version.MetadataTimestamp, &version.CreatedAt, &publishedAt)
 		if err != nil {
 			return nil, 0, fmt.Errorf("failed to scan version: %w", err)
 		}

@@ -6,23 +6,27 @@ import (
 	"compress/gzip"
 	"fmt"
 	"io"
+	"maps"
 	"net/http"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"time"
 
+	"github.com/sorenmh/deploysmith/internal/shared/tfbundle"
 	"github.com/spf13/cobra"
 	"gopkg.in/yaml.v3"
 )
 
 var (
 	uploadURLOverride string
+	uploadTerraform   string
 )
 
 var uploadCmd = &cobra.Command{
 	Use:   "upload [files or directory]",
-	Short: "Upload manifest files to S3",
+	Short: "Upload manifest files or a terraform bundle to S3",
 	Long: `Upload manifest YAML files to S3 using the presigned URL from forge init.
 
 You can upload a directory:
@@ -31,7 +35,15 @@ You can upload a directory:
 Or specific files:
   forge upload deployment.yaml service.yaml
 
-If version.yml is not present, it will be auto-generated.`,
+If version.yml is not present, it will be auto-generated.
+
+For a version initialized with --artifact-type terraform, upload the
+OpenTofu root module instead. forge packs its *.tf files, the
+.terraform.lock.hcl lock file and env/<env>.tfvars, after checking that
+the lock file is there, the OpenTofu version is pinned with an exact
+required_version, the backend block is empty and there are no state files
+or automatically loaded tfvars:
+  forge upload --terraform infra/`,
 	RunE: runUpload,
 }
 
@@ -39,21 +51,27 @@ func init() {
 	rootCmd.AddCommand(uploadCmd)
 
 	uploadCmd.Flags().StringVar(&uploadURLOverride, "upload-url", "", "Override upload URL (otherwise reads from .forge/upload-url)")
+	uploadCmd.Flags().StringVar(&uploadTerraform, "terraform", "", "Upload the OpenTofu root module in this directory as a terraform bundle")
 }
 
 func runUpload(cmd *cobra.Command, args []string) error {
+	if uploadTerraform != "" {
+		if len(args) > 0 {
+			return fmt.Errorf("--terraform uploads one directory; do not pass files as well")
+		}
+		return runUploadTerraform(uploadTerraform)
+	}
+
 	if len(args) == 0 {
 		return fmt.Errorf("no files or directory specified")
 	}
 
-	// Get upload URL
-	uploadURL := uploadURLOverride
-	if uploadURL == "" {
-		data, err := os.ReadFile(".forge/upload-url")
-		if err != nil {
-			return fmt.Errorf("failed to read upload URL from .forge/upload-url: %w\nDid you run 'forge init' first?", err)
-		}
-		uploadURL = strings.TrimSpace(string(data))
+	uploadURL, err := resolveUploadURL()
+	if err != nil {
+		return err
+	}
+	if err := checkArtifactType("manifests"); err != nil {
+		return err
 	}
 
 	// Collect files to upload
@@ -180,6 +198,88 @@ func runUpload(cmd *cobra.Command, args []string) error {
 
 	fmt.Printf("\nUploaded %d files (%.1f KB) as archive (%.1f KB) in %.1fs\n", fileCount, float64(totalSize)/1024, float64(archiveSize)/1024, duration.Seconds())
 	return nil
+}
+
+// runUploadTerraform validates, packs and uploads the bundle rooted at dir
+func runUploadTerraform(dir string) error {
+	uploadURL, err := resolveUploadURL()
+	if err != nil {
+		return err
+	}
+	if err := checkArtifactType(tfbundle.ArtifactType); err != nil {
+		return err
+	}
+
+	fmt.Printf("Creating terraform bundle from %s...\n", dir)
+	startTime := time.Now()
+
+	files, err := tfbundle.Collect(dir)
+	if err != nil {
+		return err
+	}
+	bundle, err := tfbundle.Validate(files)
+	if err != nil {
+		return err
+	}
+
+	totalSize := 0
+	for _, name := range slices.Sorted(maps.Keys(bundle.Files)) {
+		size := len(bundle.Files[name])
+		totalSize += size
+		fmt.Printf("  ✓ %s (%.1f KB)\n", name, float64(size)/1024)
+	}
+	environments := "none"
+	if len(bundle.Environments) > 0 {
+		environments = strings.Join(bundle.Environments, ", ")
+	}
+	fmt.Printf("OpenTofu %s, environments: %s\n", bundle.OpenTofuVersion, environments)
+
+	archive, err := tfbundle.Pack(bundle.Files)
+	if err != nil {
+		return err
+	}
+
+	fmt.Println("Uploading terraform bundle...")
+	if err := uploadContent(uploadURL, tfbundle.ArchiveName, archive); err != nil {
+		return fmt.Errorf("failed to upload bundle: %w", err)
+	}
+
+	fmt.Printf("\nUploaded %d files (%.1f KB) as archive (%.1f KB) in %.1fs\n", len(bundle.Files), float64(totalSize)/1024, float64(len(archive))/1024, time.Since(startTime).Seconds())
+	return nil
+}
+
+// resolveUploadURL returns the --upload-url flag or the URL saved by forge init
+func resolveUploadURL() (string, error) {
+	if uploadURLOverride != "" {
+		return uploadURLOverride, nil
+	}
+	data, err := os.ReadFile(".forge/upload-url")
+	if err != nil {
+		return "", fmt.Errorf("failed to read upload URL from .forge/upload-url: %w\nDid you run 'forge init' first?", err)
+	}
+	return strings.TrimSpace(string(data)), nil
+}
+
+// checkArtifactType fails if forge init created the draft for a different
+// artifact type than the one being uploaded. Without version info (e.g. with
+// --upload-url) there is nothing to check; smithd validates on publish.
+func checkArtifactType(uploading string) error {
+	versionInfo, err := LoadVersionInfo()
+	if err != nil {
+		return nil
+	}
+	initialized := versionInfo.ArtifactType
+	if initialized == "" {
+		initialized = "manifests"
+	}
+	switch initialized {
+	case uploading:
+		return nil
+	case tfbundle.ArtifactType:
+		return fmt.Errorf("version %s was initialized for a terraform bundle; upload it with 'forge upload --terraform <dir>'", versionInfo.Version)
+	default:
+		return fmt.Errorf("version %s was initialized for %s; run 'forge init --artifact-type %s' to upload a terraform bundle", versionInfo.Version, initialized, uploading)
+	}
 }
 
 func validateYAML(filePath string) error {
