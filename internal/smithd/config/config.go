@@ -61,6 +61,9 @@ type Config struct {
 	// UIPublicURL is where users reach the UI, e.g. https://smithui.example.com,
 	// used to link to deployments from Slack messages
 	UIPublicURL string
+
+	// GitHubApp reports deployments as check runs on GitHub (optional)
+	GitHubApp GitHubAppConfig
 }
 
 // Load loads configuration from environment variables
@@ -94,6 +97,12 @@ func Load() (*Config, error) {
 		UIListenAddr:          getEnv("UI_LISTEN_ADDR", ""),
 		UIPublicURL:           getEnv("UI_PUBLIC_URL", ""),
 	}
+
+	githubApp, err := loadGitHubApp()
+	if err != nil {
+		return nil, err
+	}
+	cfg.GitHubApp = githubApp
 
 	// Validate required fields
 	if len(cfg.APIKeys) == 0 || cfg.APIKeys[0] == "" {
