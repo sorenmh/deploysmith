@@ -223,7 +223,7 @@ func (a *App) do(ctx context.Context, method, path, token string, body, out any)
 	if err != nil {
 		return err
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode >= 300 {
 		var msg struct {
