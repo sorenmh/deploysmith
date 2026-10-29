@@ -16,6 +16,7 @@ import (
 type Client struct {
 	baseURL string
 	apiKey  string
+	token   string // session token from `smithctl login`; used instead of apiKey
 	client  *http.Client
 }
 
@@ -28,6 +29,23 @@ func NewClient(baseURL, apiKey string) *Client {
 			Timeout: 30 * time.Second,
 		},
 	}
+}
+
+// WithSessionToken makes the client authenticate as the signed-in user,
+// instead of with the API key; an empty token keeps the API key
+func (c *Client) WithSessionToken(token string) *Client {
+	c.token = token
+	return c
+}
+
+// setAuth authenticates a request with the session token if there is one,
+// else with the API key
+func (c *Client) setAuth(req *http.Request) {
+	if c.token != "" {
+		req.Header.Set("Authorization", "Bearer "+c.token)
+		return
+	}
+	req.Header.Set("X-API-Key", c.apiKey)
 }
 
 // joinURL safely joins a base URL with a path, handling trailing slashes
@@ -135,7 +153,7 @@ func (c *Client) RegisterApplication(req RegisterApplicationRequest) (*Applicati
 	}
 
 	httpReq.Header.Set("Content-Type", "application/json")
-	httpReq.Header.Set("X-API-Key", c.apiKey)
+	c.setAuth(httpReq)
 
 	resp, err := c.client.Do(httpReq)
 	if err != nil {
@@ -183,7 +201,7 @@ func (c *Client) ListApplications(limit, offset int) (*ListApplicationsResponse,
 		return nil, fmt.Errorf("failed to create request: %w", err)
 	}
 
-	httpReq.Header.Set("X-API-Key", c.apiKey)
+	c.setAuth(httpReq)
 
 	resp, err := c.client.Do(httpReq)
 	if err != nil {
@@ -249,7 +267,7 @@ func (c *Client) GetApplication(appNameOrID string) (*Application, error) {
 		return nil, fmt.Errorf("failed to create request: %w", err)
 	}
 
-	httpReq.Header.Set("X-API-Key", c.apiKey)
+	c.setAuth(httpReq)
 
 	resp, err := c.client.Do(httpReq)
 	if err != nil {
@@ -306,7 +324,7 @@ func (c *Client) ListVersions(appNameOrID, status string, limit, offset int) (*L
 		return nil, fmt.Errorf("failed to create request: %w", err)
 	}
 
-	httpReq.Header.Set("X-API-Key", c.apiKey)
+	c.setAuth(httpReq)
 
 	resp, err := c.client.Do(httpReq)
 	if err != nil {
@@ -342,7 +360,7 @@ func (c *Client) GetVersion(appNameOrID, versionID string) (*Version, error) {
 		return nil, fmt.Errorf("failed to create request: %w", err)
 	}
 
-	httpReq.Header.Set("X-API-Key", c.apiKey)
+	c.setAuth(httpReq)
 
 	resp, err := c.client.Do(httpReq)
 	if err != nil {
@@ -412,7 +430,7 @@ func (c *Client) DeployVersion(appNameOrID, versionID, environment string) (*Dep
 	}
 
 	httpReq.Header.Set("Content-Type", "application/json")
-	httpReq.Header.Set("X-API-Key", c.apiKey)
+	c.setAuth(httpReq)
 
 	resp, err := c.client.Do(httpReq)
 	if err != nil {
@@ -462,7 +480,7 @@ func (c *Client) CreatePolicy(appNameOrID string, req CreatePolicyRequest) (*Pol
 	}
 
 	httpReq.Header.Set("Content-Type", "application/json")
-	httpReq.Header.Set("X-API-Key", c.apiKey)
+	c.setAuth(httpReq)
 
 	resp, err := c.client.Do(httpReq)
 	if err != nil {
@@ -503,7 +521,7 @@ func (c *Client) ListPolicies(appNameOrID string) (*ListPoliciesResponse, error)
 		return nil, fmt.Errorf("failed to create request: %w", err)
 	}
 
-	httpReq.Header.Set("X-API-Key", c.apiKey)
+	c.setAuth(httpReq)
 
 	resp, err := c.client.Do(httpReq)
 	if err != nil {
@@ -539,7 +557,7 @@ func (c *Client) DeletePolicy(appNameOrID, policyID string) error {
 		return fmt.Errorf("failed to create request: %w", err)
 	}
 
-	httpReq.Header.Set("X-API-Key", c.apiKey)
+	c.setAuth(httpReq)
 
 	resp, err := c.client.Do(httpReq)
 	if err != nil {
@@ -572,7 +590,7 @@ func (c *Client) CreateEnvironment(req CreateEnvironmentRequest) (*Environment, 
 	}
 
 	httpReq.Header.Set("Content-Type", "application/json")
-	httpReq.Header.Set("X-API-Key", c.apiKey)
+	c.setAuth(httpReq)
 
 	resp, err := c.client.Do(httpReq)
 	if err != nil {
@@ -602,7 +620,7 @@ func (c *Client) ListEnvironments() (*ListEnvironmentsResponse, error) {
 		return nil, fmt.Errorf("failed to create request: %w", err)
 	}
 
-	httpReq.Header.Set("X-API-Key", c.apiKey)
+	c.setAuth(httpReq)
 
 	resp, err := c.client.Do(httpReq)
 	if err != nil {
@@ -632,7 +650,7 @@ func (c *Client) GetEnvironment(environmentID string) (*Environment, error) {
 		return nil, fmt.Errorf("failed to create request: %w", err)
 	}
 
-	httpReq.Header.Set("X-API-Key", c.apiKey)
+	c.setAuth(httpReq)
 
 	resp, err := c.client.Do(httpReq)
 	if err != nil {
@@ -668,7 +686,7 @@ func (c *Client) UpdateEnvironment(environmentID string, req UpdateEnvironmentRe
 	}
 
 	httpReq.Header.Set("Content-Type", "application/json")
-	httpReq.Header.Set("X-API-Key", c.apiKey)
+	c.setAuth(httpReq)
 
 	resp, err := c.client.Do(httpReq)
 	if err != nil {
@@ -700,7 +718,7 @@ func (c *Client) ExportDB() ([]byte, error) {
 		return nil, fmt.Errorf("failed to create request: %w", err)
 	}
 
-	httpReq.Header.Set("X-API-Key", c.apiKey)
+	c.setAuth(httpReq)
 
 	resp, err := c.client.Do(httpReq)
 	if err != nil {
@@ -731,7 +749,7 @@ func (c *Client) ImportDB(data []byte) error {
 	}
 
 	httpReq.Header.Set("Content-Type", "application/json")
-	httpReq.Header.Set("X-API-Key", c.apiKey)
+	c.setAuth(httpReq)
 
 	resp, err := c.client.Do(httpReq)
 	if err != nil {
@@ -756,7 +774,7 @@ func (c *Client) DeleteEnvironment(environmentID string) error {
 		return fmt.Errorf("failed to create request: %w", err)
 	}
 
-	httpReq.Header.Set("X-API-Key", c.apiKey)
+	c.setAuth(httpReq)
 
 	resp, err := c.client.Do(httpReq)
 	if err != nil {

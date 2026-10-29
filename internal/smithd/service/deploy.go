@@ -199,6 +199,16 @@ func (s *Service) isRollback(deployment *models.Deployment, version *models.Vers
 	return version.CreatedAt.Before(previous.CreatedAt)
 }
 
+// requireDeployable returns an error for versions smithd cannot deploy yet:
+// terraform bundles, which are stored but not deployed until smithd can
+// commit them to the gitops repo for a controller to plan and apply
+func requireDeployable(version *models.Version) error {
+	if version.ArtifactType == models.ArtifactTerraform {
+		return invalid("unsupported_artifact_type", fmt.Sprintf("Version %s is a terraform bundle; deploying terraform versions is not supported yet", version.VersionID))
+	}
+	return nil
+}
+
 // deployCtx adds a deployment's identifying fields to the log context
 func deployCtx(ctx context.Context, appName string, version *models.Version, environment, policyName string) context.Context {
 	fields := []logging.AttrProvider{

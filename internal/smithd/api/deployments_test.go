@@ -22,6 +22,7 @@ func newStoreTestServer(t *testing.T) *Server {
 	database := dbtest.Open(t)
 
 	s := &Server{
+		db:               database,
 		appStore:         store.NewApplicationStore(database),
 		versionStore:     store.NewVersionStore(database),
 		deploymentStore:  store.NewDeploymentStore(database),

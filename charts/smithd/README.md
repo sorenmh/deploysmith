@@ -189,13 +189,63 @@ ingress:
         - smithd.example.com
 ```
 
+#### Login with GitHub
+
+smithd can sign people in with GitHub itself: `smithctl login` (device flow)
+and the web UI (GitHub's sign-in page), with short-lived smithd sessions, and
+deployments record who started them. API keys keep working for CI. This is
+the simplest way to serve the web UI: no proxy is needed, it is served at
+`/ui` on the main ingress and requires signing in.
+
+1. Create a GitHub App with **Enable Device Flow** checked and the callback
+   URL `https://smithd.example.com/ui/auth/callback`; with an organization
+   restriction, give it **Members: Read-only** and install it on the
+   organization. Step by step (and the OAuth App alternative) in
+   [docs/login-with-github.md](../../docs/login-with-github.md).
+
+2. Configure it:
+
+   ```yaml
+   ingress:
+     enabled: true
+     hosts:
+       - host: smithd.example.com
+         paths:
+           - path: /
+             pathType: Prefix
+     tls:
+       - secretName: smithd-tls
+         hosts:
+           - smithd.example.com
+
+   config:
+     ui:
+       publicUrl: https://smithd.example.com   # gives the callback URL
+     github:
+       clientId: Iv23liExample
+       allowedOrg: acme              # and/or allowedUsers: octocat,hubot
+       allowedTeam: deployers        # optional
+       sessionTtl: 12h
+
+   secrets:
+     github:
+       clientSecret: <client secret>   # or github-client-secret in existingSecret
+   ```
+
+3. `smithctl login --url https://smithd.example.com`, or open
+   `https://smithd.example.com/ui`.
+
+Don't combine it with `uiProxy`, `uiIngress` or `config.ui.userHeader`; the
+chart refuses to.
+
 #### Web UI with oauth2-proxy
 
 smithd can serve a web UI for viewing what runs where, deploying and rolling
-back versions, and managing auto-deploy policies and environments. smithd does
-not handle logins itself: it trusts a header naming the user, set by an
-authenticating proxy, [oauth2-proxy](https://oauth2-proxy.github.io/oauth2-proxy/).
-The chart supports two setups.
+back versions, and managing auto-deploy policies and environments. Instead of
+signing people in with GitHub itself (above), smithd can trust a header naming
+the user, set by an authenticating proxy,
+[oauth2-proxy](https://oauth2-proxy.github.io/oauth2-proxy/). The chart
+supports two setups.
 
 ##### Sidecar on its own host (any ingress controller, recommended)
 
@@ -552,7 +602,7 @@ kubectl exec -it <pod-name> -- ls -la /app/.ssh/
 
 ## Security Considerations
 
-1. **API Keys**: Use strong, randomly generated keys
+1. **API Keys**: Use strong, randomly generated keys; give people login with GitHub instead of a shared key
 2. **Secrets Management**: Consider using external secret managers (AWS Secrets Manager, HashiCorp Vault)
 3. **Network Policies**: Restrict network access to smithd
 4. **Pod Security**: Run as non-root user (default)
