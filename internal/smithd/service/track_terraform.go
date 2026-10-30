@@ -65,6 +65,7 @@ func (s *Service) pollTerraform(ctx context.Context) {
 	for i := range deployments {
 		s.trackTerraformRun(ctx, &deployments[i])
 	}
+	s.pollPlanRuns(ctx)
 }
 
 // trackedRun is a terraform deployment being followed
@@ -397,15 +398,22 @@ func (r *trackedRun) applied(message string) {
 // condition and the events of the CR. The runner pod, and with it its log,
 // is deleted after each run.
 func (r *trackedRun) failRun(stage string, run *terraform.Run) {
+	r.fail(stage, r.s.terraformFailure(r.ctx, r.namespace, r.cr, run))
+}
+
+// terraformFailure describes why a run of a Terraform CR failed, as the
+// controller reports it: the Ready condition and the warning events of the
+// CR
+func (s *Service) terraformFailure(ctx context.Context, namespace, cr string, run *terraform.Run) string {
 	ready := run.Condition(terraform.ConditionReady)
 	message := ready.Message
 	if ready.Reason != "" {
 		message = ready.Reason + ": " + ready.Message
 	}
 
-	runEvents, err := r.s.TerraformReader.Events(r.ctx, r.namespace, r.cr)
+	runEvents, err := s.TerraformReader.Events(ctx, namespace, cr)
 	if err != nil {
-		logging.LogWarnCtx(r.ctx, "Failed to read the events of the CR: "+err.Error())
+		logging.LogWarnCtx(ctx, "Failed to read the events of the CR: "+err.Error())
 	}
 	var lines []string
 	for _, event := range runEvents {
@@ -420,7 +428,7 @@ func (r *trackedRun) failRun(stage string, run *terraform.Run) {
 	if len(lines) > 0 {
 		message += "\n\nEvents of the Terraform CR:\n" + strings.Join(lines, "\n")
 	}
-	r.fail(stage, message)
+	return message
 }
 
 // fail finishes the deployment as failed and reports it

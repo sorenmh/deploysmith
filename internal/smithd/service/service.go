@@ -5,6 +5,7 @@ package service
 
 import (
 	"context"
+	"sync"
 	"time"
 
 	"github.com/sorenmh/deploysmith/internal/smithd/events"
@@ -73,11 +74,23 @@ type Deps struct {
 	// are not followed while it is nil, i.e. outside a cluster.
 	TerraformPlans  *store.TerraformPlanStore
 	TerraformReader *terraform.Reader
+
+	// Plan-only runs (DEP-22): PlanRuns holds them and TerraformPlansGitops
+	// writes them to the plans branch. Without either they are off.
+	// TerraformAutoPlan starts one for every environment when a terraform
+	// version is published.
+	PlanRuns             *store.PlanRunStore
+	TerraformPlansGitops TerraformPlansGitops
+	TerraformAutoPlan    bool
 }
 
 // Service implements smithd's operations
 type Service struct {
 	Deps
+
+	// planSweepAt is when the plans branch was last swept for leftovers
+	planSweepMu sync.Mutex
+	planSweepAt time.Time
 }
 
 // New creates a Service

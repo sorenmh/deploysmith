@@ -3,6 +3,7 @@ package config
 import (
 	"fmt"
 	"os"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -108,6 +109,14 @@ type Config struct {
 	// its read-only deploy key ("none" for no Secret)
 	TerraformSourceURL    string
 	TerraformSourceSecret string
+	// TerraformPlansBranch is the branch of the gitops repository that holds
+	// the plan-only runs (DEP-22), with its own Flux GitRepository and
+	// Kustomization; smithd creates it if it is missing. Plan-only runs
+	// never touch the main branch.
+	TerraformPlansBranch string
+	// TerraformAutoPlan starts a plan-only run of every terraform version
+	// when it is published, for each environment with Terraform enabled
+	TerraformAutoPlan bool
 
 	// smithd's own namespace and ServiceAccount, which may read the plans
 	// in the runner namespaces
@@ -200,11 +209,15 @@ func Load() (*Config, error) {
 	cfg.OpenBaoRunnerAuthMount = getEnv("OPENBAO_RUNNER_AUTH_MOUNT", cfg.OpenBaoAuthMount)
 	cfg.SmithdNamespace = getEnv("SMITHD_NAMESPACE", podNamespace())
 	cfg.TerraformSourceURL = getEnv("TERRAFORM_SOURCE_URL", sshURL(cfg.GitopsRepo))
+	cfg.TerraformPlansBranch = getEnv("TERRAFORM_PLANS_BRANCH", "plans")
 	if cfg.TerraformSourceSecret == "none" {
 		cfg.TerraformSourceSecret = ""
 	}
 
 	var err error
+	if cfg.TerraformAutoPlan, err = getBool("TERRAFORM_AUTO_PLAN", true); err != nil {
+		return nil, err
+	}
 	if cfg.TerraformRunnerImages, err = parseRunnerImages(getEnv("TERRAFORM_RUNNER_IMAGES", "")); err != nil {
 		return nil, err
 	}
@@ -340,6 +353,18 @@ func getDuration(key string, defaultValue time.Duration) (time.Duration, error) 
 		return 0, fmt.Errorf("%s must be a positive duration such as 2h, got %q", key, value)
 	}
 	return d, nil
+}
+
+func getBool(key string, defaultValue bool) (bool, error) {
+	value := os.Getenv(key)
+	if value == "" {
+		return defaultValue, nil
+	}
+	b, err := strconv.ParseBool(value)
+	if err != nil {
+		return false, fmt.Errorf("%s must be true or false, got %q", key, value)
+	}
+	return b, nil
 }
 
 func getEnv(key, defaultValue string) string {
