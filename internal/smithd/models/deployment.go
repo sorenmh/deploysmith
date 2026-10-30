@@ -50,6 +50,22 @@ type TerraformRun struct {
 	// PlanID is the id tofu-controller gives the plan of that commit
 	// (status.plan.pending), e.g. plan-main-8fa3d36e98
 	PlanID string `json:"planId,omitempty"`
+	// Rollback is true if the version is older than the one that was applied
+	// when the deployment was made. It is a normal deploy with a new plan.
+	Rollback bool `json:"rollback,omitempty"`
+	// ApprovedBy is who approved the plan (a GitHub login, "api-key", or
+	// "git" for an approval committed outside smithd) and ApprovedAt when.
+	// DestroyConfirmed is true if the approval confirmed a plan with
+	// destroys. ApprovalResetAt is when smithd committed approvePlan: ""
+	// again after the apply.
+	ApprovedBy       string     `json:"approvedBy,omitempty"`
+	ApprovedAt       *time.Time `json:"approvedAt,omitempty"`
+	DestroyConfirmed bool       `json:"destroyConfirmed,omitempty"`
+	ApprovalResetAt  *time.Time `json:"approvalResetAt,omitempty"`
+	// RejectedBy, RejectedAt and RejectReason are set for a rejected plan
+	RejectedBy   string     `json:"rejectedBy,omitempty"`
+	RejectedAt   *time.Time `json:"rejectedAt,omitempty"`
+	RejectReason string     `json:"rejectReason,omitempty"`
 	// Plan is the readable plan smithd copied from the cluster, once the
 	// controller has made it. Only the deployment GET has it, with the text.
 	Plan *TerraformPlan `json:"plan,omitempty"`
@@ -140,6 +156,19 @@ type DeployVersionResponse struct {
 	StartedAt       time.Time `json:"startedAt"`
 	// Terraform is set for deployments of terraform versions
 	Terraform *TerraformRun `json:"terraform,omitempty"`
+}
+
+// ApproveDeploymentRequest is the request to approve the plan of a terraform
+// deployment. ConfirmDestroy is required if the plan destroys or replaces
+// resources.
+type ApproveDeploymentRequest struct {
+	ConfirmDestroy bool `json:"confirmDestroy,omitempty"`
+}
+
+// RejectDeploymentRequest is the request to reject the plan of a terraform
+// deployment
+type RejectDeploymentRequest struct {
+	Reason string `json:"reason,omitempty"`
 }
 
 // Overview shows, for every app, what runs in each environment
