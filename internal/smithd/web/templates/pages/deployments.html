@@ -20,8 +20,12 @@
       <option value="pending"{{if eq .Filter.Status "pending"}} selected{{end}}>Deploying</option>
       <option value="success"{{if eq .Filter.Status "success"}} selected{{end}}>Deployed</option>
       <option value="failed"{{if eq .Filter.Status "failed"}} selected{{end}}>Failed</option>
+      <option value="planning"{{if eq .Filter.Status "planning"}} selected{{end}}>Planning</option>
       <option value="awaiting_approval"{{if eq .Filter.Status "awaiting_approval"}} selected{{end}}>Awaiting approval</option>
+      <option value="applying"{{if eq .Filter.Status "applying"}} selected{{end}}>Applying</option>
       <option value="applied"{{if eq .Filter.Status "applied"}} selected{{end}}>Applied</option>
+      <option value="stale"{{if eq .Filter.Status "stale"}} selected{{end}}>Replaced</option>
+      <option value="rejected"{{if eq .Filter.Status "rejected"}} selected{{end}}>Rejected</option>
     </select>
   </label>
   <button type="submit" class="button button--quiet">Filter</button>
@@ -31,10 +35,12 @@
 {{end}}
 
 {{/* deployments-table is also served on its own for live refreshes; it
-     keeps polling only while a listed deployment is still pending */}}
+     keeps polling only while a listed deployment is still pending, planning
+     or applying */}}
 {{define "deployments-table"}}
 <div id="deployments"{{if .AnyPending}} hx-get="{{.RefreshURL}}" hx-trigger="every 3s" hx-swap="outerHTML"{{end}}>
   {{if .Deployments}}
+  {{$plans := .Plans}}
   <div class="table-scroll">
   <table class="table">
     <thead>
@@ -43,17 +49,19 @@
         <th scope="col">App</th>
         <th scope="col">Version</th>
         <th scope="col">Environment</th>
+        {{if $plans}}<th scope="col">Plan</th>{{end}}
         <th scope="col">Triggered by</th>
         <th scope="col">Started</th>
       </tr>
     </thead>
     <tbody>
       {{range .Deployments}}
-      <tr>
+      <tr{{if eq .Status "awaiting_approval"}} class="needs-action"{{end}}>
         <td><a class="status-link" href="/ui/deployments/{{.ID}}">{{template "status" .}}</a></td>
         <td><a href="/ui/apps/{{.AppID}}">{{.AppName}}</a></td>
         <td><span class="id">{{.VersionID}}</span></td>
         <td>{{.Environment}}</td>
+        {{if $plans}}<td>{{with index $plans .ID}}{{if .PlanID}}<span class="plan-summary{{if .Destroys}} plan-summary--destroy{{end}}" title="to add, change and destroy">{{counts .}}</span>{{end}}{{end}}</td>{{end}}
         <td>{{template "trigger" .}}</td>
         <td>{{template "time" .StartedAt}}</td>
       </tr>

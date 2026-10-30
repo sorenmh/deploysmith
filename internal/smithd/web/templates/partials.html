@@ -4,5 +4,45 @@
 {{/* time renders a relative time with the exact time on hover */}}
 {{define "time"}}{{if .}}<time datetime="{{.Format "2006-01-02T15:04:05Z07:00"}}" title="{{.Format "2 Jan 2006 15:04:05 MST"}}">{{ago .}}</time>{{end}}{{end}}
 
+{{/* plan renders a readable terraform plan: counts, the resources by action
+     and the full text, collapsed. dot is a TerraformPlan, the plan of a
+     deployment or of a plan-only run. */}}
+{{define "plan"}}
+<section class="plan" aria-labelledby="plan-title">
+  <h2 class="section-title" id="plan-title">Plan <span class="id">{{.PlanID}}</span></h2>
+  {{if .AppliedDiffered}}
+  <div class="notice notice--failed" role="alert">
+    <p>The applied plan differed from the reviewed one. The controller made the plan again before applying it, and the new plan was not the same.</p>
+  </div>
+  {{end}}
+  {{if or .ToAdd .ToChange .ToDestroy}}
+  <p class="plan-counts">
+    <span class="plan-count plan-count--add">+{{.ToAdd}} to add</span>
+    <span class="plan-count plan-count--change">~{{.ToChange}} to change</span>
+    <span class="plan-count{{if .ToDestroy}} plan-count--destroy{{end}}">-{{.ToDestroy}} to destroy</span>
+  </p>
+  {{else}}
+  <p class="muted">{{if .OutputChanges}}This plan only changes outputs.{{else}}This plan has no changes.{{end}}</p>
+  {{end}}
+  {{if .Destroys}}<p class="plan-warning">This plan destroys or replaces resources.</p>{{end}}
+
+  {{range actions .}}
+  <div class="plan-resources plan-resources--{{.Class}}">
+    <h3 class="plan-resources__title">{{.Title}} <span class="muted">({{len .Resources}})</span></h3>
+    <ul>
+      {{range .Resources}}<li><code>{{.}}</code></li>{{end}}
+    </ul>
+  </div>
+  {{end}}
+
+  {{if .Text}}
+  <details class="plan-text">
+    <summary>Full plan</summary>
+    <pre>{{.Text}}</pre>
+  </details>
+  {{end}}
+</section>
+{{end}}
+
 {{/* trigger describes who or what started a deployment; dot is a DeploymentDetail */}}
 {{define "trigger"}}{{if .PolicyName}}Policy {{.PolicyName}}{{else if eq .TriggeredBy "auto-deploy"}}Auto-deploy{{else if .TriggeredBy}}{{.TriggeredBy}}{{else}}<span class="muted">Unknown</span>{{end}}{{end}}

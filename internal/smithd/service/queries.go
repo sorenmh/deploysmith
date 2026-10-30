@@ -150,6 +150,15 @@ func (s *Service) GetDeployment(deploymentID string) (*models.DeploymentDetail, 
 	return deployment, nil
 }
 
+// TerraformPlanSummaries returns the plan counts of the given deployments by
+// deployment id, for listings; deployments without a plan are left out
+func (s *Service) TerraformPlanSummaries(deploymentIDs []string) (map[string]models.TerraformPlan, error) {
+	if s.TerraformPlans == nil {
+		return map[string]models.TerraformPlan{}, nil
+	}
+	return s.TerraformPlans.Summaries(deploymentIDs)
+}
+
 // ListDeployments lists deployments, newest first
 func (s *Service) ListDeployments(filter store.DeploymentFilter, limit, offset int) ([]models.DeploymentDetail, int, error) {
 	switch filter.Status {

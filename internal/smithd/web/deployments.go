@@ -20,6 +20,7 @@ type deploymentsPage struct {
 	Apps         []models.Application
 	Environments []*models.Environment
 	Deployments  []models.DeploymentDetail
+	Plans        map[string]models.TerraformPlan // plan counts by deployment id
 	AnyPending   bool
 	RefreshURL   string
 	PrevPage     string
@@ -49,11 +50,18 @@ func (ui *UI) handleDeployments(w http.ResponseWriter, r *http.Request) {
 		Filtered:    filter != (store.DeploymentFilter{}),
 		Deployments: deployments,
 	}
+	var terraformIDs []string
 	for _, d := range deployments {
-		if d.Status == "pending" {
+		if pollsDeployment(d.Status) {
 			data.AnyPending = true
-			break
 		}
+		if d.Terraform != nil {
+			terraformIDs = append(terraformIDs, d.ID)
+		}
+	}
+	if data.Plans, err = ui.svc.TerraformPlanSummaries(terraformIDs); err != nil {
+		ui.renderServiceError(w, r, err)
+		return
 	}
 
 	pageURL := func(n int, partial bool) string {
@@ -107,12 +115,11 @@ func (ui *UI) handleDeployment(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if r.URL.Query().Get("partial") != "" {
-		ui.renderFragment(w, "deployment", "deployment-detail", deployment)
+		ui.renderFragment(w, "deployment", "deployment-detail", ui.deploymentPageData(deployment))
 		return
 	}
 
-	title := deployment.AppName + " " + deployment.VersionID + " to " + deployment.Environment
-	ui.render(w, r, http.StatusOK, "deployment", page{Title: title, Section: "deployments", Data: deployment})
+	ui.renderDeployment(w, r, http.StatusOK, deployment, "")
 }
 
 // renderFragment renders a named template of a page without the layout,
