@@ -139,6 +139,30 @@ func (s *S3Storage) MoveVersion(appName, versionID string) error {
 	return nil
 }
 
+// DeleteVersion deletes all files of a version, from the drafts or the
+// published location. A version without files is not an error.
+func (s *S3Storage) DeleteVersion(appName, versionID string, published bool) error {
+	files, err := s.ListFiles(appName, versionID, published)
+	if err != nil {
+		return fmt.Errorf("failed to list files: %w", err)
+	}
+
+	prefix := "drafts"
+	if published {
+		prefix = "published"
+	}
+	for _, file := range files {
+		_, err := s.client.DeleteObject(context.Background(), &s3.DeleteObjectInput{
+			Bucket: aws.String(s.bucket),
+			Key:    aws.String(fmt.Sprintf("%s/%s/%s/%s", prefix, appName, versionID, file)),
+		})
+		if err != nil {
+			return fmt.Errorf("failed to delete %s: %w", file, err)
+		}
+	}
+	return nil
+}
+
 // GetFile retrieves a file from S3
 func (s *S3Storage) GetFile(appName, versionID, filename string, published bool) (io.ReadCloser, error) {
 	key := fmt.Sprintf("drafts/%s/%s/%s", appName, versionID, filename)

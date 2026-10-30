@@ -46,6 +46,12 @@ CREATE TABLE IF NOT EXISTS versions (
     source_sha TEXT NOT NULL DEFAULT '',    -- the commit (a PR's head, not its merge commit)
     source_pr INTEGER NOT NULL DEFAULT 0,   -- pull request number, 0 if none
 
+    -- Temporary versions: the bundle of a local plan, never published or
+    -- deployed, hidden from lists and deleted when it expires
+    temporary BOOLEAN NOT NULL DEFAULT FALSE,
+    expires_at TIMESTAMP,
+    created_by TEXT NOT NULL DEFAULT '',
+
     -- Lifecycle timestamps
     created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
     published_at TIMESTAMP,
@@ -58,6 +64,7 @@ CREATE INDEX IF NOT EXISTS idx_versions_app_id ON versions(app_id);
 CREATE INDEX IF NOT EXISTS idx_versions_status ON versions(status);
 CREATE INDEX IF NOT EXISTS idx_versions_created_at ON versions(created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_versions_git_branch ON versions(git_branch);
+CREATE INDEX IF NOT EXISTS idx_versions_expires_at ON versions(expires_at) WHERE temporary;
 
 -- Policies table
 CREATE TABLE IF NOT EXISTS policies (
@@ -242,6 +249,9 @@ CREATE TABLE IF NOT EXISTS plan_runs (
     resources TEXT NOT NULL DEFAULT '{}',
     plan_text TEXT NOT NULL DEFAULT '',
 
+    -- The user of a local plan (DEP-25), empty for other plans
+    requested_by TEXT NOT NULL DEFAULT '',
+
     -- When the run's files were removed from the plans branch
     cleaned_at TIMESTAMP,
 
@@ -255,8 +265,9 @@ CREATE TABLE IF NOT EXISTS plan_runs (
 
 CREATE INDEX IF NOT EXISTS idx_plan_runs_version ON plan_runs(version_id, environment, started_at DESC);
 
--- One active run per app, environment and root: a newer run replaces it
-CREATE UNIQUE INDEX IF NOT EXISTS idx_plan_runs_active_root ON plan_runs(app_id, environment, terraform_root)
+-- One active run per app, environment, root and requester: a newer run
+-- replaces it
+CREATE UNIQUE INDEX IF NOT EXISTS idx_plan_runs_active_root ON plan_runs(app_id, environment, terraform_root, requested_by)
     WHERE status IN ('pending', 'planning');
 
 -- Finished runs whose files are still on the plans branch

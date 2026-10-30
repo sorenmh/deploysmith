@@ -91,6 +91,36 @@ func TestUploadAndPublishVersion(t *testing.T) {
 	}
 }
 
+func TestDeleteVersion(t *testing.T) {
+	s := newTestStorage(t)
+
+	for _, key := range []string{"drafts/hello/local-a/terraform.tar.gz", "drafts/hello/local-b/terraform.tar.gz"} {
+		_, err := s.client.PutObject(context.Background(), &s3.PutObjectInput{
+			Bucket: aws.String("versions"),
+			Key:    aws.String(key),
+			Body:   bytes.NewReader([]byte("bundle")),
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	if err := s.DeleteVersion("hello", "local-a", false); err != nil {
+		t.Fatal(err)
+	}
+	if files, _ := s.ListFiles("hello", "local-a", false); len(files) != 0 {
+		t.Errorf("files left after delete: %v", files)
+	}
+	if files, _ := s.ListFiles("hello", "local-b", false); len(files) != 1 {
+		t.Errorf("another version's files = %v, want them kept", files)
+	}
+
+	// Nothing to delete is fine, so that a sweep can be repeated
+	if err := s.DeleteVersion("hello", "local-a", false); err != nil {
+		t.Errorf("deleting a version without files: %v", err)
+	}
+}
+
 func TestCopySource(t *testing.T) {
 	got := copySource("versions", "drafts/hello/v1/my file+1.yaml")
 	want := "versions/drafts/hello/v1/my%20file+1.yaml"

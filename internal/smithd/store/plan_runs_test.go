@@ -33,7 +33,7 @@ func planRunFixture(t *testing.T) (*PlanRunStore, *models.Application, *models.V
 func TestPlanRunLifecycle(t *testing.T) {
 	runs, app, version, _ := planRunFixture(t)
 
-	run, superseded, err := runs.Create(app.ID, version, "production", "main", "alice")
+	run, superseded, err := runs.Create(app.ID, version, "production", "main", "alice", "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -103,7 +103,7 @@ func TestPlanRunLifecycle(t *testing.T) {
 
 func TestPlanRunFailed(t *testing.T) {
 	runs, app, version, _ := planRunFixture(t)
-	run, _, err := runs.Create(app.ID, version, "production", "main", "alice")
+	run, _, err := runs.Create(app.ID, version, "production", "main", "alice", "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -119,7 +119,7 @@ func TestPlanRunFailed(t *testing.T) {
 func TestPlanRunReplacesTheActiveRun(t *testing.T) {
 	runs, app, version, deployments := planRunFixture(t)
 
-	first, _, err := runs.Create(app.ID, version, "production", "main", "alice")
+	first, _, err := runs.Create(app.ID, version, "production", "main", "alice", "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -127,12 +127,12 @@ func TestPlanRunReplacesTheActiveRun(t *testing.T) {
 		t.Fatal(err)
 	}
 	// Another environment is another root
-	other, superseded, err := runs.Create(app.ID, version, "staging", "main", "alice")
+	other, superseded, err := runs.Create(app.ID, version, "staging", "main", "alice", "")
 	if err != nil || len(superseded) != 0 {
 		t.Fatalf("a run for another environment superseded %+v, %v", superseded, err)
 	}
 
-	second, superseded, err := runs.Create(app.ID, version, "production", "main", "bob")
+	second, superseded, err := runs.Create(app.ID, version, "production", "main", "bob", "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -140,7 +140,7 @@ func TestPlanRunReplacesTheActiveRun(t *testing.T) {
 		t.Fatalf("superseded = %+v", superseded)
 	}
 	// The run that is being committed is replaced too, and finds out
-	third, superseded, err := runs.Create(app.ID, version, "production", "main", "bob")
+	third, superseded, err := runs.Create(app.ID, version, "production", "main", "bob", "")
 	if err != nil || len(superseded) != 1 || superseded[0].ID != second.ID || superseded[0].Status != models.PlanRunSuperseded {
 		t.Fatalf("third run superseded %+v, %v", superseded, err)
 	}
@@ -172,11 +172,11 @@ func TestPlanRunReplacesTheActiveRun(t *testing.T) {
 
 func TestPlanRunCleanup(t *testing.T) {
 	runs, app, version, _ := planRunFixture(t)
-	active, _, err := runs.Create(app.ID, version, "staging", "main", "alice")
+	active, _, err := runs.Create(app.ID, version, "staging", "main", "alice", "")
 	if err != nil {
 		t.Fatal(err)
 	}
-	done, _, err := runs.Create(app.ID, version, "production", "main", "alice")
+	done, _, err := runs.Create(app.ID, version, "production", "main", "alice", "")
 	if err != nil {
 		t.Fatal(err)
 	}
