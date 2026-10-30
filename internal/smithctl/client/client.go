@@ -87,14 +87,23 @@ type Version struct {
 	Deployments  []string   `json:"deployedTo,omitempty"`
 }
 
-// Deployment represents a deployment
+// Deployment represents a deployment, as the API returns it with the names
+// of its app, version and policy
 type Deployment struct {
-	ID          string    `json:"id"`
-	AppID       string    `json:"appId"`
-	VersionID   string    `json:"versionId"`
-	Environment string    `json:"environment"`
-	Status      string    `json:"status"`
-	CreatedAt   time.Time `json:"createdAt"`
+	ID              string     `json:"id"`
+	AppID           string     `json:"appId"`
+	AppName         string     `json:"appName"`
+	VersionID       string     `json:"versionId"`
+	Environment     string     `json:"environment"`
+	Status          string     `json:"status"`
+	TriggeredBy     string     `json:"triggeredBy,omitempty"`
+	PolicyName      string     `json:"policyName,omitempty"`
+	GitopsCommitSHA string     `json:"gitopsCommitSha,omitempty"`
+	ErrorMessage    string     `json:"errorMessage,omitempty"`
+	StartedAt       time.Time  `json:"startedAt"`
+	CompletedAt     *time.Time `json:"completedAt,omitempty"`
+	// Terraform is set for terraform versions
+	Terraform *TerraformRun `json:"terraform,omitempty"`
 }
 
 // Policy represents an auto-deployment policy
@@ -403,6 +412,29 @@ type TerraformRun struct {
 	Root            string `json:"root"`
 	SourceCommitSHA string `json:"sourceCommitSha,omitempty"`
 	PlanID          string `json:"planId,omitempty"`
+	// Plan is the readable plan, once the controller has made it
+	Plan *TerraformPlan `json:"plan,omitempty"`
+}
+
+// TerraformPlan is the readable plan of a terraform deployment
+type TerraformPlan struct {
+	PlanID        string     `json:"planId"`
+	PlanHash      string     `json:"planHash,omitempty"`
+	PlannedAt     *time.Time `json:"plannedAt,omitempty"`
+	ToAdd         int        `json:"toAdd"`
+	ToChange      int        `json:"toChange"`
+	ToDestroy     int        `json:"toDestroy"`
+	Destroys      bool       `json:"destroys"`
+	OutputChanges bool       `json:"outputChanges,omitempty"`
+	Resources     struct {
+		Create  []string `json:"create"`
+		Update  []string `json:"update"`
+		Replace []string `json:"replace"`
+		Destroy []string `json:"destroy"`
+	} `json:"resources"`
+	Text            string `json:"text,omitempty"`
+	AppliedPlanHash string `json:"appliedPlanHash,omitempty"`
+	AppliedDiffered bool   `json:"appliedDiffered,omitempty"`
 }
 
 // DeployVersion deploys a version to an environment
