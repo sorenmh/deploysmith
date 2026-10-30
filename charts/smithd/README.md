@@ -350,7 +350,9 @@ smithd can report each deployment as a check run
 (`deploysmith/deploy-<env>`) on the commit the version was built from, with
 a GitHub App that has **Checks: Read and write** and is installed on the
 repositories (step by step in
-[docs/github-checks.md](../../docs/github-checks.md)):
+[docs/github-checks.md](../../docs/github-checks.md)). Terraform apps also
+get the plan as `deploysmith/plan-<env>`
+([docs/terraform.md](../../docs/terraform.md#the-plan-on-the-pull-request)):
 
 ```yaml
 config:
@@ -369,10 +371,36 @@ secrets:
 
 #### Terraform apps
 
-smithd can run an app's Terraform through tofu-controller (see
-`docs/specs/terraform-controller.md`). Enabling Terraform for an app in an
-environment sets up everything that app's runner needs to run isolated
-from other apps:
+smithd can run an app's Terraform through tofu-controller. How it works and
+how to use it (bundles, CI, plan, approval): [docs/terraform.md](../../docs/terraform.md);
+the CR shape and the reasons for it: [docs/specs/terraform-controller.md](../../docs/specs/terraform-controller.md).
+This section is for whoever installs smithd. Terraform support is off until
+`config.openbao.addr` is set.
+
+**What has to exist before the first Terraform app can deploy**, in this order:
+
+1. **Cluster** (once): tofu-controller, the runner images, the Flux
+   Kustomizations and the `plans` branch objects, the read-only deploy key
+   `gitops-readonly`, the shared S3 bucket and DynamoDB table:
+   [docs/terraform-cluster-setup.md](../../docs/terraform-cluster-setup.md).
+2. **OpenBao** (once): engines, Kubernetes auth, smithd's policy and role
+   ([below](#set-up-once-in-openbao)).
+3. **AWS**: OpenBao's own AWS identity, which may only `sts:AssumeRole` on
+   `role/tf-*`, and the platform app with the `tf-app` module
+   (`terraform/modules/tf-app/README.md`) that creates the IAM roles.
+4. **smithd** with the values in the
+   [reference table](#terraform-configuration-reference) and `rbac.create: true`
+   (smithd reads Terraform CRs, GitRepositories, ConfigMaps and Events; never
+   Secrets).
+5. **GitHub App** (optional) with **Checks: Read and write**, installed on
+   the repositories, for plan and deploy check runs
+   ([docs/github-checks.md](../../docs/github-checks.md)); login with GitHub
+   for per-user approval ([docs/login-with-github.md](../../docs/login-with-github.md)).
+6. **Per app and environment**: the `tf-app` module block, then the commands
+   below.
+
+Enabling Terraform for an app in an environment sets up everything that
+app's runner needs to run isolated from other apps:
 
 ```bash
 smithctl app terraform enable viino --env prod      # shared backend
@@ -405,7 +433,9 @@ Everything smithd writes is an upsert, so provisioning is safe to repeat.
 A failure (e.g. OpenBao denied a write) is shown by `enable`/`sync` and kept
 on the environment until a sync succeeds.
 
-**Set up once in OpenBao** (Terraform support is off until `config.openbao.addr` is set):
+##### Set up once in OpenBao
+
+Terraform support is off until `config.openbao.addr` is set:
 
 ```bash
 # Engines the runners use. OpenBao 2.x has no built-in AWS secrets engine:
@@ -446,9 +476,14 @@ bao write auth/kubernetes/role/smithd \
   token_policies=smithd token_ttl=1h
 ```
 
-Adjust the mounts if you use other paths (`config.openbao.*Mount`). With a
-static token for development set `secrets.openbaoToken` instead of the
-Kubernetes role.
+Adjust the mounts if you use other paths (`config.openbao.*Mount`); if the
+runners log in at another auth mount than smithd, set
+`config.openbao.runnerAuthMount` and change the `auth/kubernetes/role/tf-*`
+path above to match. With a static token for development set
+`secrets.openbaoToken` instead of the Kubernetes role. An app's secrets are
+put under `secret/apps/<app>/` (for example
+`bao kv put -mount=secret apps/viino/database password=...`); the app's
+runner can read exactly that prefix.
 
 ```yaml
 rbac:
@@ -535,6 +570,45 @@ app (`terraform/modules/tf-app/README.md`).
 Note that smithd's OpenBao token can write any policy named `tf-*` and bind
 it to a `tf-*` role. Treat it like an OpenBao admin credential: anyone who
 controls smithd can give a runner more than its app's secrets.
+
+##### Terraform configuration reference
+
+Every chart value and environment variable that Terraform support uses. The
+chart writes the values into smithd's ConfigMap (secrets into its Secret);
+outside Helm set the environment variables.
+
+| Chart value | Environment variable | Default | Meaning |
+|---|---|---|---|
+| `rbac.create` | | `false` (set `true`) | ClusterRole `<release>-flux-reader` (get/list/watch `terraforms.infra.contrib.fluxcd.io`, get/list `gitrepositories.source.toolkit.fluxcd.io`) and ClusterRole `smithd-terraform-reader` (get/list ConfigMaps and Events, bound per `tf-<app>` namespace by a RoleBinding that smithd commits). No Secrets. |
+| `config.openbao.addr` | `OPENBAO_ADDR` | `""` | OpenBao address. **Empty turns Terraform support off.** Runners reach it on the same port. |
+| `config.openbao.caCert` | `OPENBAO_CACERT` | `""` | CA certificate path for smithd's connection (runners do not get it yet) |
+| `config.openbao.authMount` / `authRole` | `OPENBAO_AUTH_MOUNT` / `OPENBAO_AUTH_ROLE` | `kubernetes` / `smithd` | Kubernetes auth mount and role smithd logs in with |
+| `config.openbao.runnerAuthMount` | `OPENBAO_RUNNER_AUTH_MOUNT` | `authMount` | Auth mount the runners log in with |
+| `config.openbao.runnerAudience` | `OPENBAO_RUNNER_AUDIENCE` | `""` | Audience of the runners' ServiceAccount token; empty accepts any. Set, the runner gets a projected token with it |
+| `config.openbao.kvMount` / `transitMount` / `awsMount` | `OPENBAO_KV_MOUNT` / `OPENBAO_TRANSIT_MOUNT` / `OPENBAO_AWS_MOUNT` | `secret` / `transit` / `aws` | Engine mounts used in the runner policies and the encryption config |
+| `config.openbao.namespace` | `OPENBAO_K8S_NAMESPACE` | `openbao` | Kubernetes namespace of OpenBao; the runners' NetworkPolicy lets them in |
+| `secrets.openbaoToken` | `OPENBAO_TOKEN` | `""` | Static token for development; otherwise Kubernetes auth |
+| | `OPENBAO_JWT_PATH` | the pod's ServiceAccount token | Where smithd reads its own token (no chart value) |
+| `config.terraform.awsAccountId` | `TERRAFORM_AWS_ACCOUNT_ID` | `""` | Account of the `tf-<app>-<env>` IAM roles (unless an environment names its own role ARN) |
+| `config.terraform.stateBucket` / `stateRegion` / `lockTable` | `TERRAFORM_STATE_BUCKET` / `TERRAFORM_STATE_REGION` / `TERRAFORM_LOCK_TABLE` | `""` | The shared backend, the default for new apps |
+| `config.terraform.controllerNamespace` | `TERRAFORM_CONTROLLER_NAMESPACE` | `flux-system` | Where tofu-controller runs; its pods may reach the runners |
+| `config.terraform.kubeApiCidrs` | `TERRAFORM_KUBE_API_CIDRS` | `""` | API server addresses the runners may reach; empty allows private ranges on 443 and 6443 |
+| `config.terraform.runnerTokenTtl` / `stsTtl` | `TERRAFORM_RUNNER_TOKEN_TTL` / `TERRAFORM_STS_TTL` | `2h` / `1h` | Lifetime of a runner's OpenBao token (must cover the longest run) and of its AWS credentials |
+| `config.terraform.runnerImages` | `TERRAFORM_RUNNER_IMAGES` | 1.12.9 and 1.13.2 images | OpenTofu version to runner image (`1.13.2=ghcr.io/...`); a bundle pinning another version is refused |
+| `config.terraform.sourceUrl` | `TERRAFORM_SOURCE_URL` | `gitops.repo` as `ssh://` URL | The gitops repository as Flux fetches the bundle sources |
+| `config.terraform.sourceSecret` | `TERRAFORM_SOURCE_SECRET` | `gitops-readonly` | Secret in the Flux namespace with the read-only deploy key; empty for none |
+| `config.terraform.plansBranch` | `TERRAFORM_PLANS_BRANCH` | `plans` | Branch for plan-only runs; smithd creates it |
+| `config.terraform.autoPlan` | `TERRAFORM_AUTO_PLAN` | `true` | Plan every terraform version when it is published, for each environment with Terraform enabled |
+| `config.terraform.localPlanTtl` | `TERRAFORM_LOCAL_PLAN_TTL` | `24h` | Lifetime of the temporary version of a local plan |
+| `config.flux.namespace` | `FLUX_NAMESPACE` | `flux-system` | Namespace of the GitRepositories smithd creates for bundles |
+| `config.flux.kustomizationName`, `secrets.flux.webhookUrl` / `webhookToken` | `FLUX_KUSTOMIZATION_NAME`, `FLUX_WEBHOOK_URL`, `FLUX_WEBHOOK_TOKEN` | | Manifest deployments only; the webhook (a Flux Receiver) is also triggered after Terraform commits |
+| (set by the chart) | `SMITHD_NAMESPACE`, `SMITHD_SERVICE_ACCOUNT` | release namespace, ServiceAccount | Subject of the RoleBinding that lets smithd read plans |
+| `config.github.appId`, `secrets.github.privateKey` | `GITHUB_APP_ID`, `GITHUB_APP_PRIVATE_KEY` | `""` | GitHub App for check runs (**Checks: Read and write**); both or neither |
+| `config.ui.publicUrl` | `UI_PUBLIC_URL` | `""` | Links in check runs, Slack and push to the deployment page |
+| `config.github.clientId`, `allowedOrg`, `allowedTeam`, `allowedUsers`, `sessionTtl`, `url`, `apiUrl`, `secrets.github.clientSecret` | `GITHUB_CLIENT_ID`, `GITHUB_ALLOWED_ORG`, `GITHUB_ALLOWED_TEAM`, `GITHUB_ALLOWED_USERS`, `SESSION_TTL`, `GITHUB_URL`, `GITHUB_API_URL`, `GITHUB_CLIENT_SECRET` | | Login with GitHub, for per-user approval and `forge plan --terraform` ([docs/login-with-github.md](../../docs/login-with-github.md)) |
+
+smithd also needs the usual `config.gitops.*` (repository, deploy key with
+write access) and `config.s3.*` (bundles are stored like every version).
 
 #### Using MinIO Instead of AWS S3
 

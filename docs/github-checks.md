@@ -131,18 +131,21 @@ deployment in the web UI. The **plan text itself is not sent to GitHub**: it
 can show infrastructure details, and it is in the web UI and
 `smithctl deployment show --plan`, behind login.
 
-The call for plan check runs is also what the plan-only runs of DEP-22 will use:
+Plan-only runs (`forge plan`, a publish, DEP-22) report the same
+`deploysmith/plan-<env>` check as described at the top, without a deploy
+check. Local plans (`forge plan --terraform`) report nothing.
 
-```go
-svc.GitHub.ReportPlan(ctx, github.Plan{
-	Repo:        source.Repository, // from Versions.GetSource
-	SHA:         source.CommitSHA,
-	Environment: "production",
-	RunID:       deployment.ID,     // later reports update the same check run
-	Status:      github.StatusCompleted,
-	Conclusion:  github.ConclusionNeutral, // changes waiting for approval
-	Title:       "2 to add, 0 to change, 1 to destroy",
-	Summary:     summaryMarkdown,   // destroys highlighted
-	URL:         planURL,
-})
-```
+## Several apps on one commit
+
+The check names carry the environment but not the app. An app with manifests
+and a Terraform app built from the same repository and commit (see
+[terraform.md](terraform.md#an-app-with-manifests-and-terraform)) each get
+their own check run named `deploysmith/deploy-<env>` on that commit, told apart
+by the app in the summary. smithd creates and updates them separately (one per
+deployment). How GitHub's checks list displays several runs that share a name
+was not checked; it may show only the latest.
+
+## Terraform guide
+
+How plans appear on pull requests, and the rest of the Terraform workflow:
+[terraform.md](terraform.md#the-plan-on-the-pull-request).

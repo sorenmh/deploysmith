@@ -1,7 +1,7 @@
 # Login with GitHub
 
 smithd can sign people in with their GitHub account, so it knows who
-deploys (and, later, who approves a plan). People log in to `smithctl` with
+deploys and who approves a Terraform plan. People log in to `smithctl` with
 the OAuth device flow and to the web UI with GitHub's normal sign-in page.
 Machines such as CI keep using API keys.
 
@@ -111,6 +111,12 @@ smithctl logout
 
 `--url` (or `SMITHD_URL`, or the config file) picks the server; a session is
 only used for the URL it was created for. CI keeps `SMITHD_API_KEY`.
+
+## What the identity is used for
+
+- **Who deployed**: an API deploy by a signed-in user records the user as `triggeredBy`.
+- **Who approved or rejected a Terraform plan**: `smithctl deployment approve|reject` and the web UI's buttons record your GitHub login, the time and, for destroys, that you confirmed them ([terraform.md](terraform.md#operator-workflow)). With only an API key the approver is recorded as `api-key`. Everyone who may sign in may approve; there is no approver allowlist yet.
+- **Local plans**: `forge plan --terraform` needs a session, not an API key, so smithd knows whose temporary version it is (forge reads the same `~/.deploysmith/sessions.json`; [forge.md](forge.md#local-plan-forge-plan---terraform)).
 
 ## API
 
