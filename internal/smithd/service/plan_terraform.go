@@ -66,7 +66,8 @@ func (s *Service) requirePlanRuns() error {
 //
 // A plan-only run is not a deployment: it can't be approved or applied, and
 // it doesn't touch the root's deployments. A newer run for the same root
-// replaces the older one, which is superseded. Everything that can be checked
+// replaces the older one, which is superseded; a local plan (a temporary
+// version) only replaces the same user's earlier local plan of the root. Everything that can be checked
 // up front is, so a refused run leaves no record.
 func (s *Service) PlanVersion(ctx context.Context, appID, versionID, environment, triggeredBy string) (*models.PlanRun, error) {
 	if err := s.requirePlanRuns(); err != nil {
@@ -89,6 +90,12 @@ func (s *Service) PlanVersion(ctx context.Context, appID, versionID, environment
 	if version.ArtifactType != models.ArtifactTerraform {
 		return nil, invalid("not_terraform", fmt.Sprintf("Version %s is a %s version; only terraform versions can be planned", version.VersionID, version.ArtifactType))
 	}
+	requestedBy := ""
+	if version.Temporary {
+		if requestedBy, err = s.requireLocalPlanOwner(ctx, version); err != nil {
+			return nil, err
+		}
+	}
 	tfEnv, err := s.terraformTarget(app, environment)
 	if err != nil {
 		return nil, err
@@ -97,13 +104,18 @@ func (s *Service) PlanVersion(ctx context.Context, appID, versionID, environment
 	if err != nil {
 		return nil, err
 	}
+	if version.Temporary {
+		if err := checkLocalPlanBundle(version, bundle); err != nil {
+			return nil, err
+		}
+	}
 	image, err := s.TerraformRoots.RunnerImage(bundle.OpenTofuVersion)
 	if err != nil {
 		return nil, invalid("unsupported_opentofu_version", fmt.Sprintf("Version %s can't be planned: %s", version.VersionID, err.Error()))
 	}
 
 	root := defaultTerraformRoot
-	run, superseded, err := s.PlanRuns.Create(app.ID, version, environment, root, triggeredBy)
+	run, superseded, err := s.PlanRuns.Create(app.ID, version, environment, root, triggeredBy, requestedBy)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create plan run: %w", err)
 	}
@@ -430,7 +442,8 @@ func (s *Service) planNotice(run *models.PlanRun, version *models.Version, plan 
 // branch when there is something to remove, in one commit. Once an hour it
 // also removes what no run of the database needs (a run records itself
 // before it pushes, so everything on the branch belongs to a run), squashes
-// the history of the branch if it grew long, and deletes old results.
+// the history of the branch if it grew long, deletes old results and the
+// expired temporary versions of local plans.
 func (s *Service) cleanupPlanRuns(ctx context.Context) {
 	if s.TerraformPlansGitops == nil {
 		return
@@ -441,6 +454,12 @@ func (s *Service) cleanupPlanRuns(ctx context.Context) {
 		s.planSweepAt = time.Now()
 	}
 	s.planSweepMu.Unlock()
+
+	// Before the plans branch is swept, so that the leftovers of the plans
+	// of the versions deleted here go with it
+	if sweep {
+		s.sweepTemporaryVersions(ctx)
+	}
 
 	uncleaned, err := s.PlanRuns.CountUncleaned()
 	if err != nil {

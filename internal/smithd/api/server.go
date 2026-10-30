@@ -122,6 +122,8 @@ func NewServer(cfg *config.Config, database *db.DB) *Server {
 	}
 	deps.PlanRuns = store.NewPlanRunStore(database)
 	deps.TerraformAutoPlan = cfg.TerraformAutoPlan
+	deps.TerraformLocalPlanTTL = cfg.TerraformLocalPlanTTL
+	deps.BundleDeleter = s3Storage
 	deps.TerraformSharedBackend = models.TerraformBackend{Bucket: cfg.TerraformStateBucket, Region: cfg.TerraformStateRegion, LockTable: cfg.TerraformLockTable}
 	if deps.TerraformManifests, err = terraformManifestOptions(cfg); err != nil {
 		log.Fatalf("Failed to configure Terraform support: %v", err)
@@ -194,6 +196,7 @@ func (s *Server) setupAuthenticatedRoutes(r chi.Router) {
 	r.Post("/apps/{appId}/versions/{versionId}/plan", s.handlePlanVersion)
 	r.Get("/apps/{appId}/versions/{versionId}/plan", s.handleGetVersionPlan)
 	r.Get("/plan-runs/{planRunId}", s.handleGetPlanRun)
+	r.Post("/apps/{appId}/terraform/local-plans", s.handleLocalPlan)
 	r.Get("/deployments", s.handleListDeployments)
 	r.Get("/deployments/{deploymentId}", s.handleGetDeployment)
 	r.Post("/deployments/{deploymentId}/approve", s.handleApproveDeployment)
@@ -515,6 +518,11 @@ func (s *Server) handlePublishVersion(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	if version.Temporary {
+		writeError(w, http.StatusConflict, "temporary_version", "The temporary version of a local plan can't be published")
+		return
+	}
+
 	// Check if already published
 	if version.Status == "published" {
 		writeError(w, http.StatusConflict, "conflict", "Version is already published")
@@ -773,8 +781,11 @@ func (s *Server) handleListVersions(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	// Temporary versions (local plans) are only listed on request
+	includeTemporary := r.URL.Query().Get("includeTemporary") == "true"
+
 	// List versions
-	versions, total, err := s.versionStore.List(appID, limit, offset)
+	versions, total, err := s.versionStore.List(appID, limit, offset, includeTemporary)
 	if err != nil {
 		log.Printf("Failed to list versions: %v", err)
 		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to list versions")

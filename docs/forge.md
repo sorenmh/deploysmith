@@ -347,6 +347,43 @@ version is published (`config.terraform.autoPlan`, on by default), so
 `forge plan --wait` is only needed to see the plan in the CI log or to gate on
 destroys.
 
+#### Local plan: `forge plan --terraform`
+
+See what uncommitted changes would do, without CI, a commit or a push:
+
+```bash
+smithctl login
+forge plan --terraform infra/ --env production            # --app, or forge app-bind
+forge plan --terraform infra/ --env production --output json
+```
+
+forge validates and packs the OpenTofu root module in `infra/` exactly like
+`forge upload --terraform`, then asks smithd for a **temporary version** named
+`local-<user>-<content hash>` (the same files give the same version), uploads
+the bundle to it and runs the plan-only flow above, always waiting for the
+result. The plan runs in the cluster with the read-only role: the credentials
+never reach your machine. The exit codes are those of `forge plan --wait`: `0`
+planned, `1` failed, replaced or timed out, `2` the plan destroys or replaces
+resources. `--timeout`, `--poll-interval` and `--full` work as there.
+
+- **Needs a signed-in user.** forge reads the session `smithctl login` stored
+  in `~/.deploysmith/sessions.json` and tells you to run `smithctl login` if it
+  is missing or expired. API keys are not accepted, by forge or by smithd: the
+  point is knowing who ran the plan. CI plans a published version with
+  `forge plan <version>`.
+- **Temporary versions** are drafts that can never be published or deployed,
+  manually or by a policy. They are left out of version lists unless you ask
+  (`smithctl version list --all`, `?includeTemporary=true`), don't count as the
+  latest or current version, and are deleted with their bundle after 24 hours
+  (`config.terraform.localPlanTtl`, `TERRAFORM_LOCAL_PLAN_TTL`).
+- **One local plan at a time** per user, app and environment: starting another
+  replaces the earlier one, which ends as replaced. Other people's plans and
+  the plans of CI are not touched.
+- Terraform must be enabled for the app in the environment
+  (`smithctl app terraform enable`), or smithd answers `terraform_not_enabled`.
+- smithd sends no GitHub check runs, Slack or push notifications for local
+  plans: there is no commit or pull request to report on.
+
 ### `forge version`
 
 Show forge version information.

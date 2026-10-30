@@ -23,7 +23,7 @@ func NewPlanRunStore(db *db.DB) *PlanRunStore {
 }
 
 // activePlanRunStatuses is the states of a run that is still being planned;
-// only one per app, environment and root can be in them
+// only one per app, environment, root and requester can be in them
 const activePlanRunStatuses = "('pending', 'planning')"
 
 // planRunColumns are scanned by scanPlanRun, without the plan
@@ -66,11 +66,14 @@ func scanPlanRuns(rows *sql.Rows) ([]models.PlanRun, error) {
 
 // Create creates the pending plan-only run of a version for a root and
 // supersedes the root's active run, if any: a newer run replaces the older
-// one, which is returned. A run that is still being committed is replaced
+// one, which is returned. requestedBy is the user of a local plan, or empty:
+// a run only replaces the active run of the same requester, so a local plan
+// never replaces anyone else's plan or the plan of CI, and the other way
+// round. A run that is still being committed is replaced
 // too; it finds out when it records its commits. Both happen in one
 // transaction, and the unique index on active runs makes concurrent runs of
 // the same root fail rather than both become active.
-func (s *PlanRunStore) Create(appID string, version *models.Version, environment, root, triggeredBy string) (created *models.PlanRun, superseded []models.PlanRun, err error) {
+func (s *PlanRunStore) Create(appID string, version *models.Version, environment, root, triggeredBy, requestedBy string) (created *models.PlanRun, superseded []models.PlanRun, err error) {
 	tx, err := s.db.Begin()
 	if err != nil {
 		return nil, nil, fmt.Errorf("failed to begin transaction: %w", err)
@@ -91,8 +94,8 @@ func (s *PlanRunStore) Create(appID string, version *models.Version, environment
 	rows, err := tx.Query(`
 		SELECT `+planRunColumns+`
 		`+planRunFrom+`
-		WHERE r.app_id = ? AND r.environment = ? AND r.terraform_root = ? AND r.status IN `+activePlanRunStatuses,
-		appID, environment, root)
+		WHERE r.app_id = ? AND r.environment = ? AND r.terraform_root = ? AND r.requested_by = ? AND r.status IN `+activePlanRunStatuses,
+		appID, environment, root, requestedBy)
 	if err != nil {
 		return nil, nil, fmt.Errorf("failed to get active plan runs: %w", err)
 	}
@@ -123,9 +126,9 @@ func (s *PlanRunStore) Create(appID string, version *models.Version, environment
 	}
 
 	_, err = tx.Exec(`
-		INSERT INTO plan_runs (id, app_id, version_id, environment, terraform_root, status, triggered_by, started_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-	`, run.ID, appID, version.ID, environment, root, run.Status, triggeredBy, run.StartedAt)
+		INSERT INTO plan_runs (id, app_id, version_id, environment, terraform_root, status, triggered_by, requested_by, started_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+	`, run.ID, appID, version.ID, environment, root, run.Status, triggeredBy, requestedBy, run.StartedAt)
 	if err != nil {
 		return nil, nil, fmt.Errorf("failed to create plan run (is another plan of the root being started?): %w", err)
 	}

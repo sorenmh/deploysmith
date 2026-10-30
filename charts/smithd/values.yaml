@@ -309,6 +309,9 @@ config:
     # deploysmith/plan-<env> (needs the version's source, see
     # docs/github-checks.md). Plans are read-only.
     autoPlan: true
+    # How long the temporary version of a local plan (forge plan --terraform)
+    # and its bundle are kept; smithd deletes them after this
+    localPlanTtl: 24h
   # Login with GitHub (optional, see docs/login-with-github.md). People log in
   # to smithctl (device flow) and the web UI with a GitHub App or OAuth App;
   # the UI is then served on the main ingress and requires signing in, so

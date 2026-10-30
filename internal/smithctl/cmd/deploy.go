@@ -95,7 +95,7 @@ Examples:
 		// If no version provided, show interactive version selection
 		if versionID == "" {
 			// List recent versions
-			resp, err := c.ListVersions(appID, "published", 10, 0)
+			resp, err := c.ListVersions(appID, "published", 10, 0, false)
 			if err != nil {
 				return err
 			}
@@ -230,7 +230,7 @@ Examples:
 		fmt.Printf("Current version in %s: %s\n\n", environment, currentDeployment.VersionID)
 
 		// List recent versions
-		resp, err := c.ListVersions(appID, "published", 10, 0)
+		resp, err := c.ListVersions(appID, "published", 10, 0, false)
 		if err != nil {
 			return err
 		}

@@ -82,13 +82,20 @@ type Deps struct {
 	PlanRuns             *store.PlanRunStore
 	TerraformPlansGitops TerraformPlansGitops
 	TerraformAutoPlan    bool
+
+	// Local plans (DEP-25): temporary versions expire after
+	// TerraformLocalPlanTTL (24 hours if zero); BundleDeleter deletes their
+	// bundles then. Without it they are not deleted.
+	TerraformLocalPlanTTL time.Duration
+	BundleDeleter         BundleDeleter
 }
 
 // Service implements smithd's operations
 type Service struct {
 	Deps
 
-	// planSweepAt is when the plans branch was last swept for leftovers
+	// planSweepAt is when the plans branch was last swept for leftovers,
+	// and for expired temporary versions
 	planSweepMu sync.Mutex
 	planSweepAt time.Time
 }

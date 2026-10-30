@@ -13,6 +13,8 @@ const (
 	KindNotFound
 	// KindConflict means the request conflicts with existing state (HTTP 409)
 	KindConflict
+	// KindForbidden means the caller may not do this (HTTP 403)
+	KindForbidden
 )
 
 // Error is an error caused by the caller's request rather than by smithd.
@@ -31,6 +33,10 @@ func invalid(code, message string) error {
 
 func notFound(message string) error {
 	return &Error{Kind: KindNotFound, Code: "not_found", Message: message}
+}
+
+func forbidden(code, message string) error {
+	return &Error{Kind: KindForbidden, Code: code, Message: message}
 }
 
 func conflict(message string) error {

@@ -577,6 +577,49 @@ reported as the check run `deploysmith/plan-<env>` on that commit
 version it starts a run for every environment with Terraform enabled
 (`TERRAFORM_AUTO_PLAN`, on by default).
 
+**Local plans.** A signed-in user (a session from `smithctl login`; API keys get
+`403 login_required`) can plan files that are not committed anywhere:
+
+**Endpoint:** `POST /apps/{appId}/terraform/local-plans`
+
+**Request Body:**
+```json
+{
+  "environment": "production",
+  "contentHash": "3b4f9c0d1e2a5b6c7d8e9f00112233445566778899aabbccddeeff0011223344"
+}
+```
+
+`contentHash` is the hex SHA-256 of the bundle's files (forge computes it with
+`tfbundle.ContentHash`). smithd makes the temporary version
+`local-<user>-<first 12 characters of the hash>`, or, for the same files again,
+moves the expiry of the existing one.
+
+**Response:** `201 Created`
+```json
+{
+  "versionId": "local-alice-3b4f9c0d1e2a",
+  "uploadUrl": "https://s3.example.com/drafts/viino/local-alice-3b4f9c0d1e2a/terraform.tar.gz?X-Amz-...",
+  "uploadExpires": "2025-01-15T10:35:00Z",
+  "expiresAt": "2025-01-16T10:30:00Z"
+}
+```
+
+Upload the bundle (`tfbundle.Pack`) to `uploadUrl`, then start the plan with
+`POST /apps/{appId}/versions/{versionId}/plan` as above, as the same user.
+`403 not_your_local_plan` for another user's version, `400 bundle_mismatch`
+if the uploaded files don't have the hash in the version's id,
+`400 local_plan_expired`, `400 terraform_not_enabled`. A newer plan of the
+same user for the same app and environment replaces the earlier one; plan-only
+runs of other users and of published versions are never replaced by it.
+
+Temporary versions are drafts with `"temporary": true`, `expiresAt` and
+`createdBy`. `POST .../versions/{versionId}/publish` and `.../deploy` answer
+`409` / `400 temporary_version`. `GET /apps/{appId}/versions` leaves them out
+unless `?includeTemporary=true`. smithd deletes them, with their bundle and
+plan-only runs, once `expiresAt` has passed (`TERRAFORM_LOCAL_PLAN_TTL`,
+default `24h`). No check runs or notifications are sent for them.
+
 ---
 
 ### 9. Create Auto-Deploy Policy
