@@ -1,0 +1,14 @@
+
+OpenTofu used the selected providers to generate the following execution
+plan. Resource actions are indicated with the following symbols:
+-/+ destroy and then create replacement
+
+OpenTofu will perform the following actions:
+
+  # terraform_data.rep must be replaced
+-/+ resource "terraform_data" "rep" {
+      ~ id               = "1a0107a5-5749-ca28-ac49-1b7e70841541" -> (known after apply)
+      ~ triggers_replace = "one" -> "two"
+    }
+
+Plan: 1 to add, 0 to change, 1 to destroy.

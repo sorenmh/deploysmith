@@ -27,6 +27,8 @@ func seed(t *testing.T, d *DB) {
 			VALUES ('dep-2', 'app-1', 'ver-2', 'production', 'awaiting_approval', 'alice', 'sha-3', 'main', 'sha-2', 'plan-main-sha-2')`,
 		`INSERT INTO terraform_environments (id, app_id, environment, backend_bucket, backend_key, backend_region, provisioned_at)
 			VALUES ('tf-1', 'app-1', 'production', 'tfstate', 'hello/production/main/terraform.tfstate', 'eu-north-1', '2026-10-19 10:07:00')`,
+		`INSERT INTO terraform_plans (deployment_id, plan_id, plan_hash, planned_at, to_add, to_destroy, destroys, resources, plan_text)
+			VALUES ('dep-2', 'plan-main-sha-2', 'abc', '2026-10-19 11:05:00', 2, 1, TRUE, '{"create":["a","b"],"destroy":["c"]}', 'Plan: 2 to add, 0 to change, 1 to destroy.')`,
 	}
 	for _, statement := range statements {
 		if _, err := d.Exec(statement); err != nil {
@@ -65,7 +67,7 @@ func TestDumpLoadSQLiteToPostgres(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() {
-		for _, table := range []string{"terraform_environments", "deployments", "policies", "versions", "environments", "applications"} {
+		for _, table := range []string{"terraform_plans", "terraform_environments", "deployments", "policies", "versions", "environments", "applications"} {
 			target.Exec("DELETE FROM " + table)
 		}
 		target.Close()
@@ -108,6 +110,9 @@ func TestDumpLoadSQLiteToPostgres(t *testing.T) {
 	}
 	if n := count(t, target, `SELECT COUNT(*) FROM terraform_environments WHERE provisioned_at IS NOT NULL`); n != 1 {
 		t.Errorf("%d terraform environments, want 1", n)
+	}
+	if n := count(t, target, `SELECT COUNT(*) FROM terraform_plans WHERE destroys AND to_add = 2 AND planned_at IS NOT NULL`); n != 1 {
+		t.Errorf("%d terraform plans, want 1", n)
 	}
 }
 

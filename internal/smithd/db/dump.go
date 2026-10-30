@@ -9,7 +9,7 @@ import (
 // order (parents before children). schema_version is intentionally excluded
 // since golang-migrate owns it. users and sessions are left out too: they are
 // recreated when people sign in again on the new database.
-var dumpTables = []string{"applications", "environments", "versions", "policies", "deployments", "terraform_environments"}
+var dumpTables = []string{"applications", "environments", "versions", "policies", "deployments", "terraform_environments", "terraform_plans"}
 
 // TableDump holds a generic snapshot of a single table's rows.
 type TableDump struct {
