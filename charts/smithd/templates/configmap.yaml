@@ -76,6 +76,8 @@ data:
   TERRAFORM_SOURCE_URL: {{ .sourceUrl | quote }}
   {{- end }}
   TERRAFORM_SOURCE_SECRET: {{ default "none" .sourceSecret | quote }}
+  TERRAFORM_PLANS_BRANCH: {{ .plansBranch | quote }}
+  TERRAFORM_AUTO_PLAN: {{ .autoPlan | quote }}
   {{- end }}
   {{- with .Values.config.ui }}
   {{- if .allowedUsers }}

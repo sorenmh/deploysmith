@@ -83,7 +83,7 @@ metadata:
 apiVersion: v1
 kind: ServiceAccount
 metadata:
-  name: tf-runner-readonly     # used by plan-only runs (DEP-22); read-only OpenBao/IAM role
+  name: tf-runner-dev-readonly  # used by plan-only runs (DEP-22); read-only OpenBao/IAM role
   namespace: tf-viino
 ---
 # The runner stores plans as Secrets/ConfigMaps and uses Leases in its own namespace.
@@ -334,32 +334,43 @@ Rejecting a plan changes nothing in git. A new deploy rewrites `<root>.yaml` (ne
 
 ## Plan-Only Runs
 
-For draft versions (DEP-22) smithd commits to a separate branch `plans` (one Flux `GitRepository` + `Kustomization` for that branch, set up in DEP-16), so `main` stays clean:
+For draft and published versions (DEP-22) smithd commits to a separate branch `plans` (one Flux `GitRepository` + `Kustomization` per environment for that branch, set up in DEP-16), so `main` stays clean:
 
 ```
 plans branch:
 environments/<env>/terraform-plans/<app>/<plan-name>/src/<root>/   # commit A'
 environments/<env>/terraform-plans/<app>/<plan-name>.yaml          # commit B': GitRepository (branch: plans, commit: A') + Terraform
+environments/<env>/terraform-plans/<app>/kustomization.yaml        # lists the <plan-name>.yaml files
+environments/<env>/terraform-plans/kustomization.yaml              # lists the apps
 ```
+
+`<plan-name>` is `plan-` and the first 12 characters of the plan run's id, so it is unique per run. The Terraform CR has that name, the readable plan is the ConfigMap `tfplan-default-<plan-name>`, and the GitRepository is `tf-<app>-<plan-name>` in the Flux namespace. The branch is created by smithd if it does not exist (a single commit with a README, no history in common with `main`).
 
 ```yaml
 apiVersion: infra.contrib.fluxcd.io/v1alpha2
 kind: Terraform
 metadata:
-  name: plan-dev-main-42540c4      # unique per version: the ConfigMap name follows it
+  name: plan-6a1f3c1e5c0b
   namespace: tf-viino
+  annotations:
+    deploysmith.io/plan-run-id: 6a1f3c1e-5c0b-4c43-a1f4-1f0f8f4e9d10
 spec:
-  planOnly: true                   # never applies, whatever approvePlan says
+  planOnly: true                   # never applies; there is no approvePlan
   storeReadablePlan: human
-  serviceAccountName: tf-runner-readonly
+  serviceAccountName: tf-runner-dev-readonly
   plan:
     lock: false                    # read-only IAM role can't write the DynamoDB lock item
   disableDriftDetection: true
   # sourceRef → GitRepository on branch "plans" pinned to A'; plan id = plan-plans-<A'[:10]>
   # backendConfig, tfVarsFiles, runnerPodTemplate as above, with the read-only OpenBao/AWS roles
+  # (tf-<app>-<env>-readonly, <app>-<env>-readonly)
 ```
 
-Status: `Plan=True`/`TerraformPlannedWithChanges` and `Ready=Unknown` with message `Plan generated: This object is in the plan only mode.`, or `TerraformPlannedNoChanges`. The readable plan is in ConfigMap `tfplan-default-plan-dev-main-42540c4`. Once stored, smithd removes the directory from the `plans` branch. Flux prunes the CR, and the plan Secret/ConfigMap are garbage-collected through their ownerReference.
+`spec.plan.lock` is a field of v0.16.6 (`Plan configures options that apply only to the plan phase`): `false` runs `tofu plan -lock=false`, so plan-only runs never wait for, or hold, the state lock of a real run.
+
+Status: `Plan=True`/`TerraformPlannedWithChanges` and `Ready=Unknown` with message `Plan generated: This object is in the plan only mode.`, or `TerraformPlannedNoChanges`. smithd follows it like a deployment (`planning`, then `planned` or `failed`), in its own table `plan_runs`: a plan-only run is not a deployment, so it can never be approved or applied, does not count for what runs in an environment and does not take part in the one-active-run rule of a root (DEP-18). Only one plan-only run per app, environment and root is active; a newer one supersedes it.
+
+**Cleanup.** Once the result is stored (or the run failed or was superseded) smithd removes the run's directory and file from the `plans` branch, in one commit for all finished runs, and takes it out of the kustomizations. Flux prunes the CR, and the plan Secret/ConfigMap are garbage-collected through their ownerReference. Once an hour smithd also removes everything on the branch that no active run needs (leftovers of a crash), and when no run is left and the branch has more than 100 commits, replaces its history with a single commit (a force push that only goes through if nobody pushed meanwhile). Every run adds two commits and its cleanup one, so the branch is short and `main` has none of it.
 
 The read-only role still needs Transit **decrypt** to read the state and a data key to encrypt the plan file. It needs `s3:GetObject` but no lock-table writes.
 

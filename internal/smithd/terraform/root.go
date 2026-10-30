@@ -59,6 +59,10 @@ type Root struct {
 	// VersionID and DeploymentID are recorded on the CR
 	VersionID    string
 	DeploymentID string
+	// PlanRun makes it a plan-only run (RootPlanOnlyManifest) instead of the
+	// root itself: the run's id, recorded on the CR in place of
+	// DeploymentID, and from which its CR and source are named
+	PlanRun string
 	// Branch and SourceCommit are the gitops branch and the commit holding
 	// the source in SourcePath (repo-relative)
 	Branch       string
@@ -83,6 +87,21 @@ func CRName(env, root string) string { return env + "-" + root }
 
 // SourceName is the name of a root's GitRepository, unique among all apps
 func SourceName(app, env, root string) string { return "tf-" + app + "-" + env + "-" + root }
+
+// PlanName is the name of a plan-only run: of its Terraform CR in the app's
+// namespace and of its files on the plans branch. It is unique per run, so
+// that each run has a readable plan (ConfigMap tfplan-default-<name>) of
+// its own, and short, since the runner pod is named after it.
+func PlanName(planRun string) string {
+	id := strings.ReplaceAll(planRun, "-", "")
+	if len(id) > 12 {
+		id = id[:12]
+	}
+	return "plan-" + id
+}
+
+// PlanSourceName is the name of the GitRepository of a plan-only run
+func PlanSourceName(app, planRun string) string { return "tf-" + app + "-" + PlanName(planRun) }
 
 // PlanID is the id tofu-controller gives the plan of a source commit on a
 // branch (status.plan.pending): plan-<branch>-<first 10 characters>
@@ -141,19 +160,28 @@ type terraformSpec struct {
 	Path        string   `yaml:"path"`
 	TFVarsFiles []string `yaml:"tfVarsFiles,omitempty"`
 	// ApprovePlan is always written, also when empty: a leftover approval
-	// would apply the next plan of the same revision
-	ApprovePlan                string `yaml:"approvePlan"`
-	StoreReadablePlan          string `yaml:"storeReadablePlan"`
-	ServiceAccountName         string `yaml:"serviceAccountName"`
-	DisableDriftDetection      bool   `yaml:"disableDriftDetection"`
-	DestroyResourcesOnDeletion bool   `yaml:"destroyResourcesOnDeletion"`
-	AlwaysCleanupRunnerPod     bool   `yaml:"alwaysCleanupRunnerPod"`
+	// would apply the next plan of the same revision. Plan-only runs have
+	// none.
+	ApprovePlan *string `yaml:"approvePlan,omitempty"`
+	// PlanOnly runs never apply, whatever approvePlan says; Plan.Lock false
+	// skips the state lock, which the read-only role can't take
+	PlanOnly                   bool      `yaml:"planOnly,omitempty"`
+	Plan                       *planSpec `yaml:"plan,omitempty"`
+	StoreReadablePlan          string    `yaml:"storeReadablePlan"`
+	ServiceAccountName         string    `yaml:"serviceAccountName"`
+	DisableDriftDetection      bool      `yaml:"disableDriftDetection"`
+	DestroyResourcesOnDeletion bool      `yaml:"destroyResourcesOnDeletion"`
+	AlwaysCleanupRunnerPod     bool      `yaml:"alwaysCleanupRunnerPod"`
 	BackendConfig              struct {
 		CustomConfiguration string `yaml:"customConfiguration"`
 	} `yaml:"backendConfig"`
 	RunnerPodTemplate struct {
 		Spec runnerPodSpec `yaml:"spec"`
 	} `yaml:"runnerPodTemplate"`
+}
+
+type planSpec struct {
+	Lock bool `yaml:"lock"`
 }
 
 type runnerPodSpec struct {
@@ -182,15 +210,49 @@ type volumeMount struct {
 // source commit, and its Terraform CR with approvePlan "", so the controller
 // plans the source and waits for approval
 func RootManifest(root Root, opts RootOptions) ([]byte, error) {
+	root.PlanRun = ""
+	return rootManifest(root, opts)
+}
+
+// RootPlanOnlyManifest returns the file of a plan-only run of the root (see
+// docs/specs/terraform-controller.md, "Plan-Only Runs"): the same
+// GitRepository and CR as RootManifest, named after the run, with
+// planOnly: true, no approvePlan, no state lock, and the read-only
+// ServiceAccount and OpenBao and AWS roles. The controller plans the source
+// and keeps the plan, and never applies it.
+func RootPlanOnlyManifest(root Root, planRun string, opts RootOptions) ([]byte, error) {
+	if planRun == "" {
+		return nil, fmt.Errorf("the plan-only run's id is required")
+	}
+	root.PlanRun = planRun
+	return rootManifest(root, opts)
+}
+
+func rootManifest(root Root, opts RootOptions) ([]byte, error) {
 	if root.SourceCommit == "" || root.Branch == "" {
 		return nil, fmt.Errorf("the root's source commit and branch are required")
 	}
+	planOnly := root.PlanRun != ""
 	namespace := Namespace(root.App)
 	sourceName := SourceName(root.App, root.Environment, root.Name)
+	crName := CRName(root.Environment, root.Name)
+	annotations := map[string]string{
+		"deploysmith.io/version":       root.VersionID,
+		"deploysmith.io/deployment-id": root.DeploymentID,
+	}
 	labels := map[string]string{
 		"deploysmith.io/app":         root.App,
 		"deploysmith.io/environment": root.Environment,
 		"deploysmith.io/root":        root.Name,
+	}
+	if planOnly {
+		sourceName = PlanSourceName(root.App, root.PlanRun)
+		crName = PlanName(root.PlanRun)
+		annotations = map[string]string{
+			"deploysmith.io/version": root.VersionID,
+			PlanRunAnnotation:        root.PlanRun,
+		}
+		labels["deploysmith.io/plan-only"] = "true"
 	}
 
 	source := gitRepositorySpec{
@@ -218,9 +280,15 @@ func RootManifest(root Root, opts RootOptions) ([]byte, error) {
 		// Relative to the repo root, not to path
 		spec.TFVarsFiles = []string{root.TFVarsFile}
 	}
-	spec.ApprovePlan = ""
+	if planOnly {
+		spec.PlanOnly = true
+		spec.Plan = &planSpec{Lock: false}
+	} else {
+		approve := ""
+		spec.ApprovePlan = &approve
+	}
 	spec.StoreReadablePlan = "human"
-	spec.ServiceAccountName = RunnerServiceAccount(root.Environment, false)
+	spec.ServiceAccountName = RunnerServiceAccount(root.Environment, planOnly)
 	spec.DisableDriftDetection = true
 	spec.DestroyResourcesOnDeletion = false
 	spec.AlwaysCleanupRunnerPod = true
@@ -238,20 +306,21 @@ func RootManifest(root Root, opts RootOptions) ([]byte, error) {
 			APIVersion: "infra.contrib.fluxcd.io/v1alpha2",
 			Kind:       "Terraform",
 			Metadata: metadata{
-				Name:      CRName(root.Environment, root.Name),
-				Namespace: namespace,
-				Labels:    labels,
-				Annotations: map[string]string{
-					"deploysmith.io/version":       root.VersionID,
-					"deploysmith.io/deployment-id": root.DeploymentID,
-				},
+				Name:        crName,
+				Namespace:   namespace,
+				Labels:      labels,
+				Annotations: annotations,
 			},
 			Spec: spec,
 		},
 	}
 
 	var buf bytes.Buffer
-	fmt.Fprintf(&buf, "# Terraform root %s of %s in %s, version %s, managed by smithd\n", root.Name, root.App, root.Environment, root.VersionID)
+	if planOnly {
+		fmt.Fprintf(&buf, "# Plan-only run of Terraform root %s of %s in %s, version %s, managed by smithd\n", root.Name, root.App, root.Environment, root.VersionID)
+	} else {
+		fmt.Fprintf(&buf, "# Terraform root %s of %s in %s, version %s, managed by smithd\n", root.Name, root.App, root.Environment, root.VersionID)
+	}
 	for _, obj := range objects {
 		buf.WriteString("---\n")
 		enc := yaml.NewEncoder(&buf)
@@ -270,15 +339,16 @@ func RootManifest(root Root, opts RootOptions) ([]byte, error) {
 // what tf-runner-auth needs to log in to OpenBao and get AWS credentials
 // (docs/terraform-cluster-setup.md, "Runner Environment")
 func runnerPod(root Root, opts RootOptions) runnerPodSpec {
+	readOnly := root.PlanRun != ""
 	pod := runnerPodSpec{Image: root.RunnerImage}
 	pod.Env = []envVar{
 		{Name: "BAO_ADDR", Value: opts.OpenBaoAddr},
-		{Name: "SMITH_BAO_AUTH_ROLE", Value: AuthRole(root.App, root.Environment, false)},
+		{Name: "SMITH_BAO_AUTH_ROLE", Value: AuthRole(root.App, root.Environment, readOnly)},
 	}
 	if opts.AuthMount != "" {
 		pod.Env = append(pod.Env, envVar{Name: "SMITH_BAO_AUTH_MOUNT", Value: opts.AuthMount})
 	}
-	pod.Env = append(pod.Env, envVar{Name: "SMITH_BAO_AWS_ROLE", Value: AWSRole(root.App, root.Environment, false)})
+	pod.Env = append(pod.Env, envVar{Name: "SMITH_BAO_AWS_ROLE", Value: AWSRole(root.App, root.Environment, readOnly)})
 	if opts.AWSMount != "" {
 		pod.Env = append(pod.Env, envVar{Name: "SMITH_BAO_AWS_MOUNT", Value: opts.AWSMount})
 	}

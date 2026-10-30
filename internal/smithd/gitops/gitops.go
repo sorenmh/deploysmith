@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/go-git/go-git/v5"
+	"github.com/go-git/go-git/v5/config"
 	"github.com/go-git/go-git/v5/plumbing"
 	"github.com/go-git/go-git/v5/plumbing/object"
 	"github.com/go-git/go-git/v5/plumbing/transport"
@@ -31,6 +32,9 @@ type Service struct {
 	repoURL    string
 	sshKeyPath string
 	workDir    string
+	// branch is the branch to work on, created if the remote has none; the
+	// remote's default branch if empty
+	branch string
 
 	mu   sync.Mutex
 	repo *git.Repository
@@ -51,6 +55,17 @@ func NewService(repoURL, sshKeyPath string) *Service {
 		pushAttempts: 3,
 		retryDelay:   time.Second,
 	}
+}
+
+// NewBranchService creates a gitops service for another branch of the
+// repository than the default one, with a working copy of its own. The
+// branch is created, with no history in common with the others, if the
+// remote does not have it yet.
+func NewBranchService(repoURL, sshKeyPath, branch string) *Service {
+	s := NewService(repoURL, sshKeyPath)
+	s.branch = branch
+	s.workDir += "-" + branch
+	return s
 }
 
 // isSafePathSegment reports whether name can be used as a single directory
@@ -169,8 +184,8 @@ func (s *Service) changeSteps(steps []step) ([]string, error) {
 	return nil, fmt.Errorf("gitops deploy failed after %d attempts: %w", s.pushAttempts, lastErr)
 }
 
-// branch returns the branch the working copy is on
-func (s *Service) branch() (string, error) {
+// currentBranch returns the branch the working copy is on
+func (s *Service) currentBranch() (string, error) {
 	head, err := s.repo.Reference(plumbing.HEAD, false)
 	if err != nil {
 		return "", fmt.Errorf("failed to read HEAD: %w", err)
@@ -228,12 +243,9 @@ func (s *Service) sync() error {
 		} else {
 			// Remove work dir if it exists but isn't a usable git repo
 			os.RemoveAll(s.workDir)
-			repo, err := git.PlainClone(s.workDir, false, &git.CloneOptions{
-				URL:  s.repoURL,
-				Auth: auth,
-			})
+			repo, err := s.clone(auth)
 			if err != nil {
-				return fmt.Errorf("failed to clone repo: %w", err)
+				return err
 			}
 			s.repo = repo
 			return nil
@@ -275,6 +287,64 @@ func (s *Service) sync() error {
 	}
 
 	return nil
+}
+
+// clone clones the remote into the working directory, on the service's
+// branch if it has one
+func (s *Service) clone(auth transport.AuthMethod) (*git.Repository, error) {
+	options := &git.CloneOptions{URL: s.repoURL, Auth: auth}
+	if s.branch != "" {
+		options.ReferenceName = plumbing.NewBranchReferenceName(s.branch)
+		options.SingleBranch = true
+	}
+	var noRef git.NoMatchingRefSpecError
+	repo, err := git.PlainClone(s.workDir, false, options)
+	if s.branch != "" && errors.As(err, &noRef) {
+		os.RemoveAll(s.workDir)
+		return s.createBranch(auth)
+	}
+	if err != nil {
+		return nil, fmt.Errorf("failed to clone repo: %w", err)
+	}
+	return repo, nil
+}
+
+// createBranch creates the service's branch on the remote, with a single
+// commit that has no parent, so that it never shares history with, or
+// merges into, the repository's other branches
+func (s *Service) createBranch(auth transport.AuthMethod) (*git.Repository, error) {
+	fail := func(err error) (*git.Repository, error) {
+		return nil, fmt.Errorf("failed to create branch %s: %w", s.branch, err)
+	}
+	repo, err := git.PlainInit(s.workDir, false)
+	if err != nil {
+		return fail(err)
+	}
+	if err := repo.Storer.SetReference(plumbing.NewSymbolicReference(plumbing.HEAD, plumbing.NewBranchReferenceName(s.branch))); err != nil {
+		return fail(err)
+	}
+	if _, err := repo.CreateRemote(&config.RemoteConfig{Name: "origin", URLs: []string{s.repoURL}}); err != nil {
+		return fail(err)
+	}
+	readme := fmt.Sprintf("# %s\n\nWritten by DeploySmith (smithd), do not edit. This branch holds the plan-only runs of Terraform apps while they run and is cleaned up afterwards. Its history is rewritten from time to time.\n", s.branch)
+	if err := os.WriteFile(filepath.Join(s.workDir, "README.md"), []byte(readme), 0644); err != nil {
+		return fail(err)
+	}
+	worktree, err := repo.Worktree()
+	if err != nil {
+		return fail(err)
+	}
+	if _, err := worktree.Add("README.md"); err != nil {
+		return fail(err)
+	}
+	created := &Service{repo: repo, sshKeyPath: s.sshKeyPath}
+	if _, _, err := created.commit("Create the " + s.branch + " branch"); err != nil {
+		return fail(err)
+	}
+	if err := created.push(); err != nil {
+		return fail(err)
+	}
+	return repo, nil
 }
 
 // processManifests flattens the uploaded files, extracting tarballs if present

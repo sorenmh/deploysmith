@@ -60,6 +60,20 @@ func TestReaderRun(t *testing.T) {
 	}
 }
 
+func TestReaderRunOfPlanOnlyRun(t *testing.T) {
+	cluster := terraformtest.New(t)
+	plannedAt := time.Date(2026, 10, 28, 12, 30, 0, 0, time.UTC)
+	cluster.SetCR(runNamespace, "plan-0123456789ab", terraformtest.WithChanges("", sourceCommit, "plan-plans-8fa3d36e98", plannedAt).ForPlanRun("run-1"))
+
+	run, err := cluster.Reader().Run(context.Background(), runNamespace, "plan-0123456789ab")
+	if err != nil || run == nil {
+		t.Fatalf("Run = %+v, %v", run, err)
+	}
+	if run.PlanRunID != "run-1" || run.DeploymentID != "" || run.PendingPlan != "plan-plans-8fa3d36e98" || run.ApprovePlan != "" {
+		t.Errorf("unexpected run %+v", run)
+	}
+}
+
 func TestReaderReadablePlan(t *testing.T) {
 	cluster := terraformtest.New(t)
 	reader := cluster.Reader()

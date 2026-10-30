@@ -7,7 +7,7 @@ deployed and whether that worked:
 | Check run | When |
 | --- | --- |
 | `deploysmith/deploy-<env>` | every deployment of the version to `<env>`, manual or auto-deploy |
-| `deploysmith/plan-<env>` | the plan of a Terraform deployment (DEP-19); plan-only runs for pull requests follow in DEP-22 |
+| `deploysmith/plan-<env>` | the plan of a Terraform deployment (DEP-19), and the plan-only run of a terraform version, made by `forge plan` or automatically when the version is published (DEP-22) |
 
 A deployment's check run is **queued** when the deployment is requested,
 **in progress** while Flux applies it (with `FLUX_KUSTOMIZATION_NAME`), and
@@ -16,6 +16,14 @@ version, environment, who or which policy started it and the gitops commit;
 on failure the error is shown below it. With `UI_PUBLIC_URL` set, **Details**
 links to the deployment in the web UI. Each deployment gets its own check
 run; GitHub shows the latest one per name.
+
+A plan-only run's `deploysmith/plan-<env>` check is **in progress** until the
+controller has made the plan, then **completed**: *success* for a plan without
+destroys (including no changes), *neutral* if it destroys or replaces
+resources, and *failure* if the plan failed. A newer plan of the same app and
+environment ends the older check as *neutral* ("Plan replaced"). The summary
+has the counts and the resources by action, not the plan text; a plan-only run
+has no deploy check, since nothing is deployed.
 
 Reporting is a side channel: if GitHub is down, the app is not installed on
 the repository or anything else goes wrong, smithd logs it and the

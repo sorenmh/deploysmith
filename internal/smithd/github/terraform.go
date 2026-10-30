@@ -123,10 +123,15 @@ func planTitle(p *slack.PlanSummary) string {
 // planSummary describes a Terraform plan in markdown: the counts, destroys
 // highlighted, and the resources by action
 func planSummary(d slack.Deploy) string {
-	p := d.Plan
-	if p == nil {
+	if d.Plan == nil {
 		return summary(d, "No plan.")
 	}
+	return planBody(d.Plan, "Check the destroyed and replaced resources before approving.") + summary(d, "**Deployment**")
+}
+
+// planBody is the plan of planSummary without the deployment. advice follows
+// the warning that the plan destroys resources.
+func planBody(p *slack.PlanSummary, advice string) string {
 	var b strings.Builder
 	if p.NoChanges() {
 		b.WriteString("**No changes.** The infrastructure matches the configuration.\n\n")
@@ -134,13 +139,12 @@ func planSummary(d slack.Deploy) string {
 		fmt.Fprintf(&b, "**Plan: %s**\n\n", p.Counts())
 	}
 	if p.Destroys() {
-		b.WriteString("> [!WARNING]\n> **This plan destroys resources.** Check the destroyed and replaced resources before approving.\n\n")
+		fmt.Fprintf(&b, "> [!WARNING]\n> **This plan destroys resources.** %s\n\n", advice)
 	}
 	list(&b, "Destroyed", p.Destroyed)
 	list(&b, "Replaced (destroyed and created again)", p.Replaced)
 	list(&b, "Created", p.Created)
 	list(&b, "Updated in place", p.Updated)
-	b.WriteString(summary(d, "**Deployment**"))
 	return b.String()
 }
 

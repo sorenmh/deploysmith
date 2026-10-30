@@ -95,6 +95,9 @@ func (c *Cluster) Reader() *terraform.Reader { return terraform.NewReaderFor(c.C
 type CR struct {
 	// DeploymentID is the annotation smithd sets
 	DeploymentID string
+	// PlanRunID is the annotation smithd sets on the CR of a plan-only run
+	// instead (see ForPlanRun)
+	PlanRunID string
 	// ApprovePlan is spec.approvePlan
 	ApprovePlan string
 
@@ -141,6 +144,14 @@ func WithoutChanges(deploymentID, source string, plannedAt time.Time) CR {
 		Plan:  terraform.Condition{Status: "False", Reason: terraform.ReasonPlannedNoChanges, Message: "Plan no changes"},
 		Ready: terraform.Condition{Status: "True", Reason: terraform.ReasonPlannedNoChanges, Message: "Plan no changes: main@sha1:" + source},
 	}
+}
+
+// ForPlanRun turns a CR into that of a plan-only run: written by the run
+// instead of a deployment, and planOnly
+func (c CR) ForPlanRun(planRunID string) CR {
+	c.DeploymentID = ""
+	c.PlanRunID = planRunID
+	return c
 }
 
 // Approved turns a CR with a plan into one that applies it
@@ -191,14 +202,20 @@ func (cr CR) object(namespace, name string, generation int64) *unstructured.Unst
 	if !cr.PlannedAt.IsZero() {
 		status["lastPlanAt"] = cr.PlannedAt.UTC().Format(time.RFC3339)
 	}
+	annotations := map[string]any{terraform.DeploymentAnnotation: cr.DeploymentID}
+	spec := map[string]any{"approvePlan": cr.ApprovePlan}
+	if cr.PlanRunID != "" {
+		annotations = map[string]any{terraform.PlanRunAnnotation: cr.PlanRunID}
+		spec = map[string]any{"planOnly": true}
+	}
 	return &unstructured.Unstructured{Object: map[string]any{
 		"apiVersion": "infra.contrib.fluxcd.io/v1alpha2",
 		"kind":       "Terraform",
 		"metadata": map[string]any{
 			"name": name, "namespace": namespace, "generation": generation,
-			"annotations": map[string]any{terraform.DeploymentAnnotation: cr.DeploymentID},
+			"annotations": annotations,
 		},
-		"spec":   map[string]any{"approvePlan": cr.ApprovePlan},
+		"spec":   spec,
 		"status": status,
 	}}
 }

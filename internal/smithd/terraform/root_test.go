@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"github.com/sorenmh/deploysmith/internal/smithd/models"
+	"gopkg.in/yaml.v3"
 )
 
 var testRootOptions = RootOptions{
@@ -254,5 +255,102 @@ func TestPlanID(t *testing.T) {
 func TestHCLString(t *testing.T) {
 	if got := hclString(`a"b\c${x}%{y}`); got != `"a\"b\\c$${x}%%{y}"` {
 		t.Errorf("hclString = %s", got)
+	}
+}
+
+func TestRootPlanOnlyManifest(t *testing.T) {
+	root := testRoot()
+	root.Branch = "plans"
+	root.SourcePath = "environments/dev/terraform-plans/viino/plan-0123456789ab/src/main"
+	root.TFVarsFile = root.SourcePath + "/env/dev.tfvars"
+	root.DeploymentID = ""
+	got, err := RootPlanOnlyManifest(root, "01234567-89ab-cdef-0123-456789abcdef", testRootOptions)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	var docs []map[string]any
+	dec := yaml.NewDecoder(strings.NewReader(string(got)))
+	for {
+		var doc map[string]any
+		if err := dec.Decode(&doc); err != nil {
+			break
+		}
+		docs = append(docs, doc)
+	}
+	if len(docs) != 2 {
+		t.Fatalf("got %d objects:\n%s", len(docs), got)
+	}
+
+	source, cr := docs[0], docs[1]
+	if name := source["metadata"].(map[string]any)["name"]; name != "tf-viino-plan-0123456789ab" {
+		t.Errorf("GitRepository name = %v", name)
+	}
+	ref := source["spec"].(map[string]any)["ref"].(map[string]any)
+	if ref["branch"] != "plans" || ref["commit"] != root.SourceCommit {
+		t.Errorf("GitRepository ref = %v", ref)
+	}
+
+	meta := cr["metadata"].(map[string]any)
+	if meta["name"] != "plan-0123456789ab" || meta["namespace"] != "tf-viino" {
+		t.Errorf("CR metadata = %v", meta)
+	}
+	annotations := meta["annotations"].(map[string]any)
+	if annotations[PlanRunAnnotation] != "01234567-89ab-cdef-0123-456789abcdef" || annotations[DeploymentAnnotation] != nil {
+		t.Errorf("annotations = %v", annotations)
+	}
+	spec := cr["spec"].(map[string]any)
+	if spec["planOnly"] != true {
+		t.Errorf("planOnly = %v", spec["planOnly"])
+	}
+	if lock, ok := spec["plan"].(map[string]any)["lock"]; !ok || lock != false {
+		t.Errorf("plan = %v, want lock: false", spec["plan"])
+	}
+	if _, ok := spec["approvePlan"]; ok {
+		t.Errorf("a plan-only run has approvePlan %v", spec["approvePlan"])
+	}
+	if spec["serviceAccountName"] != "tf-runner-dev-readonly" {
+		t.Errorf("serviceAccountName = %v", spec["serviceAccountName"])
+	}
+	if spec["path"] != "./"+root.SourcePath || spec["destroyResourcesOnDeletion"] != false {
+		t.Errorf("path = %v, destroyResourcesOnDeletion = %v", spec["path"], spec["destroyResourcesOnDeletion"])
+	}
+	for _, want := range []string{
+		"- name: SMITH_BAO_AUTH_ROLE\n          value: tf-viino-dev-readonly\n",
+		"- name: SMITH_BAO_AWS_ROLE\n          value: viino-dev-readonly\n",
+		`key            = "viino/dev/main/terraform.tfstate"`,
+	} {
+		if !strings.Contains(string(got), want) {
+			t.Errorf("manifest does not contain %q:\n%s", want, got)
+		}
+	}
+
+	// The root's own manifest is not affected
+	real, err := RootManifest(root, testRootOptions)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(real), "planOnly") || !strings.Contains(string(real), "approvePlan: \"\"") || !strings.Contains(string(real), "serviceAccountName: tf-runner-dev\n") {
+		t.Errorf("root manifest:\n%s", real)
+	}
+}
+
+func TestRootPlanOnlyManifestRequiresRunAndSource(t *testing.T) {
+	if _, err := RootPlanOnlyManifest(testRoot(), "", testRootOptions); err == nil {
+		t.Error("RootPlanOnlyManifest without a run succeeded")
+	}
+	root := testRoot()
+	root.SourceCommit = ""
+	if _, err := RootPlanOnlyManifest(root, "run", testRootOptions); err == nil {
+		t.Error("RootPlanOnlyManifest without a source commit succeeded")
+	}
+}
+
+func TestPlanName(t *testing.T) {
+	if got := PlanName("01234567-89ab-cdef-0123-456789abcdef"); got != "plan-0123456789ab" {
+		t.Errorf("PlanName = %q", got)
+	}
+	if got := PlanName("abc"); got != "plan-abc" {
+		t.Errorf("PlanName = %q", got)
 	}
 }

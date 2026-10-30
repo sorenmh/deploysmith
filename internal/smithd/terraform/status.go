@@ -24,6 +24,10 @@ const (
 // deployment that wrote it
 const DeploymentAnnotation = "deploysmith.io/deployment-id"
 
+// PlanRunAnnotation is set by smithd on the Terraform CR of a plan-only run
+// to the run that wrote it
+const PlanRunAnnotation = "deploysmith.io/plan-run-id"
+
 // Condition is one status condition of a Terraform CR
 type Condition struct {
 	// Status is True, False or Unknown; empty if the CR has no such condition
@@ -37,6 +41,8 @@ type Condition struct {
 type Run struct {
 	// DeploymentID is the deployment that wrote the CR (DeploymentAnnotation)
 	DeploymentID string
+	// PlanRunID is the plan-only run that wrote the CR (PlanRunAnnotation)
+	PlanRunID string
 	// ApprovePlan is spec.approvePlan: the plan id approved, "" if none
 	ApprovePlan string
 
@@ -73,6 +79,7 @@ func parseRun(obj map[string]any) *Run {
 	run.Generation = intField(metadata, "generation")
 	annotations, _ := metadata["annotations"].(map[string]any)
 	run.DeploymentID, _ = annotations[DeploymentAnnotation].(string)
+	run.PlanRunID, _ = annotations[PlanRunAnnotation].(string)
 
 	spec, _ := obj["spec"].(map[string]any)
 	run.ApprovePlan, _ = spec["approvePlan"].(string)

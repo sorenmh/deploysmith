@@ -120,6 +120,8 @@ func NewServer(cfg *config.Config, database *db.DB) *Server {
 	if reader := terraform.NewReader(); reader != nil {
 		deps.TerraformReader = reader
 	}
+	deps.PlanRuns = store.NewPlanRunStore(database)
+	deps.TerraformAutoPlan = cfg.TerraformAutoPlan
 	deps.TerraformSharedBackend = models.TerraformBackend{Bucket: cfg.TerraformStateBucket, Region: cfg.TerraformStateRegion, LockTable: cfg.TerraformLockTable}
 	if deps.TerraformManifests, err = terraformManifestOptions(cfg); err != nil {
 		log.Fatalf("Failed to configure Terraform support: %v", err)
@@ -130,6 +132,8 @@ func NewServer(cfg *config.Config, database *db.DB) *Server {
 	}
 	if deps.Terraform != nil {
 		deps.TerraformGitops = gitopsService
+		// Plan-only runs have a working copy of their own, on their own branch
+		deps.TerraformPlansGitops = gitops.NewBranchService(cfg.GitopsRepo, cfg.GitopsSSHKeyPath, cfg.TerraformPlansBranch)
 		log.Printf("Terraform support enabled (OpenBao at %s)", cfg.OpenBaoAddr)
 	} else {
 		log.Printf("Terraform support disabled: OPENBAO_ADDR is not set")
@@ -187,6 +191,9 @@ func (s *Server) setupAuthenticatedRoutes(r chi.Router) {
 
 	// Deployment routes
 	r.Post("/apps/{appId}/versions/{versionId}/deploy", s.handleDeployVersion)
+	r.Post("/apps/{appId}/versions/{versionId}/plan", s.handlePlanVersion)
+	r.Get("/apps/{appId}/versions/{versionId}/plan", s.handleGetVersionPlan)
+	r.Get("/plan-runs/{planRunId}", s.handleGetPlanRun)
 	r.Get("/deployments", s.handleListDeployments)
 	r.Get("/deployments/{deploymentId}", s.handleGetDeployment)
 	r.Post("/deployments/{deploymentId}/approve", s.handleApproveDeployment)
@@ -552,6 +559,7 @@ func (s *Server) handlePublishVersion(w http.ResponseWriter, r *http.Request) {
 
 	s.svc.VersionPublished(r.Context(), app, version)
 	s.svc.TriggerAutoDeploys(r.Context(), app, version)
+	s.svc.TriggerAutoPlans(r.Context(), app, version)
 
 	resp := models.PublishVersionResponse{
 		VersionID:     version.VersionID,
