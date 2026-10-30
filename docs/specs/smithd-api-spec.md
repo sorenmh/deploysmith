@@ -453,6 +453,92 @@ Returns `404` if the deployment doesn't exist.
 
 ---
 
+### 8c. Plan a Terraform Version (plan-only run)
+
+Show what a draft or published terraform version would change in an
+environment, without deploying it. A plan-only run is not a deployment: it
+can't be approved or applied, it doesn't count for what runs in the
+environment, and it never blocks or changes a deployment of the same root. See
+[Plan-Only Runs](terraform-controller.md#plan-only-runs).
+
+**Endpoint:** `POST /apps/{appId}/versions/{versionId}/plan`
+
+**Request Body:**
+```json
+{
+  "environment": "production"
+}
+```
+
+**Response:** `202 Accepted`, once the run is committed to the `plans` branch
+and waits for the controller:
+```json
+{
+  "id": "6a1f3c1e-5c0b-4c43-a1f4-1f0f8f4e9d10",
+  "appId": "app-123",
+  "appName": "infra",
+  "versionId": "42540c4-123",
+  "environment": "production",
+  "root": "main",
+  "status": "planning",
+  "triggeredBy": "ci",
+  "startedAt": "2025-01-15T10:40:00Z",
+  "sourceCommitSha": "8fa3d36e98b07c3fa4aa308bfd6992f75e1f38f7",
+  "gitopsCommitSha": "1c0ffee...",
+  "planId": "plan-plans-8fa3d36e98"
+}
+```
+
+A run goes `pending` → `planning` → `planned`, or ends as `failed` or
+`superseded`. Only one run per app, environment and root is active: a newer
+one replaces it, and the older run becomes `superseded` (and its check run
+neutral). The refusals are `400`: `terraform_disabled` (no OpenBao),
+`terraform_plans_disabled`, `not_terraform`, `terraform_not_enabled`,
+`terraform_not_provisioned`, `unsupported_opentofu_version`, `no_bundle` (a
+draft whose bundle isn't uploaded yet) and `validation_failed`; and `404` for
+an unknown app or version.
+
+**Endpoint:** `GET /plan-runs/{planRunId}`
+
+**Response:** `200 OK` with the run as above. Once `planned` it has the plan,
+with the full text (sensitive values masked by OpenTofu); `failed` runs have
+`errorMessage` (the controller's `Ready` message and the events of the CR):
+```json
+{
+  "id": "6a1f3c1e-5c0b-4c43-a1f4-1f0f8f4e9d10",
+  "status": "planned",
+  "completedAt": "2025-01-15T10:41:30Z",
+  "plan": {
+    "planId": "plan-plans-8fa3d36e98",
+    "plannedAt": "2025-01-15T10:41:20Z",
+    "toAdd": 3,
+    "toChange": 1,
+    "toDestroy": 2,
+    "destroys": true,
+    "resources": {
+      "create": ["aws_s3_bucket.logs"],
+      "update": ["aws_lambda_function.api"],
+      "replace": ["aws_db_instance.main"],
+      "destroy": ["aws_sqs_queue.old"]
+    },
+    "text": "Terraform will perform the following actions: ..."
+  }
+}
+```
+
+**Endpoint:** `GET /apps/{appId}/versions/{versionId}/plan?environment=production`
+
+**Response:** `200 OK` with the newest run of the version for the environment,
+or `404` if there is none. Results are kept for 30 days.
+
+If the version was built from a known repository and commit, the run is also
+reported as the check run `deploysmith/plan-<env>` on that commit
+([github-checks.md](../github-checks.md)). When smithd publishes a terraform
+version it starts a run for every environment with Terraform enabled
+(`TERRAFORM_AUTO_PLAN`, on by default).
+
+---
+
 ### 9. Create Auto-Deploy Policy
 
 Create an auto-deployment policy for an application.

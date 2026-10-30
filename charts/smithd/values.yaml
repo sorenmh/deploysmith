@@ -300,6 +300,15 @@ config:
     # Secret in the Flux namespace with a read-only deploy key for sourceUrl
     # ("" for none, e.g. a public repository)
     sourceSecret: gitops-readonly
+    # Branch of the gitops repository for plan-only runs (forge plan). smithd
+    # creates it; Flux needs a GitRepository and Kustomization on it
+    # (docs/terraform-cluster-setup.md).
+    plansBranch: plans
+    # Plan every terraform version when it is published, for each environment
+    # with Terraform enabled, and report it as the check run
+    # deploysmith/plan-<env> (needs the version's source, see
+    # docs/github-checks.md). Plans are read-only.
+    autoPlan: true
   # Login with GitHub (optional, see docs/login-with-github.md). People log in
   # to smithctl (device flow) and the web UI with a GitHub App or OAuth App;
   # the UI is then served on the main ingress and requires signing in, so

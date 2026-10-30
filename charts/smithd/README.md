@@ -495,6 +495,22 @@ is the check run `deploysmith/plan-<env>` with the counts and the resources
 that are destroyed highlighted (not the plan text, which is only in smithd),
 and the deploy check run stays open until the plan is applied.
 
+**Plan-only runs.** `forge plan --wait --env <env>` (or `POST
+/api/v1/apps/<app>/versions/<version>/plan`) shows what a draft or published
+terraform version would change, without deploying it. smithd commits the
+bundle and a `planOnly` Terraform CR to the branch `config.terraform.plansBranch`
+(`plans`) of the gitops repository, never to `main`: the CR runs as the
+read-only ServiceAccount `tf-runner-<env>-readonly` with the read-only OpenBao
+and AWS roles, without the state lock, and can't be approved. smithd copies the
+plan into its database and removes the CR from the branch again. Flux needs a
+GitRepository `gitops-plans` and a Kustomization `terraform-plans-<env>` for the
+branch ([docs/terraform-cluster-setup.md](../../docs/terraform-cluster-setup.md#gitops-repository)).
+A newer plan for the same app and environment replaces a running one, and plan-only runs never
+block or change a real deployment. With `config.terraform.autoPlan` (default
+`true`) every terraform version is planned when it is published, for each
+environment with Terraform enabled, and the plan is reported as the check run
+`deploysmith/plan-<env>` on the version's commit (`docs/github-checks.md`).
+
 An existing app keeps its backend:
 `smithctl app terraform enable legacy --env prod --backend-bucket legacy-tfstate --backend-key prod/terraform.tfstate --backend-region eu-central-1 --backend-lock-table legacy-tflock --encryption-fallback`.
 `--encryption-fallback` lets the first apply read the plaintext state and
