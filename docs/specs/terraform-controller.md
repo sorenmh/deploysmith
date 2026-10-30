@@ -83,7 +83,7 @@ metadata:
 apiVersion: v1
 kind: ServiceAccount
 metadata:
-  name: tf-runner-readonly     # used by plan-only runs (DEP-22); read-only OpenBao/IAM role
+  name: tf-runner-dev-readonly  # used by plan-only runs (DEP-22); read-only OpenBao/IAM role
   namespace: tf-viino
 ---
 # The runner stores plans as Secrets/ConfigMaps and uses Leases in its own namespace.
@@ -290,6 +290,15 @@ Observed conditions and how smithd maps them to deployment states (DEP-18/19):
 
 The runner pod is deleted after each run, so its logs are gone. The condition message and the Events on the `Terraform` object (`kubectl get events`, reasons `TerraformPlanSucceed`, `TerraformAppliedSucceed`, `TFExecPlanFailed`, …) are what smithd keeps for failed runs.
 
+**As implemented (DEP-19)**, `internal/smithd/service/track_terraform.go`: every 10 seconds smithd looks at the CR of each deployment that is `planning`, `awaiting_approval` or `applying` (state is in the database, so a restart loses nothing; a replica only reports a change it made, through a conditional update). A CR is the deployment's if its annotation `deploysmith.io/deployment-id` says so; one that still names an older deployment is Flux not having applied the commit yet, one naming a newer deployment makes this one `stale`. Within that:
+
+- `planning` → `awaiting_approval`: `lastPlannedRevision` is the deployment's source commit, `Plan=True`/`TerraformPlannedWithChanges`, `plan.pending` is the stored plan id, and the ConfigMap's `savedPlan` is that id. smithd stores the text, summary and `plan-hash`. → `applied`: the same with `Ready=True`/`TerraformPlannedNoChanges`. → `failed`: `Ready=False` with `lastAttemptedRevision` equal to the source commit. Without any of these for an hour (Flux not applying the CR, the readable plan unreadable) it fails.
+- `awaiting_approval` → `stale`: `lastPlannedRevision` or `plan.pending` is another one, the CR is gone, or the controller planned again (`lastPlanAt` changed) and the `plan-hash` is not the stored one. The same plan again only updates `plannedAt`. → `applying` if `spec.approvePlan` is the plan id (an approval made in git).
+- `applying` → `applied`: `Ready=True`/`TerraformAppliedSucceed`, `lastAppliedRevision` is the source commit and `plan.lastApplied` the plan id; smithd then compares the `plan-hash` of the plan made again with the reviewed one and records the result. → `failed`: `Ready=False` for the source commit, or the CR is gone. An applying run is never made stale.
+- A failed run keeps the `Ready` reason and message and the last Warning events of the CR in `error_message`.
+
+The approval API (DEP-20, `internal/smithd/service/approve_terraform.go`) sets `applying` itself when it commits the approval (conditional on `awaiting_approval`, so an approval that is repeated or made by two replicas counts once); an approval found in the repo first is recorded with the approver `git`.
+
 ### Readable Plan
 
 `storeReadablePlan: human` stores the output of `tofu show tfplan` (sensitive values masked) in a **ConfigMap** in the CR's namespace:
@@ -315,36 +324,53 @@ The binary plan is a gzip'd **Secret** `tfplan-default-<cr>` (key `tfplan`), chu
 4. When `Ready=True`/`TerraformAppliedSucceed` and `plan.lastApplied == <id>`, smithd compares the ConfigMap `plan-hash` (now from the re-plan) with the approved hash. If they differ, it marks the deployment "applied plan differed from the reviewed plan".
 5. smithd commits `approvePlan: ""`. Then the next plan of the same revision (drift, spec change, retry) waits for approval again.
 
+**As implemented (DEP-20):**
+
+- `POST /deployments/{id}/approve` does the checks of step 1 (`checkPlanCurrent`; the CR must also be the deployment's, by its annotation, and not approve another plan), refuses plans with destroys or replacements unless the request has `confirmDestroy: true` (the error lists them), then commits through `gitops.SetTerraformApproval`. That changes the one `approvePlan:` line of `<root>.yaml`, and only if the file is still the deployment's (annotation) and holds no other approval; the pinned `GitRepository` keeps the revision. Repeating it is a no-op (no new commit) and an `applying` deployment answers 200. Who approved, when, and whether destroys were confirmed are columns of the deployment (migration 009) and in the commit message.
+- Step 5 is a pass of the watcher (`resetApprovals`): every approved deployment that is `applied` or `failed` and has no `approval_reset_at` gets `approvePlan: ""` committed (only where the file still is its own and approved), then `approval_reset_at` is set. The work list is in the database, so it survives restarts, a failed push is tried again every 10 s, and replicas race harmlessly: the second finds the file reset already and commits nothing. A failed run is reset too, so the approval can't apply a later plan of the same revision. A newer deploy that rewrote the file already needs no reset.
+- Rejecting (`POST /deployments/{id}/reject`) sets `rejected` (with who, when and the reason) and notifies Slack, Web Push and the GitHub check runs; it refuses if the CR already has the approval.
+
 Rejecting a plan changes nothing in git. A new deploy rewrites `<root>.yaml` (new `ref.commit`, `approvePlan: ""`). That clears the pending plan: the controller re-plans on a revision change, and on a spec change while a plan is pending.
 
 ## Plan-Only Runs
 
-For draft versions (DEP-22) smithd commits to a separate branch `plans` (one Flux `GitRepository` + `Kustomization` for that branch, set up in DEP-16), so `main` stays clean:
+For draft and published versions (DEP-22) smithd commits to a separate branch `plans` (one Flux `GitRepository` + `Kustomization` per environment for that branch, set up in DEP-16), so `main` stays clean:
 
 ```
 plans branch:
 environments/<env>/terraform-plans/<app>/<plan-name>/src/<root>/   # commit A'
 environments/<env>/terraform-plans/<app>/<plan-name>.yaml          # commit B': GitRepository (branch: plans, commit: A') + Terraform
+environments/<env>/terraform-plans/<app>/kustomization.yaml        # lists the <plan-name>.yaml files
+environments/<env>/terraform-plans/kustomization.yaml              # lists the apps
 ```
+
+`<plan-name>` is `plan-` and the first 12 characters of the plan run's id, so it is unique per run. The Terraform CR has that name, the readable plan is the ConfigMap `tfplan-default-<plan-name>`, and the GitRepository is `tf-<app>-<plan-name>` in the Flux namespace. The branch is created by smithd if it does not exist (a single commit with a README, no history in common with `main`).
 
 ```yaml
 apiVersion: infra.contrib.fluxcd.io/v1alpha2
 kind: Terraform
 metadata:
-  name: plan-dev-main-42540c4      # unique per version: the ConfigMap name follows it
+  name: plan-6a1f3c1e5c0b
   namespace: tf-viino
+  annotations:
+    deploysmith.io/plan-run-id: 6a1f3c1e-5c0b-4c43-a1f4-1f0f8f4e9d10
 spec:
-  planOnly: true                   # never applies, whatever approvePlan says
+  planOnly: true                   # never applies; there is no approvePlan
   storeReadablePlan: human
-  serviceAccountName: tf-runner-readonly
+  serviceAccountName: tf-runner-dev-readonly
   plan:
     lock: false                    # read-only IAM role can't write the DynamoDB lock item
   disableDriftDetection: true
   # sourceRef → GitRepository on branch "plans" pinned to A'; plan id = plan-plans-<A'[:10]>
   # backendConfig, tfVarsFiles, runnerPodTemplate as above, with the read-only OpenBao/AWS roles
+  # (tf-<app>-<env>-readonly, <app>-<env>-readonly)
 ```
 
-Status: `Plan=True`/`TerraformPlannedWithChanges` and `Ready=Unknown` with message `Plan generated: This object is in the plan only mode.`, or `TerraformPlannedNoChanges`. The readable plan is in ConfigMap `tfplan-default-plan-dev-main-42540c4`. Once stored, smithd removes the directory from the `plans` branch. Flux prunes the CR, and the plan Secret/ConfigMap are garbage-collected through their ownerReference.
+`spec.plan.lock` is a field of v0.16.6 (`Plan configures options that apply only to the plan phase`): `false` runs `tofu plan -lock=false`, so plan-only runs never wait for, or hold, the state lock of a real run.
+
+Status: `Plan=True`/`TerraformPlannedWithChanges` and `Ready=Unknown` with message `Plan generated: This object is in the plan only mode.`, or `TerraformPlannedNoChanges`. smithd follows it like a deployment (`planning`, then `planned` or `failed`), in its own table `plan_runs`: a plan-only run is not a deployment, so it can never be approved or applied, does not count for what runs in an environment and does not take part in the one-active-run rule of a root (DEP-18). Only one plan-only run per app, environment and root is active; a newer one supersedes it.
+
+**Cleanup.** Once the result is stored (or the run failed or was superseded) smithd removes the run's directory and file from the `plans` branch, in one commit for all finished runs, and takes it out of the kustomizations. Flux prunes the CR, and the plan Secret/ConfigMap are garbage-collected through their ownerReference. Once an hour smithd also removes everything on the branch that no active run needs (leftovers of a crash), and when no run is left and the branch has more than 100 commits, replaces its history with a single commit (a force push that only goes through if nobody pushed meanwhile). Every run adds two commits and its cleanup one, so the branch is short and `main` has none of it.
 
 The read-only role still needs Transit **decrypt** to read the state and a data key to encrypt the plan file. It needs `s3:GetObject` but no lock-table writes.
 

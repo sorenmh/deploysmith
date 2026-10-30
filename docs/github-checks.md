@@ -7,7 +7,7 @@ deployed and whether that worked:
 | Check run | When |
 | --- | --- |
 | `deploysmith/deploy-<env>` | every deployment of the version to `<env>`, manual or auto-deploy |
-| `deploysmith/plan-<env>` | Terraform plans, once smithd runs them (DEP-19, DEP-22) |
+| `deploysmith/plan-<env>` | the plan of a Terraform deployment (DEP-19), and the plan-only run of a terraform version, made by `forge plan` or automatically when the version is published (DEP-22) |
 
 A deployment's check run is **queued** when the deployment is requested,
 **in progress** while Flux applies it (with `FLUX_KUSTOMIZATION_NAME`), and
@@ -16,6 +16,14 @@ version, environment, who or which policy started it and the gitops commit;
 on failure the error is shown below it. With `UI_PUBLIC_URL` set, **Details**
 links to the deployment in the web UI. Each deployment gets its own check
 run; GitHub shows the latest one per name.
+
+A plan-only run's `deploysmith/plan-<env>` check is **in progress** until the
+controller has made the plan, then **completed**: *success* for a plan without
+destroys (including no changes), *neutral* if it destroys or replaces
+resources, and *failure* if the plan failed. A newer plan of the same app and
+environment ends the older check as *neutral* ("Plan replaced"). The summary
+has the counts and the resources by action, not the plan text; a plan-only run
+has no deploy check, since nothing is deployed.
 
 Reporting is a side channel: if GitHub is down, the app is not installed on
 the repository or anything else goes wrong, smithd logs it and the
@@ -107,10 +115,23 @@ an auto-deploy policy for PR branches to a preview environment). In a
 well; when running forge with `docker run`, pass the `GITHUB_*` variables
 and mount `$GITHUB_EVENT_PATH`, or use the flags.
 
-## Terraform plans (for DEP-19 and DEP-22)
+## Terraform deployments
 
-The reporter already has the call for plan check runs, which the Terraform
-work will use once smithd runs plans:
+A Terraform deployment is planned before anything is applied, and both are
+reported on the version's commit:
+
+| Check run | States |
+| --- | --- |
+| `deploysmith/plan-<env>` | **in progress** while the controller plans; **completed** with *neutral* when the plan has changes and waits for approval (title: `3 to add, 1 to change, 2 to destroy`, plus `(destroys resources)`), *success* when there are no changes or after the apply, *failure* if the plan failed, *neutral* if it went stale |
+| `deploysmith/deploy-<env>` | **in progress** until the plan is applied (planning, waiting for approval, applying), then *success*; *failure* if the plan or apply failed (the error is below the summary); *neutral* if it went stale |
+
+The summary of the plan check names the destroyed and replaced resources
+first, in a warning, then the created and updated ones, and links to the
+deployment in the web UI. The **plan text itself is not sent to GitHub**: it
+can show infrastructure details, and it is in the web UI and
+`smithctl deployment show --plan`, behind login.
+
+The call for plan check runs is also what the plan-only runs of DEP-22 will use:
 
 ```go
 svc.GitHub.ReportPlan(ctx, github.Plan{

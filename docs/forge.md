@@ -268,6 +268,122 @@ Publishing version v1.2.3...
 Version v1.2.3 is now live
 ```
 
+### `forge plan`
+
+Show what a terraform version would change in an environment, without
+deploying it. smithd runs a read-only plan in the cluster (a plan-only run) for
+a draft or published version and, with `--wait`, forge waits for it and prints
+the summary. Use it in CI after `forge upload --terraform`, before or without
+`forge publish`.
+
+```bash
+# The version from forge init
+forge plan --wait --env production
+
+# A given version, with the full plan as tofu shows it
+forge plan --wait --full --env production 6996908-12
+
+# For scripts: the plan run as JSON on stdout, nothing else
+forge plan --wait --env production --output json
+
+# Start the plan and return; the result is in GET /api/v1/plan-runs/<id>
+forge plan --env production
+```
+
+**Flags:**
+- `--env` (required): Environment to plan for. The app must have Terraform enabled there.
+- `--app` (optional if app is bound or init was run): Application name
+- `--wait`: Wait for the plan and print its summary
+- `--timeout` (default `30m`): How long `--wait` waits. If it passes, the plan goes on in the cluster, but forge exits with 1.
+- `--poll-interval` (default `5s`): How often `--wait` asks smithd for the result
+- `--output`, `-o` (`text` or `json`): With `json` only the plan run is printed to stdout, with the same fields as `GET /api/v1/plan-runs/<id>`
+- `--full`: Also print the full plan text (sensitive values are masked by OpenTofu)
+
+**Exit codes** (with `--wait`), for CI to gate on:
+
+| Code | Meaning |
+|---|---|
+| `0` | The plan was made, with or without changes |
+| `1` | The plan failed, was replaced by a newer plan of the same app and environment, or `--timeout` passed; or forge could not start the plan or reach smithd |
+| `2` | The plan was made and **destroys or replaces resources** |
+
+Without `--wait` the exit code is `0` once the plan has started. A pipeline
+that should fail on any problem but let a plan with destroys through (or
+fail only on those) tests the code:
+
+```bash
+forge plan --wait --env production; code=$?
+[ "$code" -eq 0 ] || [ "$code" -eq 2 ] || exit "$code"   # 1: failed
+[ "$code" -ne 2 ] || echo "::warning::the plan destroys resources"
+```
+
+**Output:**
+```
+Planning 6996908-12 for production of infra...
+  Plan run 6a1f3c1e-5c0b-4c43-a1f4-1f0f8f4e9d10 started
+
+Plan of 6996908-12 for production: 1 to add, 1 to change, 1 to destroy
+
+WARNING: this plan destroys or replaces resources.
+
+Destroyed (1):
+  aws_sqs_queue.old
+
+Created (1):
+  aws_s3_bucket.logs
+
+Updated in place (1):
+  aws_lambda_function.api
+```
+
+The plan runs with the read-only role of the app and environment, without
+locking the state, so it can run while a deployment of the same root is
+planning, awaiting approval or applying. A newer plan for the same app and
+environment replaces a running one. If the version has a known repository and
+commit (`forge init` detects them in GitHub Actions), smithd reports the same
+result as the check run `deploysmith/plan-<env>` on the pull request
+([github-checks.md](github-checks.md)), and does so automatically when the
+version is published (`config.terraform.autoPlan`, on by default), so
+`forge plan --wait` is only needed to see the plan in the CI log or to gate on
+destroys.
+
+#### Local plan: `forge plan --terraform`
+
+See what uncommitted changes would do, without CI, a commit or a push:
+
+```bash
+smithctl login
+forge plan --terraform infra/ --env production            # --app, or forge app-bind
+forge plan --terraform infra/ --env production --output json
+```
+
+forge validates and packs the OpenTofu root module in `infra/` exactly like
+`forge upload --terraform`, then asks smithd for a **temporary version** named
+`local-<user>-<content hash>` (the same files give the same version), uploads
+the bundle to it and runs the plan-only flow above, always waiting for the
+result. The plan runs in the cluster with the read-only role: the credentials
+never reach your machine. The exit codes are those of `forge plan --wait`: `0`
+planned, `1` failed, replaced or timed out, `2` the plan destroys or replaces
+resources. `--timeout`, `--poll-interval` and `--full` work as there.
+
+- **Needs a signed-in user.** forge reads the session `smithctl login` stored
+  in `~/.deploysmith/sessions.json` and tells you to run `smithctl login` if it
+  is missing or expired. API keys are not accepted, by forge or by smithd: the
+  point is knowing who ran the plan. CI plans a published version with
+  `forge plan <version>`.
+- **Temporary versions** are drafts that can never be published or deployed,
+  manually or by a policy. They are left out of version lists unless you ask
+  (`smithctl version list --all`, `?includeTemporary=true`), don't count as the
+  latest or current version, and are deleted with their bundle after 24 hours
+  (`config.terraform.localPlanTtl`, `TERRAFORM_LOCAL_PLAN_TTL`).
+- **One local plan at a time** per user, app and environment: starting another
+  replaces the earlier one, which ends as replaced. Other people's plans and
+  the plans of CI are not touched.
+- Terraform must be enabled for the app in the environment
+  (`smithctl app terraform enable`), or smithd answers `terraform_not_enabled`.
+- smithd sends no GitHub check runs, Slack or push notifications for local
+  plans: there is no commit or pull request to report on.
+
 ### `forge version`
 
 Show forge version information.
@@ -414,6 +530,10 @@ forge init --version "$VERSION" \
   --git-branch "$GIT_BRANCH" \
   --artifact-type terraform
 forge upload --terraform infra/
+
+# Optional: show the plan of the draft in the log; exit code 2 means it
+# destroys or replaces resources (see `forge plan`)
+forge plan --wait --env production
 forge publish --version "$VERSION"
 ```
 

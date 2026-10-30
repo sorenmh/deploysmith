@@ -495,7 +495,9 @@ Error: --env is required
 
 ## Future Enhancements (Post-MVP)
 
-- `smithctl deployment show` - Show deployment details and logs
+- `smithctl deployment show` - Show deployment details and logs; for Terraform, the plan (`--plan` for the full text) and who approved it
+- `smithctl deployment approve <id> [--confirm-destroy]` - Approve the plan of a Terraform deployment
+- `smithctl deployment reject <id> [--reason ...]` - Reject the plan of a Terraform deployment
 - `smithctl deployment list` - List deployment history
 - `smithctl diff` - Compare two versions
 - `smithctl logs` - Stream logs from deployed app (via kubectl integration)
