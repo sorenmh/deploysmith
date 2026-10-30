@@ -6,7 +6,7 @@ forge is a command-line tool for CI/CD pipelines that packages and publishes app
 
 forge enables you to:
 - Package Kubernetes manifests and publish them to smithd
-- Package OpenTofu root modules as terraform bundles (see [Terraform bundles](#terraform-bundles))
+- Package OpenTofu root modules as terraform bundles and show what they would change with `forge plan` (see [Terraform bundles](#terraform-bundles) and [terraform.md](terraform.md))
 - Integrate seamlessly with CI/CD pipelines
 - Manage application versions with proper metadata tracking
 - Bind repositories to applications for streamlined workflows
@@ -76,6 +76,8 @@ export SMITHD_API_KEY=sk_live_abc123
 ```
 
 **Note:** forge only needs access to smithd - it does NOT require AWS credentials since it uses presigned URLs.
+
+Only `forge plan --terraform` (a plan of local files) needs a signed-in user instead of an API key: it reads the session that `smithctl login` stored in `~/.deploysmith/sessions.json` ([login-with-github.md](login-with-github.md)).
 
 ### 2. Configuration File
 
@@ -189,7 +191,7 @@ the version's git SHA.
 
 **What it does:**
 1. Creates a draft version in smithd
-2. Generates a presigned S3 URL for manifest upload
+2. Generates a presigned S3 URL for the manifest (or, with `--artifact-type terraform`, bundle) upload
 3. Saves upload URL to `.forge/upload-url`
 4. Saves version info to `.forge/version-info`
 
@@ -197,7 +199,7 @@ the version's git SHA.
 
 ### `forge upload`
 
-Upload manifest files as a tar.gz archive to S3.
+Upload manifest files, or with `--terraform <dir>` an OpenTofu bundle, as a tar.gz archive to S3.
 
 ```bash
 # Upload directory of YAML files
@@ -213,7 +215,11 @@ forge upload manifests/ --upload-url "https://custom-url"
 forge upload --terraform infra/
 ```
 
-**What it does:**
+**Flags:**
+- `--upload-url`: use this URL instead of `.forge/upload-url`
+- `--terraform <dir>`: pack and upload the OpenTofu root module in `<dir>` (files and rules: [terraform.md](terraform.md#bundle-layout-and-rules)); do not pass files as well
+
+**What it does** (for manifests; a bundle is validated against the [bundle rules](terraform.md#bundle-layout-and-rules) instead):
 1. Validates all YAML files for syntax errors
 2. Creates a tar.gz archive containing all files
 3. Auto-generates `version.yml` if not present
@@ -271,7 +277,7 @@ Version v1.2.3 is now live
 ### `forge plan`
 
 Show what a terraform version would change in an environment, without
-deploying it. smithd runs a read-only plan in the cluster (a plan-only run) for
+deploying it (guide: [terraform.md](terraform.md)). smithd runs a read-only plan in the cluster (a plan-only run) for
 a draft or published version and, with `--wait`, forge waits for it and prints
 the summary. Use it in CI after `forge upload --terraform`, before or without
 `forge publish`.
@@ -458,105 +464,29 @@ forge publish --app "$APP_NAME" --version "$VERSION"
 
 Besides Kubernetes manifests, a version can carry an OpenTofu root module: a
 version of type `terraform`. CI builds and uploads the bundle without any
-cloud credentials; smithd stores it in S3 like every other version.
-Deploying a terraform version (`smithctl deploy`) commits it to the gitops
-repo, where tofu-controller plans it and waits for approval. Auto-deploy
-policies never deploy terraform versions.
+cloud credentials; smithd stores it in S3 like every other version, and
+`smithctl deploy` commits it to the gitops repo, where tofu-controller plans
+it and waits for someone to approve. Auto-deploy policies never deploy
+terraform versions.
 
-### Bundle layout
+The guide to all of it is [terraform.md](terraform.md). The parts that
+concern forge:
 
-`forge upload --terraform <dir>` packs these files of the root module in
-`<dir>` and leaves everything else out:
-
-```
-infra/
-  versions.tf             # terraform block with the pinned OpenTofu version
-  main.tf, ...            # *.tf and *.tofu files, including local modules in subdirectories
-  templates/*.tftpl       # templates for templatefile(), anywhere
-  .terraform.lock.hcl     # provider lock file, from tofu init (required)
-  env/
-    staging.tfvars        # non-secret variables per environment
-    production.tfvars
-```
-
-Other files (`README.md`, `file()` inputs such as `*.json` policies) are left
-out; give templates the `.tftpl` extension.
-
-The OpenTofu version is pinned with an exact `required_version` in the root
-module's `terraform` block. OpenTofu enforces it itself, so the bundle can't
-be applied with a different version. A `.opentofu-version` file is not read.
-
-```hcl
-terraform {
-  required_version = "1.10.6"
-
-  # smithd sets the backend configuration: leave it empty
-  backend "s3" {}
-}
-```
-
-forge checks the bundle before uploading it, and smithd checks it again on
-publish. A bundle is rejected, with every problem listed, if:
-
-- `.terraform.lock.hcl` is missing
-- `required_version` is missing, not exact (`>= 1.10`, `~> 1.10`) or set more than once
-- the `backend` block has settings, or there is a `cloud` block
-- it contains state (`*.tfstate*`), `*.auto.tfvars` or `terraform.tfvars`, which
-  OpenTofu would load automatically; use `env/<env>.tfvars` instead
-- it contains override files (`override.tf`, `*_override.tf` or their `.tofu`
-  and JSON variants) anywhere: the controller writes `backend_override.tf` with
-  smithd's backend configuration, and a bundle must not be able to replace it
-- it contains JSON configuration (`*.tf.json`, `*.tofu.json`), which is not
-  supported; leaving it out would plan the destruction of what it declares
-- it contains symbolic links
-- a file is not valid HCL
-
-The `.terraform` directory that `tofu init` creates (and any other hidden
-directory) is skipped when packing. Secrets never go into the bundle:
-`env/<env>.tfvars` holds non-secret values only.
-
-### CI steps
-
-```bash
-VERSION="$GIT_SHA"
-
-# Check the configuration; no backend, so no credentials needed
-tofu -chdir=infra init -backend=false
-tofu -chdir=infra fmt -check
-tofu -chdir=infra validate
-
-forge init --version "$VERSION" \
-  --git-sha "$GIT_SHA" \
-  --git-branch "$GIT_BRANCH" \
-  --artifact-type terraform
-forge upload --terraform infra/
-
-# Optional: show the plan of the draft in the log; exit code 2 means it
-# destroys or replaces resources (see `forge plan`)
-forge plan --wait --env production
-forge publish --version "$VERSION"
-```
+- **What a bundle contains and what is refused** (exact `required_version`,
+  lock file, empty `backend`, no override files, no state or `*.auto.tfvars`,
+  `env/<env>.tfvars`, `*.tofu` and `*.tftpl` allowed, JSON configuration not
+  yet): [Bundle layout and rules](terraform.md#bundle-layout-and-rules).
+  forge checks the bundle before uploading and smithd again on publish.
+- **CI steps** (`tofu init -backend=false`, `fmt -check`, `validate`,
+  `forge init --artifact-type terraform`, `forge upload --terraform`,
+  `forge plan --wait`, `forge publish`) with a GitHub Actions workflow:
+  [CI workflow](terraform.md#ci-workflow).
+- **Plans without deploying**: [`forge plan`](#forge-plan) in CI and
+  [`forge plan --terraform`](#local-plan-forge-plan---terraform) from a
+  laptop.
 
 The version id is the git SHA, as for manifests. `smithctl version list`
 shows the type of each version.
-
-### Deploying
-
-The app must have Terraform enabled in the environment (`smithctl app
-terraform enable`, chart README "Terraform apps"), and smithd must have a
-runner image for the bundle's OpenTofu version. Then:
-
-```bash
-smithctl deploy --app infra --version "$VERSION" --env production
-```
-
-smithd commits the bundle to `environments/production/terraform/infra/src/main/`
-and the `Terraform` CR to `main.yaml`, with the state backend, the state
-encryption key and `env/production.tfvars` filled in by smithd. The deployment
-is `planning` until tofu-controller has planned it; the plan then waits for
-approval and nothing is applied until someone approves it. Deploying another
-version while the plan waits replaces it (the earlier deployment becomes
-`stale`).
 
 ## CI/CD Examples
 
@@ -819,6 +749,10 @@ FORGE_DEBUG=1 forge init --version v1.0.0
 - Check YAML syntax with a validator
 - Ensure files are valid Kubernetes manifests
 - Avoid Helm/Go template syntax in raw YAML files
+
+**5. Terraform bundle rejected, or a plan that does not start**
+- forge and smithd list every problem of a bundle at once: see [Bundle layout and rules](terraform.md#bundle-layout-and-rules)
+- Plan and deploy errors (`unsupported_opentofu_version`, `terraform_not_enabled`, `plan_not_current`, ...): [Troubleshooting in terraform.md](terraform.md#troubleshooting)
 
 ### Getting Help
 
