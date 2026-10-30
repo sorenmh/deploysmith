@@ -447,9 +447,52 @@ A terraform deployment that has been planned also has its plan in `terraform.pla
 }
 ```
 
+A terraform deployment also records who decided on its plan (fields are left out while they are not set): `rollback` (the version is older than the one applied; deploying it is a normal deploy with a new plan), `approvedBy` (GitHub login, `api-key`, or `git` for an approval committed outside smithd), `approvedAt`, `destroyConfirmed`, `approvalResetAt` (when smithd committed `approvePlan: ""` again after the apply), `rejectedBy`, `rejectedAt` and `rejectReason`.
+
 `toAdd`, `toChange` and `toDestroy` are the counts of the plan's `Plan:` line (a replacement counts as an add and a destroy); `destroys` is true if the plan destroys or replaces anything. `text` is `tofu show` of the plan with sensitive values masked by OpenTofu. `appliedPlanHash` and `appliedDiffered` are set after the apply: the controller plans again right before applying, and `appliedDiffered` says that this plan differed from the reviewed one. The deployment's `errorMessage` holds the controller's error for a `failed` run.
 
 Returns `404` if the deployment doesn't exist.
+
+---
+
+### 8c. Approve Terraform Plan
+
+**Endpoint:** `POST /deployments/{deploymentId}/approve`
+
+**Request body (optional):**
+```json
+{ "confirmDestroy": false }
+```
+
+Approves the plan of a terraform deployment that is `awaiting_approval`: smithd commits `approvePlan: "<plan id>"` (and nothing else) to the root's Terraform CR in the gitops repo, and the controller applies. The deployment becomes `applying`; once it is `applied` (or `failed`) smithd commits `approvePlan: ""` again. The approver is recorded from the request's identity (the signed-in GitHub login, or `api-key`).
+
+**Response:** `200 OK` with the deployment as in Get Deployment. Approving a deployment that is already `applying` (or `applied` after an approval) is not an error and commits nothing.
+
+Before committing, smithd checks that the plan is still the one that was reviewed: the CR is the deployment's, `status.plan.pending` is the plan id, the revision and `lastPlannedGeneration` are those of the plan, nobody approved another plan, and the plan in the cluster has the stored `planHash`. The controller makes a new plan when it applies, which only has the same id; if that plan differs from the reviewed one, `terraform.plan.appliedDiffered` says so afterwards.
+
+**Errors:**
+- `400 destroy_confirmation_required`: the plan destroys or replaces resources and `confirmDestroy` is not `true`; the message lists them.
+- `400 not_terraform`, `400 terraform_disabled`, `400 terraform_unavailable` (smithd is not running in a cluster)
+- `404` if the deployment doesn't exist
+- `409 not_awaiting_approval`: the deployment is in another state (`planning`, `stale`, `failed`, `rejected`, ...)
+- `409 plan_not_current`: the plan changed or was replaced since it was made; deploy again, or wait for the new plan and review that
+
+---
+
+### 8d. Reject Terraform Plan
+
+**Endpoint:** `POST /deployments/{deploymentId}/reject`
+
+**Request body (optional):**
+```json
+{ "reason": "wrong environment" }
+```
+
+Rejects the plan of a terraform deployment that is `awaiting_approval`. The deployment becomes `rejected`, with who, when and the reason (`terraform.rejectedBy`, `rejectedAt`, `rejectReason`; `errorMessage` says `Rejected by <who>: <reason>`). Nothing is committed: the CR stays unapproved, and the next deploy of the root replaces the pending plan. Slack, Web Push and the GitHub check runs report it.
+
+**Response:** `200 OK` with the deployment. Rejecting a `rejected` deployment is not an error.
+
+**Errors:** `400 not_terraform`, `400 invalid_request` (reason over 1000 characters), `404`, `409 not_awaiting_approval`, and `409 conflict` if the plan was approved in the repo and is being applied.
 
 ---
 
