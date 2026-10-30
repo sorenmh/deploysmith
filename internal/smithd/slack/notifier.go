@@ -34,6 +34,12 @@ type Deploy struct {
 	CommitSHA   string
 	URL         string // link to the deployment in the web UI, if any
 	Rollback    bool   // the version is older than what runs in the environment
+
+	// For GitHub check runs: the deployment, and the repository (owner/name)
+	// and commit the version was built from, if known
+	DeploymentID string
+	SourceRepo   string
+	SourceSHA    string
 }
 
 func (n *Notifier) send(ctx context.Context, text string) {

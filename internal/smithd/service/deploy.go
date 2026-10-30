@@ -168,11 +168,18 @@ func (s *Service) watchFlux(ctx context.Context, notice slack.Deploy, committedA
 // slackDeploy describes a deployment for notifications
 func (s *Service) slackDeploy(deployment *models.Deployment, app *models.Application, version *models.Version, policy *models.Policy) slack.Deploy {
 	notice := slack.Deploy{
-		App:         app.Name,
-		Version:     version.VersionID,
-		Environment: deployment.Environment,
-		TriggeredBy: deployment.TriggeredBy,
-		CommitSHA:   deployment.GitopsCommitSHA,
+		App:          app.Name,
+		Version:      version.VersionID,
+		Environment:  deployment.Environment,
+		TriggeredBy:  deployment.TriggeredBy,
+		CommitSHA:    deployment.GitopsCommitSHA,
+		DeploymentID: deployment.ID,
+	}
+	if s.GitHub != nil {
+		if source, err := s.Versions.GetSource(version.ID); err == nil {
+			notice.SourceRepo = source.Repository
+			notice.SourceSHA = source.CommitSHA
+		}
 	}
 	if policy != nil {
 		notice.Policy = policy.Name

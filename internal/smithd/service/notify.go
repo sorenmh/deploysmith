@@ -7,27 +7,32 @@ import (
 	"github.com/sorenmh/deploysmith/internal/smithd/slack"
 )
 
-// The notify* methods send an event to every notification channel (Slack and
-// Web Push), each of which may be unconfigured.
+// The notify* methods send an event to every notification channel (Slack,
+// Web Push and, for deployments, GitHub check runs), each of which may be
+// unconfigured.
 
 func (s *Service) notifyRequested(ctx context.Context, d slack.Deploy) {
 	s.Slack.Requested(ctx, d)
 	s.Push.Requested(ctx, d)
+	s.GitHub.Requested(ctx, d)
 }
 
 func (s *Service) notifyCommitted(ctx context.Context, d slack.Deploy, waitingForFlux bool) {
 	s.Slack.Committed(ctx, d, waitingForFlux)
 	s.Push.Committed(ctx, d, waitingForFlux)
+	s.GitHub.Committed(ctx, d, waitingForFlux)
 }
 
 func (s *Service) notifyApplied(ctx context.Context, d slack.Deploy, took time.Duration) {
 	s.Slack.Applied(ctx, d, took)
 	s.Push.Applied(ctx, d, took)
+	s.GitHub.Applied(ctx, d, took)
 }
 
 func (s *Service) notifyFailed(ctx context.Context, d slack.Deploy, stage, errMsg string) {
 	s.Slack.Failed(ctx, d, stage, errMsg)
 	s.Push.Failed(ctx, d, stage, errMsg)
+	s.GitHub.Failed(ctx, d, stage, errMsg)
 }
 
 func (s *Service) notifyVersionPublished(ctx context.Context, app, version, branch, committer string) {

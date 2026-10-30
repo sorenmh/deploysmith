@@ -41,6 +41,11 @@ CREATE TABLE IF NOT EXISTS versions (
     build_number TEXT,
     metadata_timestamp TIMESTAMP,
 
+    -- Where it was built from, for reporting to GitHub (sent by forge)
+    source_repo TEXT NOT NULL DEFAULT '',   -- owner/name
+    source_sha TEXT NOT NULL DEFAULT '',    -- the commit (a PR's head, not its merge commit)
+    source_pr INTEGER NOT NULL DEFAULT 0,   -- pull request number, 0 if none
+
     -- Lifecycle timestamps
     created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
     published_at TIMESTAMP,

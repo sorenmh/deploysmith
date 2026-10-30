@@ -79,6 +79,9 @@ data:
   {{- end }}
   {{- end }}
   {{- with .Values.config.github }}
+  {{- if .appId }}
+  GITHUB_APP_ID: {{ .appId | quote }}
+  {{- end }}
   {{- if .clientId }}
   {{- if or $.Values.uiProxy.enabled $.Values.uiIngress.enabled $.Values.config.ui.userHeader }}
   {{- fail "config.github signs people in to the web UI itself; it can't be combined with uiProxy, uiIngress or config.ui.userHeader" }}
