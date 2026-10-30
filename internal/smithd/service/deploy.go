@@ -175,6 +175,7 @@ func (s *Service) slackDeploy(deployment *models.Deployment, app *models.Applica
 		TriggeredBy:  deployment.TriggeredBy,
 		CommitSHA:    deployment.GitopsCommitSHA,
 		DeploymentID: deployment.ID,
+		Terraform:    version.ArtifactType == models.ArtifactTerraform,
 	}
 	if s.GitHub != nil {
 		if source, err := s.Versions.GetSource(version.ID); err == nil {

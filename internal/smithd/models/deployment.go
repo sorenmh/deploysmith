@@ -50,6 +50,50 @@ type TerraformRun struct {
 	// PlanID is the id tofu-controller gives the plan of that commit
 	// (status.plan.pending), e.g. plan-main-8fa3d36e98
 	PlanID string `json:"planId,omitempty"`
+	// Plan is the readable plan smithd copied from the cluster, once the
+	// controller has made it. Only the deployment GET has it, with the text.
+	Plan *TerraformPlan `json:"plan,omitempty"`
+}
+
+// TerraformPlan is the readable plan of a terraform deployment, copied from
+// the cluster when it is ready: the summary the CLI, web UI and GitHub show,
+// and the full text of `tofu show` (sensitive values are masked by OpenTofu).
+// It is a durable record; the cluster overwrites the plan on the next run.
+// The binary plan never leaves the cluster.
+type TerraformPlan struct {
+	// PlanID and PlanHash identify the plan together with PlannedAt: the
+	// controller reuses the id for every plan of a revision. PlanHash is the
+	// hash of the text the controller recorded.
+	PlanID    string     `json:"planId"`
+	PlanHash  string     `json:"planHash,omitempty"`
+	PlannedAt *time.Time `json:"plannedAt,omitempty"`
+	// ToAdd, ToChange and ToDestroy are the counts of the "Plan:" line
+	// (a replacement counts as an add and a destroy)
+	ToAdd     int `json:"toAdd"`
+	ToChange  int `json:"toChange"`
+	ToDestroy int `json:"toDestroy"`
+	// Destroys is true if the plan destroys or replaces resources, which an
+	// approval has to confirm separately
+	Destroys bool `json:"destroys"`
+	// OutputChanges is true if the plan changes outputs
+	OutputChanges bool `json:"outputChanges,omitempty"`
+	// Resources are the addresses of the resources by action
+	Resources TerraformPlanResources `json:"resources"`
+	// Text is the full plan. It is left out of listings.
+	Text string `json:"text,omitempty"`
+	// AppliedPlanHash is the hash of the plan the controller made again right
+	// before applying, if it was read after the apply; AppliedDiffered is
+	// true if that differs from the reviewed plan
+	AppliedPlanHash string `json:"appliedPlanHash,omitempty"`
+	AppliedDiffered bool   `json:"appliedDiffered,omitempty"`
+}
+
+// TerraformPlanResources are the addresses of the resources a plan changes
+type TerraformPlanResources struct {
+	Create  []string `json:"create"`
+	Update  []string `json:"update"`
+	Replace []string `json:"replace"`
+	Destroy []string `json:"destroy"`
 }
 
 // DeploymentDetail is a deployment enriched with the names of the app,

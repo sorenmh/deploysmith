@@ -20,7 +20,7 @@ import (
 // environment: it commits the bundle source and then the root's Terraform
 // CR, pinned to the source commit, to the gitops repo. tofu-controller then
 // plans it and waits for approval; the deployment is left planning, and
-// DEP-19 follows it from the CR's status.
+// trackTerraformRun follows it from the CR's status.
 //
 // A deploy replaces the root's pending plan: a deployment that is planning
 // or awaiting approval becomes stale, and the rewritten CR (approvePlan "")
@@ -87,6 +87,8 @@ func (s *Service) deployTerraform(ctx context.Context, app *models.Application, 
 			logging.Field("deployment_id", deployment.ID),
 			logging.Field("stale_deployment_id", replaced.ID),
 		)
+		// Closes the check runs of the replaced deployment
+		s.notifyReplaced(ctx, app, replaced, deployment)
 	}
 
 	notice := s.slackDeploy(deployment, app, version, nil)
@@ -170,7 +172,8 @@ func (s *Service) deployTerraform(ctx context.Context, app *models.Application, 
 	s.FluxReconciler.Trigger(ctx)
 
 	notice.CommitSHA = commits.Manifest
-	s.notifyCommitted(ctx, notice, false)
+	// More follows: the plan, then the apply
+	s.notifyCommitted(ctx, notice, true)
 	logging.LogInfoCtx(ctx, "Terraform deployment committed, waiting for the plan",
 		logging.Field("deployment_id", deployment.ID),
 		logging.Field("commit_sha", commits.Manifest),

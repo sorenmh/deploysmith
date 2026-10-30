@@ -68,6 +68,11 @@ type Deps struct {
 	TerraformManifests     terraform.ManifestOptions
 	TerraformRoots         terraform.RootOptions
 	TerraformSharedBackend models.TerraformBackend // default backend of new apps; Key is unused
+	// TerraformPlans holds the readable plans copied from the cluster.
+	// TerraformReader reads the Terraform CRs, plans and events there; runs
+	// are not followed while it is nil, i.e. outside a cluster.
+	TerraformPlans  *store.TerraformPlanStore
+	TerraformReader *terraform.Reader
 }
 
 // Service implements smithd's operations

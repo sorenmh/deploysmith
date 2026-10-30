@@ -201,6 +201,54 @@ func (s *DeploymentStore) SetTerraformCommitted(id, status, commitSHA, sourceSHA
 	return nil
 }
 
+// trackedTerraformStatuses are the states of a terraform deployment smithd
+// follows in the cluster: it has been committed and has not finished
+var trackedTerraformStatuses = "('" + strings.Join([]string{models.DeploymentPlanning, models.DeploymentAwaitingApproval, models.DeploymentApplying}, "', '") + "')"
+
+// ListTrackedTerraform returns the terraform deployments that are planning,
+// waiting for approval or applying, oldest first
+func (s *DeploymentStore) ListTrackedTerraform() ([]models.Deployment, error) {
+	rows, err := s.db.Query(`
+		SELECT ` + deploymentColumns + `
+		FROM deployments
+		WHERE terraform_root IS NOT NULL AND status IN ` + trackedTerraformStatuses + `
+		ORDER BY started_at ASC
+	`)
+	if err != nil {
+		return nil, fmt.Errorf("failed to list terraform deployments: %w", err)
+	}
+	return scanDeployments(rows)
+}
+
+// TransitionTerraform moves a terraform deployment from one state to another
+// and records errorMsg. It returns false if the deployment was not in the
+// from state any more, e.g. because another smithd replica moved it first, so
+// that only the caller that moved it reports the change. Finishing states
+// (everything but planning, awaiting_approval and applying) complete the
+// deployment.
+func (s *DeploymentStore) TransitionTerraform(id, from, to, errorMsg string) (bool, error) {
+	var completedAt *time.Time
+	switch to {
+	case models.DeploymentPlanning, models.DeploymentAwaitingApproval, models.DeploymentApplying:
+	default:
+		now := time.Now().UTC()
+		completedAt = &now
+	}
+	result, err := s.db.Exec(`
+		UPDATE deployments
+		SET status = ?, error_message = ?, completed_at = ?
+		WHERE id = ? AND status = ?
+	`, to, errorMsg, completedAt, id, from)
+	if err != nil {
+		return false, fmt.Errorf("failed to update deployment: %w", err)
+	}
+	rows, err := result.RowsAffected()
+	if err != nil {
+		return false, fmt.Errorf("failed to check rows affected: %w", err)
+	}
+	return rows == 1, nil
+}
+
 // GetByID gets a deployment by ID
 func (s *DeploymentStore) GetByID(id string) (*models.Deployment, error) {
 	deployment, err := scanDeployment(s.db.QueryRow(`

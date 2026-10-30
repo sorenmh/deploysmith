@@ -144,19 +144,51 @@ func (n *Notifier) Committed(ctx context.Context, d slack.Deploy, waitingForFlux
 		title = "Rollback committed to gitops"
 	}
 	body := target(d)
-	if waitingForFlux {
+	switch {
+	case waitingForFlux && d.Terraform:
+		body += ". Waiting for the plan."
+	case waitingForFlux:
 		body += ". Waiting for Flux."
 	}
 	n.send(ctx, message{Title: title, Body: body, URL: d.URL, Tag: tag(d)})
 }
 
-// Applied reports a deployment Flux has applied to the cluster
+// PlanReady reports a Terraform plan that waits for approval
+func (n *Notifier) PlanReady(ctx context.Context, d slack.Deploy) {
+	if d.Plan == nil {
+		return
+	}
+	n.send(ctx, planReadyMessage(d))
+}
+
+func planReadyMessage(d slack.Deploy) message {
+	title := "Plan ready for approval"
+	if d.Plan.Destroys() {
+		title = "Plan ready for approval, destroys resources"
+	}
+	return message{Title: title, Body: fmt.Sprintf("%s: %s", target(d), d.Plan.Counts()), URL: d.URL, Tag: tag(d)}
+}
+
+// Applied reports a deployment Flux has applied to the cluster, or for a
+// Terraform deployment, that OpenTofu has applied the plan
 func (n *Notifier) Applied(ctx context.Context, d slack.Deploy, took time.Duration) {
+	if d.Terraform {
+		n.send(ctx, terraformAppliedMessage(d))
+		return
+	}
 	title := "Deployed"
 	if d.Rollback {
 		title = "Rollback done"
 	}
 	n.send(ctx, message{Title: title, Body: fmt.Sprintf("%s, applied in %s", target(d), took.Round(time.Second)), URL: d.URL, Tag: tag(d)})
+}
+
+func terraformAppliedMessage(d slack.Deploy) message {
+	result := "no changes"
+	if d.Plan != nil && !d.Plan.NoChanges() {
+		result = d.Plan.Counts()
+	}
+	return message{Title: "Applied", Body: fmt.Sprintf("%s, %s", target(d), result), URL: d.URL, Tag: tag(d)}
 }
 
 // Failed reports a deployment that failed at the given stage

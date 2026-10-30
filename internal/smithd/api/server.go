@@ -31,6 +31,7 @@ import (
 	"github.com/sorenmh/deploysmith/internal/smithd/slack"
 	"github.com/sorenmh/deploysmith/internal/smithd/storage"
 	"github.com/sorenmh/deploysmith/internal/smithd/store"
+	"github.com/sorenmh/deploysmith/internal/smithd/terraform"
 	"github.com/sorenmh/deploysmith/internal/smithd/web"
 	"gopkg.in/yaml.v3"
 )
@@ -114,6 +115,11 @@ func NewServer(cfg *config.Config, database *db.DB) *Server {
 
 	// Terraform apps, only with OpenBao
 	deps.TerraformEnvironments = store.NewTerraformStore(database)
+	deps.TerraformPlans = store.NewTerraformPlanStore(database)
+	// Assign only when available, so the pointer stays nil outside a cluster
+	if reader := terraform.NewReader(); reader != nil {
+		deps.TerraformReader = reader
+	}
 	deps.TerraformSharedBackend = models.TerraformBackend{Bucket: cfg.TerraformStateBucket, Region: cfg.TerraformStateRegion, LockTable: cfg.TerraformLockTable}
 	if deps.TerraformManifests, err = terraformManifestOptions(cfg); err != nil {
 		log.Fatalf("Failed to configure Terraform support: %v", err)
@@ -264,6 +270,7 @@ func newLogin(cfg *config.Config, database *db.DB) *auth.Login {
 func (s *Server) Start() error {
 	go s.svc.WatchStaleDeployments(context.Background())
 	go s.svc.SyncAllTerraform(context.Background())
+	go s.svc.WatchTerraform(context.Background())
 
 	if s.uiRouter != nil {
 		go func() {

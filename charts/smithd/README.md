@@ -475,6 +475,26 @@ policies never deploy terraform versions. A new deploy replaces a plan that is
 still planning or awaiting approval (that deployment becomes `stale`); while
 a run is applying, deploys are refused until it has finished.
 
+**Following the run.** smithd polls the Terraform CR of every terraform
+deployment every 10 seconds (it needs to run in the cluster, with the
+ClusterRole the chart creates) and shows the result in the deployment, with
+`smithctl deployment show <id>`:
+
+| State | When |
+|---|---|
+| `planning` | committed; the controller has not made the plan yet |
+| `awaiting_approval` | the plan has changes. smithd copied the readable plan (`tofu show`, sensitive values masked by OpenTofu) and its summary into its database; the binary plan stays in the cluster, which smithd cannot read |
+| `applying` | the plan was approved |
+| `applied` | no changes, or the apply finished |
+| `failed` | the plan or apply failed; the error holds the controller's `Ready` message and the events of the CR (the runner pod and its log are deleted after each run) |
+| `stale` | a newer deploy replaced the plan, the CR moved on or was deleted, or the controller planned something else than what was reviewed |
+
+"Plan ready for approval", "applied" and "failed" go to Slack and Web Push
+like other deployments. With the GitHub App (`docs/github-checks.md`) the plan
+is the check run `deploysmith/plan-<env>` with the counts and the resources
+that are destroyed highlighted (not the plan text, which is only in smithd),
+and the deploy check run stays open until the plan is applied.
+
 An existing app keeps its backend:
 `smithctl app terraform enable legacy --env prod --backend-bucket legacy-tfstate --backend-key prod/terraform.tfstate --backend-region eu-central-1 --backend-lock-table legacy-tflock --encryption-fallback`.
 `--encryption-fallback` lets the first apply read the plaintext state and

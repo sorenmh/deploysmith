@@ -73,6 +73,16 @@ func (c *Client) EnableTerraform(appNameOrID string, req EnableTerraformRequest)
 	return &env, nil
 }
 
+// GetDeployment returns a deployment. A terraform deployment that has been
+// planned has its plan, with the text.
+func (c *Client) GetDeployment(deploymentID string) (*Deployment, error) {
+	var deployment Deployment
+	if err := c.doJSON(http.MethodGet, "api/v1/deployments/"+url.PathEscape(deploymentID), nil, http.StatusOK, &deployment); err != nil {
+		return nil, err
+	}
+	return &deployment, nil
+}
+
 // ListTerraformEnvironments lists the environments an app has Terraform
 // enabled in
 func (c *Client) ListTerraformEnvironments(appNameOrID string) (*ListTerraformEnvironmentsResponse, error) {

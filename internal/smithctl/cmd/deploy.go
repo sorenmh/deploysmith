@@ -310,6 +310,7 @@ func printTerraformRun(resp *client.DeployVersionResponse) {
 	fmt.Printf("  Plan:          %s\n", resp.Terraform.PlanID)
 	fmt.Println()
 	output.Info("Terraform plans the change and waits for approval; nothing is applied until then")
+	output.Info("See the plan with: smithctl deployment show " + resp.DeploymentID)
 }
 
 func init() {

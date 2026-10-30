@@ -35,6 +35,25 @@ func (s *Service) notifyFailed(ctx context.Context, d slack.Deploy, stage, errMs
 	s.GitHub.Failed(ctx, d, stage, errMsg)
 }
 
+// notifyPlanReady reports a Terraform plan that waits for approval
+func (s *Service) notifyPlanReady(ctx context.Context, d slack.Deploy) {
+	s.Slack.PlanReady(ctx, d)
+	s.Push.PlanReady(ctx, d)
+	s.GitHub.PlanReady(ctx, d)
+}
+
+// notifyApplying and notifyStale only update the check runs on GitHub: an
+// approval and a replacement are done by people who see the result, and
+// Slack and Web Push stay with the events that need someone to act.
+
+func (s *Service) notifyApplying(ctx context.Context, d slack.Deploy) {
+	s.GitHub.Applying(ctx, d)
+}
+
+func (s *Service) notifyStale(ctx context.Context, d slack.Deploy, reason string) {
+	s.GitHub.Stale(ctx, d, reason)
+}
+
 func (s *Service) notifyVersionPublished(ctx context.Context, app, version, branch, committer string) {
 	s.Slack.VersionPublished(ctx, app, version, branch, committer)
 	s.Push.VersionPublished(ctx, app, version, branch, committer)
