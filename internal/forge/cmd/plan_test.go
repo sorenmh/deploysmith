@@ -46,7 +46,7 @@ func (f *fakeSmithd) handler(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		w.WriteHeader(http.StatusAccepted)
-		fmt.Fprint(w, f.start)
+		_, _ = fmt.Fprint(w, f.start)
 	case r.Method == http.MethodGet && strings.HasPrefix(r.URL.Path, "/api/v1/plan-runs/"):
 		f.gets++
 		if f.gets <= f.pollErr {
@@ -54,7 +54,7 @@ func (f *fakeSmithd) handler(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		i := min(f.gets-f.pollErr-1, len(f.polls)-1)
-		fmt.Fprint(w, f.polls[i])
+		_, _ = fmt.Fprint(w, f.polls[i])
 	default:
 		http.NotFound(w, r)
 	}

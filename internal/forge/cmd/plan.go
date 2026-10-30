@@ -162,7 +162,7 @@ func runPlan(ctx context.Context, opts planOptions, c planAPI, out, errOut io.Wr
 	}
 	logf := func(format string, args ...any) {
 		if !opts.JSON {
-			fmt.Fprintf(out, format+"\n", args...)
+			say(out, format+"\n", args...)
 		}
 	}
 
@@ -177,7 +177,7 @@ func runPlan(ctx context.Context, opts planOptions, c planAPI, out, errOut io.Wr
 		if opts.JSON {
 			return printJSON(out, run)
 		}
-		fmt.Fprintf(out, "Not waiting; the result is at GET /api/v1/plan-runs/%s\n", run.ID)
+		say(out, "Not waiting; the result is at GET /api/v1/plan-runs/%s\n", run.ID)
 		return nil
 	}
 
@@ -198,7 +198,7 @@ func runPlan(ctx context.Context, opts planOptions, c planAPI, out, errOut io.Wr
 			if failures++; failures >= maxPollErrors {
 				return &ExitCodeError{Code: ExitFailed, Err: fmt.Errorf("failed to get plan run %s: %w", run.ID, describeAPIError(err))}
 			}
-			fmt.Fprintf(errOut, "Warning: failed to get plan run %s, trying again: %v\n", run.ID, err)
+			say(errOut, "Warning: failed to get plan run %s, trying again: %v\n", run.ID, err)
 			continue
 		}
 		failures = 0
@@ -267,25 +267,25 @@ const maxListed = 50
 func printPlanRun(out io.Writer, run *client.PlanRun, opts planOptions) {
 	switch run.Status {
 	case client.PlanRunFailed:
-		fmt.Fprintf(out, "\nPlan of %s for %s failed:\n%s\n", opts.Version, opts.Environment, strings.TrimSpace(run.ErrorMessage))
+		say(out, "\nPlan of %s for %s failed:\n%s\n", opts.Version, opts.Environment, strings.TrimSpace(run.ErrorMessage))
 		return
 	case client.PlanRunSuperseded:
-		fmt.Fprintf(out, "\nPlan of %s for %s was replaced: %s\n", opts.Version, opts.Environment, run.ErrorMessage)
+		say(out, "\nPlan of %s for %s was replaced: %s\n", opts.Version, opts.Environment, run.ErrorMessage)
 		return
 	}
 	plan := run.Plan
 	if plan == nil {
-		fmt.Fprintf(out, "\nPlan of %s for %s has no result\n", opts.Version, opts.Environment)
+		say(out, "\nPlan of %s for %s has no result\n", opts.Version, opts.Environment)
 		return
 	}
 
 	if plan.ToAdd == 0 && plan.ToChange == 0 && plan.ToDestroy == 0 {
-		fmt.Fprintf(out, "\nPlan of %s for %s: no changes. The infrastructure matches the configuration.\n", opts.Version, opts.Environment)
+		say(out, "\nPlan of %s for %s: no changes. The infrastructure matches the configuration.\n", opts.Version, opts.Environment)
 	} else {
-		fmt.Fprintf(out, "\nPlan of %s for %s: %d to add, %d to change, %d to destroy\n", opts.Version, opts.Environment, plan.ToAdd, plan.ToChange, plan.ToDestroy)
+		say(out, "\nPlan of %s for %s: %d to add, %d to change, %d to destroy\n", opts.Version, opts.Environment, plan.ToAdd, plan.ToChange, plan.ToDestroy)
 	}
 	if plan.Destroys || plan.ToDestroy > 0 {
-		fmt.Fprintln(out, "\nWARNING: this plan destroys or replaces resources.")
+		say(out, "%s\n", "\nWARNING: this plan destroys or replaces resources.")
 	}
 	for _, list := range []struct {
 		title     string
@@ -299,19 +299,23 @@ func printPlanRun(out io.Writer, run *client.PlanRun, opts planOptions) {
 		if len(list.addresses) == 0 {
 			continue
 		}
-		fmt.Fprintf(out, "\n%s (%d):\n", list.title, len(list.addresses))
+		say(out, "\n%s (%d):\n", list.title, len(list.addresses))
 		for i, address := range list.addresses {
 			if i == maxListed {
-				fmt.Fprintf(out, "  ... and %d more\n", len(list.addresses)-maxListed)
+				say(out, "  ... and %d more\n", len(list.addresses)-maxListed)
 				break
 			}
-			fmt.Fprintf(out, "  %s\n", address)
+			say(out, "  %s\n", address)
 		}
 	}
 	if plan.OutputChanges {
-		fmt.Fprintln(out, "\nOutputs change.")
+		say(out, "%s\n", "\nOutputs change.")
 	}
 	if opts.Full && plan.Text != "" {
-		fmt.Fprintf(out, "\n%s\n", strings.TrimRight(plan.Text, "\n"))
+		say(out, "\n%s\n", strings.TrimRight(plan.Text, "\n"))
 	}
 }
+
+// say writes a formatted message; a failure to write to the terminal is not
+// worth reporting
+func say(w io.Writer, format string, args ...any) { _, _ = fmt.Fprintf(w, format, args...) }
