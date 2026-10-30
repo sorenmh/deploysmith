@@ -64,6 +64,14 @@ func (s *Service) deployTerraform(ctx context.Context, app *models.Application, 
 	}
 
 	ctx = deployCtx(ctx, app.Name, version, environment, "")
+	// An older version than the one applied is a normal deploy with a new
+	// plan; it is only labelled
+	if s.isRollback(deployment, version) {
+		if err := s.Deployments.SetRollback(deployment.ID); err != nil {
+			logging.LogErrorCtx(ctx, "Failed to record the rollback: "+err.Error(), err)
+		}
+		deployment.Terraform.Rollback = true
+	}
 	if replaced != nil {
 		logging.LogInfoCtx(ctx, "Replacing the pending plan of an earlier deployment",
 			logging.Field("deployment_id", deployment.ID),
@@ -149,7 +157,7 @@ func (s *Service) deployTerraform(ctx context.Context, app *models.Application, 
 	}
 	deployment.Status = models.DeploymentPlanning
 	deployment.GitopsCommitSHA = commits.Manifest
-	deployment.Terraform = &models.TerraformRun{Root: root, SourceCommitSHA: commits.Source, PlanID: planID}
+	deployment.Terraform = &models.TerraformRun{Root: root, SourceCommitSHA: commits.Source, PlanID: planID, Rollback: deployment.Terraform.Rollback}
 
 	s.FluxReconciler.Trigger(ctx)
 

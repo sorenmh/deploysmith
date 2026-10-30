@@ -196,6 +196,8 @@ func (s *Server) setupAuthenticatedRoutes(r chi.Router) {
 	r.Get("/plan-runs/{planRunId}", s.handleGetPlanRun)
 	r.Get("/deployments", s.handleListDeployments)
 	r.Get("/deployments/{deploymentId}", s.handleGetDeployment)
+	r.Post("/deployments/{deploymentId}/approve", s.handleApproveDeployment)
+	r.Post("/deployments/{deploymentId}/reject", s.handleRejectDeployment)
 	r.Get("/overview", s.handleOverview)
 
 	// Environment routes

@@ -297,7 +297,7 @@ The runner pod is deleted after each run, so its logs are gone. The condition me
 - `applying` → `applied`: `Ready=True`/`TerraformAppliedSucceed`, `lastAppliedRevision` is the source commit and `plan.lastApplied` the plan id; smithd then compares the `plan-hash` of the plan made again with the reviewed one and records the result. → `failed`: `Ready=False` for the source commit, or the CR is gone. An applying run is never made stale.
 - A failed run keeps the `Ready` reason and message and the last Warning events of the CR in `error_message`.
 
-DEP-20 sets `applying` when it commits the approval; the watcher accepts that the state has already been changed.
+The approval API (DEP-20, `internal/smithd/service/approve_terraform.go`) sets `applying` itself when it commits the approval (conditional on `awaiting_approval`, so an approval that is repeated or made by two replicas counts once); an approval found in the repo first is recorded with the approver `git`.
 
 ### Readable Plan
 
@@ -323,6 +323,12 @@ The binary plan is a gzip'd **Secret** `tfplan-default-<cr>` (key `tfplan`), chu
 3. The controller sees the generation change, re-plans in a new runner pod, and applies if the new id equals the approved one. With a pinned source it always does.
 4. When `Ready=True`/`TerraformAppliedSucceed` and `plan.lastApplied == <id>`, smithd compares the ConfigMap `plan-hash` (now from the re-plan) with the approved hash. If they differ, it marks the deployment "applied plan differed from the reviewed plan".
 5. smithd commits `approvePlan: ""`. Then the next plan of the same revision (drift, spec change, retry) waits for approval again.
+
+**As implemented (DEP-20):**
+
+- `POST /deployments/{id}/approve` does the checks of step 1 (`checkPlanCurrent`; the CR must also be the deployment's, by its annotation, and not approve another plan), refuses plans with destroys or replacements unless the request has `confirmDestroy: true` (the error lists them), then commits through `gitops.SetTerraformApproval`. That changes the one `approvePlan:` line of `<root>.yaml`, and only if the file is still the deployment's (annotation) and holds no other approval; the pinned `GitRepository` keeps the revision. Repeating it is a no-op (no new commit) and an `applying` deployment answers 200. Who approved, when, and whether destroys were confirmed are columns of the deployment (migration 009) and in the commit message.
+- Step 5 is a pass of the watcher (`resetApprovals`): every approved deployment that is `applied` or `failed` and has no `approval_reset_at` gets `approvePlan: ""` committed (only where the file still is its own and approved), then `approval_reset_at` is set. The work list is in the database, so it survives restarts, a failed push is tried again every 10 s, and replicas race harmlessly: the second finds the file reset already and commits nothing. A failed run is reset too, so the approval can't apply a later plan of the same revision. A newer deploy that rewrote the file already needs no reset.
+- Rejecting (`POST /deployments/{id}/reject`) sets `rejected` (with who, when and the reason) and notifies Slack, Web Push and the GitHub check runs; it refuses if the CR already has the approval.
 
 Rejecting a plan changes nothing in git. A new deploy rewrites `<root>.yaml` (new `ref.commit`, `approvePlan: ""`). That clears the pending plan: the controller re-plans on a revision change, and on a spec change while a plan is pending.
 

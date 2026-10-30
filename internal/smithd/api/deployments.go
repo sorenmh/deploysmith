@@ -1,6 +1,8 @@
 package api
 
 import (
+	"errors"
+	"io"
 	"net/http"
 	"strconv"
 
@@ -55,6 +57,40 @@ func (s *Server) handleGetDeployment(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	writeJSON(w, http.StatusOK, deployment)
+}
+
+// handleApproveDeployment approves the plan of a terraform deployment. The
+// body may be empty.
+func (s *Server) handleApproveDeployment(w http.ResponseWriter, r *http.Request) {
+	var req models.ApproveDeploymentRequest
+	if err := decodeJSON(r, &req); err != nil && !errors.Is(err, io.EOF) {
+		writeError(w, http.StatusBadRequest, "invalid_request", "Invalid request body")
+		return
+	}
+
+	deployment, err := s.svc.ApproveTerraform(r.Context(), chi.URLParam(r, "deploymentId"), req.ConfirmDestroy)
+	if err != nil {
+		writeServiceError(w, err, "Failed to approve the plan")
+		return
+	}
+	writeJSON(w, http.StatusOK, deployment)
+}
+
+// handleRejectDeployment rejects the plan of a terraform deployment. The
+// body may be empty.
+func (s *Server) handleRejectDeployment(w http.ResponseWriter, r *http.Request) {
+	var req models.RejectDeploymentRequest
+	if err := decodeJSON(r, &req); err != nil && !errors.Is(err, io.EOF) {
+		writeError(w, http.StatusBadRequest, "invalid_request", "Invalid request body")
+		return
+	}
+
+	deployment, err := s.svc.RejectTerraform(r.Context(), chi.URLParam(r, "deploymentId"), req.Reason)
+	if err != nil {
+		writeServiceError(w, err, "Failed to reject the plan")
+		return
+	}
 	writeJSON(w, http.StatusOK, deployment)
 }
 

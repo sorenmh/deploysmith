@@ -20,6 +20,11 @@ type TerraformGitops interface {
 	// DeployTerraform commits a root's source and then its CR, pinned to
 	// the source commit
 	DeployTerraform(d gitops.TerraformDeploy) (gitops.TerraformCommits, error)
+	// SetTerraformApproval sets approvePlan of the deployment's root to a
+	// plan id (an approval) or to "" (the reset after the apply) in one
+	// commit, and returns its SHA. gitops.ErrRootNotCurrent if the root's
+	// file is not the deployment's.
+	SetTerraformApproval(appName, environment, root, deploymentID, planID, message string) (string, error)
 }
 
 // defaultTerraformRoot is the root of the default state key; one root per

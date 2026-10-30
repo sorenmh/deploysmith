@@ -1,6 +1,7 @@
 package gitops
 
 import (
+	"errors"
 	"fmt"
 	"strings"
 	"testing"
@@ -312,5 +313,124 @@ func TestDeployTerraformManifestError(t *testing.T) {
 	// The source commit is not pushed alone
 	if head := remoteCommit(t, remote, ""); head.Message != "add README.md" {
 		t.Errorf("something was pushed: %q", head.Message)
+	}
+}
+
+const testRootFile = "environments/prod/terraform/viino/main.yaml"
+
+// deployRoot deploys a root whose file looks like the one smithd renders:
+// annotated with the deployment, approvePlan indented in the spec
+func deployRoot(t *testing.T, s *Service, deploymentID string) TerraformCommits {
+	t.Helper()
+	d := testDeploy(bundle("# v1\n"))
+	d.Manifest = func(branch, sourceCommit string) ([]byte, error) {
+		return []byte(fmt.Sprintf("metadata:\n  annotations:\n    deploysmith.io/deployment-id: %s\nspec:\n  interval: 6h\n  approvePlan: \"\"\n  path: ./src\n    commit: %s\n", deploymentID, sourceCommit)), nil
+	}
+	commits, err := s.DeployTerraform(d)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return commits
+}
+
+func TestSetTerraformApprovalChangesOnlyApprovePlan(t *testing.T) {
+	remote := newTestRemote(t)
+	s := newTestService(t, remote)
+	deployed := deployRoot(t, s, "dep-1")
+	before := fileAt(t, remoteCommit(t, remote, ""), testRootFile)
+
+	sha, err := s.SetTerraformApproval("viino", "prod", "main", "dep-1", "plan-main-0123456789", "approve")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// One commit on top of the deploy that changes that line only
+	head := remoteCommit(t, remote, "")
+	if head.Hash.String() != sha || head.Message != "approve" || len(head.ParentHashes) != 1 || head.ParentHashes[0].String() != deployed.Manifest {
+		t.Fatalf("remote HEAD %s %q (parents %v), want one commit %s on %s", head.Hash, head.Message, head.ParentHashes, sha, deployed.Manifest)
+	}
+	want := strings.Replace(before, `approvePlan: ""`, `approvePlan: "plan-main-0123456789"`, 1)
+	if got := fileAt(t, head, testRootFile); got != want {
+		t.Errorf("main.yaml = %q, want %q", got, want)
+	}
+	stats, err := head.Stats()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(stats) != 1 || stats[0].Name != testRootFile || stats[0].Addition != 1 || stats[0].Deletion != 1 {
+		t.Errorf("the approval changed %+v, want one line of main.yaml", stats)
+	}
+
+	// The same approval again commits nothing
+	again, err := s.SetTerraformApproval("viino", "prod", "main", "dep-1", "plan-main-0123456789", "approve")
+	if err != nil || again != sha {
+		t.Errorf("repeated approval = %q, %v, want %s and no new commit", again, err, sha)
+	}
+
+	// Resetting writes "" again, once
+	reset, err := s.SetTerraformApproval("viino", "prod", "main", "dep-1", "", "reset")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := fileAt(t, remoteCommit(t, remote, ""), testRootFile); got != before {
+		t.Errorf("main.yaml after reset = %q, want %q", got, before)
+	}
+	if again, err := s.SetTerraformApproval("viino", "prod", "main", "dep-1", "", "reset"); err != nil || again != reset {
+		t.Errorf("repeated reset = %q, %v, want %s and no new commit", again, err, reset)
+	}
+}
+
+func TestSetTerraformApprovalOnlyForTheCurrentDeployment(t *testing.T) {
+	remote := newTestRemote(t)
+	s := newTestService(t, remote)
+	deployRoot(t, s, "dep-2")
+	head := remoteCommit(t, remote, "").Hash
+
+	// A newer deployment owns the file
+	if _, err := s.SetTerraformApproval("viino", "prod", "main", "dep-1", "plan-main-0123456789", "approve"); !errors.Is(err, ErrRootNotCurrent) {
+		t.Errorf("approving for another deployment: %v, want ErrRootNotCurrent", err)
+	}
+	if _, err := s.SetTerraformApproval("viino", "prod", "other", "dep-2", "plan-main-0123456789", "approve"); !errors.Is(err, ErrRootNotCurrent) {
+		t.Errorf("approving a root without file: %v, want ErrRootNotCurrent", err)
+	}
+
+	// Another plan is approved already
+	if _, err := s.SetTerraformApproval("viino", "prod", "main", "dep-2", "plan-main-aaaaaaaaaa", "approve"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.SetTerraformApproval("viino", "prod", "main", "dep-2", "plan-main-bbbbbbbbbb", "approve"); !errors.Is(err, ErrRootNotCurrent) {
+		t.Errorf("approving over another approval: %v, want ErrRootNotCurrent", err)
+	}
+	if remoteCommit(t, remote, "").ParentHashes[0] != head {
+		t.Error("refused approvals committed something")
+	}
+
+	for _, tc := range []struct{ app, env, root, plan string }{
+		{"../x", "prod", "main", ""}, {"viino", "..", "main", ""}, {"viino", "prod", "a/b", ""}, {"viino", "prod", "main", "a/b"},
+	} {
+		if _, err := s.SetTerraformApproval(tc.app, tc.env, tc.root, "dep-2", tc.plan, "x"); err == nil {
+			t.Errorf("SetTerraformApproval(%+v) succeeded", tc)
+		}
+	}
+}
+
+func TestSetTerraformApprovalRetriesRejectedPush(t *testing.T) {
+	remote := newTestRemote(t)
+	s := newTestService(t, remote)
+	deployRoot(t, s, "dep-1")
+
+	raced := false
+	s.beforePush = func() {
+		if !raced {
+			raced = true
+			pushFromOtherClone(t, remote, "human.txt", "edit")
+		}
+	}
+	if _, err := s.SetTerraformApproval("viino", "prod", "main", "dep-1", "plan-main-0123456789", "approve"); err != nil {
+		t.Fatalf("approval failed despite retry: %v", err)
+	}
+	head := remoteCommit(t, remote, "")
+	if fileAt(t, head, "human.txt") != "edit" || !strings.Contains(fileAt(t, head, testRootFile), `approvePlan: "plan-main-0123456789"`) {
+		t.Error("the approval is not on top of the concurrent push")
 	}
 }
