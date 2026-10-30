@@ -224,6 +224,27 @@ reports each deployment as a `deploysmith/deploy-<env>` check run on the
 commit the version was built from, which `forge init` detects in GitHub
 Actions. See [docs/github-checks.md](docs/github-checks.md).
 
+### Terraform support
+
+Besides Kubernetes manifests, DeploySmith deploys Terraform (OpenTofu). CI
+checks the configuration without any cloud credentials and uploads a bundle
+with `forge upload --terraform`; `smithctl deploy` makes smithd commit it to
+the gitops repo, where [tofu-controller](https://github.com/flux-iac/tofu-controller)
+plans it in a per-app namespace. smithd shows the plan in `smithctl`, the web
+UI and as a check run on the commit, and **nothing is applied until someone
+approves it** (`smithctl deployment approve`, or the web UI). Secrets and AWS
+credentials come from OpenBao, state lives in S3 with DynamoDB locking and is
+encrypted per app, and `forge plan` shows what a draft, a pull request or
+local files would change. Terraform support is off until smithd has an
+`OPENBAO_ADDR`.
+
+- [docs/terraform.md](docs/terraform.md): the guide (model, bundle rules,
+  CI workflow, developer and operator workflows, troubleshooting, known limits)
+- [docs/terraform-cluster-setup.md](docs/terraform-cluster-setup.md) and the
+  [chart README](charts/smithd/README.md#terraform-apps): setting it up
+- [docs/terraform-migration.md](docs/terraform-migration.md): moving an
+  existing Terraform app over
+
 ### Running
 
 ```bash
@@ -390,6 +411,8 @@ See [docs/specs/smithd-database-schema.md](docs/specs/smithd-database-schema.md)
 ## Documentation
 
 - [forge CLI Tool](docs/forge.md) - **Complete forge documentation with examples**
+- [Terraform with DeploySmith](docs/terraform.md) - Terraform/OpenTofu bundles, plans and approval
+- [Login with GitHub](docs/login-with-github.md) and [Deploy status on GitHub](docs/github-checks.md)
 - [smithd API Spec](docs/specs/smithd-api-spec.md) - REST API documentation
 - [Vision](docs/specs/vision.md) - Product vision and requirements
 - [Implementation Plan](docs/specs/implementation-plan.md) - Development roadmap

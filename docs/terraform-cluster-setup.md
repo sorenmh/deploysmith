@@ -1,6 +1,6 @@
 # Terraform Cluster Setup
 
-One-time platform setup every Terraform app relies on (DEP-16, epic DEP-13): the runner image, tofu-controller, the state backend and OpenTofu state encryption. The CR shape, status fields and the reasons behind each setting are in [specs/terraform-controller.md](specs/terraform-controller.md). The per-app parts (namespace, ServiceAccounts, OpenBao roles and policies, Transit key, IAM roles) are created by smithd and the `tf-app` module (DEP-17, chart README "Terraform apps"). Moving existing apps over: [terraform-migration.md](terraform-migration.md).
+One-time platform setup every Terraform app relies on (DEP-16, epic DEP-13). Start with the model and the day-to-day use in [terraform.md](terraform.md); all chart values and environment variables are in one table in the [chart README](../charts/smithd/README.md#terraform-configuration-reference). This page covers: the runner image, tofu-controller, the state backend and OpenTofu state encryption. The CR shape, status fields and the reasons behind each setting are in [specs/terraform-controller.md](specs/terraform-controller.md). The per-app parts (namespace, ServiceAccounts, OpenBao roles and policies, Transit key, IAM roles) are created by smithd and the `tf-app` module (DEP-17, chart README "Terraform apps"). Moving existing apps over: [terraform-migration.md](terraform-migration.md).
 
 ## Checklist
 
@@ -12,7 +12,8 @@ What has to exist before the first Terraform app can deploy:
 4. **Shared state backend** (S3 bucket + DynamoDB table) from `terraform/tf_state.tf` in the platform app ([State Backend](#state-backend)).
 5. **OpenBao**: KV v2 at `secret`, Transit at `transit`, the AWS secrets engine plugin at `aws` with OpenBao's own AWS identity, Kubernetes auth, and smithd's policy and role (chart README, "Terraform apps").
 6. **smithd** with `config.openbao.*` and `config.terraform.*` set and `rbac.create: true` ([smithd RBAC](#smithd-rbac)).
-7. Per app: one `tf-app` module block in the platform app and `smithctl app terraform enable <app> --env <env>`.
+7. Optional: a GitHub App with **Checks: Read and write**, installed on the repositories, so plans and deployments show up as check runs ([github-checks.md](github-checks.md)). Login with GitHub for per-user approval ([login-with-github.md](login-with-github.md)).
+8. Per app: one `tf-app` module block in the platform app and `smithctl app terraform enable <app> --env <env>` ([terraform.md](terraform.md#platform-app-and-shared-infrastructure)).
 
 Then check the setup with the hand-written CR in [examples/terraform/terraform-cr.yaml](examples/terraform/terraform-cr.yaml): it must plan, wait for approval, and apply after `approvePlan` is set to `status.plan.pending`, with the state in S3 encrypted (the object has `encrypted_data` and no plaintext resources).
 

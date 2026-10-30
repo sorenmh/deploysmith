@@ -1,6 +1,6 @@
 # Moving an Existing Terraform App to DeploySmith
 
-Checklist for the existing Terraform apps (3 today) that are applied from their own CI. After the move, forge uploads a bundle, smithd commits it with a `Terraform` CR, tofu-controller plans, and a person approves the apply (DEP-13). The app **keeps its S3 bucket, state key and DynamoDB table**. Its state is converted from Terraform to OpenTofu and encrypted on the first apply. Cluster prerequisites: [terraform-cluster-setup.md](terraform-cluster-setup.md).
+Checklist for the existing Terraform apps (3 today) that are applied from their own CI. After the move, forge uploads a bundle, smithd commits it with a `Terraform` CR, tofu-controller plans, and a person approves the apply (DEP-13). The app **keeps its S3 bucket, state key and DynamoDB table**. Its state is converted from Terraform to OpenTofu and encrypted on the first apply. Cluster prerequisites: [terraform-cluster-setup.md](terraform-cluster-setup.md). How the result works day to day: [terraform.md](terraform.md).
 
 Do one app and one environment at a time, starting with the least important environment. Nothing else may apply the app's Terraform while it is moved: stop its CI apply job before step 5.
 
@@ -15,11 +15,11 @@ Do one app and one environment at a time, starting with the least important envi
 
 In the app's repository:
 
-- [ ] Remove the `backend` block (smithd sets the backend; forge rejects bundles with a `backend`/`cloud` block or `*override.tf` files). Remove any `encryption` block.
-- [ ] Set `required_version` to the chosen OpenTofu version, e.g. `"~> 1.13.0"`.
+- [ ] Remove the `backend` block (smithd sets the backend; forge rejects bundles with settings in the `backend` block, a `cloud` block or override files such as `override.tf` and `*_override.tf`; [bundle rules](terraform.md#bundle-layout-and-rules)). Remove any `encryption` block.
+- [ ] Pin `required_version` to the chosen OpenTofu version, **exactly**, e.g. `"1.13.2"`: forge and smithd refuse ranges such as `"~> 1.13.0"`, because the pin chooses the runner image.
 - [ ] `tofu init -backend=false -upgrade`, commit the new `.terraform.lock.hcl` (it now has `registry.opentofu.org` hashes; add `tofu providers lock -platform=linux_amd64 -platform=linux_arm64` if CI runs on another platform than the cluster).
-- [ ] Move secrets out of CI and tfvars into OpenBao `secret/apps/<app>/...` and read them with the `vault` provider (DEP-17). Non-secret values go in `tfvars/<env>.tfvars`.
-- [ ] Remove the cloud credentials and the `terraform apply` job from CI; add `forge upload` of the bundle (DEP-15).
+- [ ] Move secrets out of CI and tfvars into OpenBao `secret/apps/<app>/...` and read them with the `vault` provider (DEP-17). Non-secret values go in `env/<env>.tfvars` ([terraform.md](terraform.md#secrets-and-aws-credentials-in-a-root)).
+- [ ] Remove the cloud credentials and the `terraform apply` job from CI; add `forge upload --terraform` of the bundle ([CI workflow](terraform.md#ci-workflow)). Files that the root reads with `file()` (other than `*.tftpl` templates) are not packed yet (DEP-27).
 
 ## 3. Register the app in smithd with its existing backend
 

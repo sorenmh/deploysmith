@@ -2,6 +2,13 @@
 
 Which controller reconciles the `Terraform` custom resources smithd commits to the gitops repo, and the exact shape smithd writes and reads. Result of the spike DEP-14 for the epic DEP-13 (Terraform support).
 
+> **Status.** This is the design from the spike; the implementation follows it with these differences, and the examples below are marked where they were written before them. For the finished behaviour read [terraform.md](../terraform.md) and the [chart README](../../charts/smithd/README.md#terraform-apps).
+>
+> - ServiceAccounts, RoleBindings and OpenBao roles are **per environment**: `tf-runner-<env>` and `tf-runner-<env>-readonly` (not `tf-runner`), RoleBinding `tf-runner-<env>`, and `smithd-terraform-reader-<env>`. Two environments sharing a cluster would otherwise share objects, and a dev runner could log in as prod.
+> - The variables file of an environment is `env/<env>.tfvars` in the bundle (not `tfvars/<env>.tfvars`).
+> - Plans are read from the ConfigMap only; smithd has no access to Secrets.
+> - Approval, stale handling and plan-only runs are implemented as described under [Approval](#approval) and [Plan-Only Runs](#plan-only-runs), plus the checks listed in [terraform.md](../terraform.md#the-model).
+
 ## Decision
 
 **Use tofu-controller** (`github.com/flux-iac/tofu-controller`, CRD `terraforms.infra.contrib.fluxcd.io/v1alpha2`), pinned to **v0.16.6**. We do not build our own controller.
@@ -48,7 +55,7 @@ environments/<env>/terraform/
     ├── kustomization.yaml             # resources: [namespace.yaml, <root>.yaml]
     ├── namespace.yaml                 # Namespace, ServiceAccounts, RoleBindings, NetworkPolicy, ResourceQuota
     ├── <root>.yaml                    # GitRepository + Terraform for this env/root
-    └── src/<root>/                    # unpacked bundle: *.tf, .terraform.lock.hcl, tfvars/<env>.tfvars
+    └── src/<root>/                    # unpacked bundle: *.tf, *.tofu, *.tftpl, .terraform.lock.hcl, env/<env>.tfvars
 ```
 
 DEP-16 adds one Flux `Kustomization` per environment: `terraform-<env>`, path `./environments/<env>/terraform`, `prune: true`, **no `wait`/`healthChecks`**.
@@ -62,7 +69,7 @@ The plan id for the deploy is then `plan-<branch>-<A[:10]>`, e.g. `plan-main-8fa
 
 ## Resources smithd Generates
 
-Names: namespace `tf-<app>`, CR and GitRepository `<env>-<root>` (e.g. `dev-main`). The runner pod is named `<cr>-tf-runner`, so keep CR names short.
+Names: namespace `tf-<app>`, CR `<env>-<root>` (e.g. `dev-main`), GitRepository `tf-<app>-<env>-<root>` in the Flux namespace (e.g. `tf-viino-dev-main`). The runner pod is named `<cr>-tf-runner`, so keep CR names short.
 
 ### Namespace and RBAC (`namespace.yaml`)
 
@@ -77,7 +84,7 @@ metadata:
 apiVersion: v1
 kind: ServiceAccount
 metadata:
-  name: tf-runner              # used by apply runs; OpenBao role tf-viino-<env>
+  name: tf-runner-dev          # used by apply runs; OpenBao role tf-viino-dev
   namespace: tf-viino
 ---
 apiVersion: v1
@@ -91,21 +98,21 @@ metadata:
 apiVersion: rbac.authorization.k8s.io/v1
 kind: RoleBinding
 metadata:
-  name: tf-runner
+  name: tf-runner-dev
   namespace: tf-viino
 roleRef:
   apiGroup: rbac.authorization.k8s.io
   kind: ClusterRole
   name: tf-runner-role
 subjects:
-  - {kind: ServiceAccount, name: tf-runner, namespace: tf-viino}
-  - {kind: ServiceAccount, name: tf-runner-readonly, namespace: tf-viino}
+  - {kind: ServiceAccount, name: tf-runner-dev, namespace: tf-viino}
+  - {kind: ServiceAccount, name: tf-runner-dev-readonly, namespace: tf-viino}
 ---
 # Lets smithd read the readable plan and the events in this namespace only
 apiVersion: rbac.authorization.k8s.io/v1
 kind: RoleBinding
 metadata:
-  name: smithd-terraform-reader
+  name: smithd-terraform-reader-dev
   namespace: tf-viino
 roleRef:
   apiGroup: rbac.authorization.k8s.io
@@ -159,10 +166,10 @@ spec:
     namespace: flux-system
   path: ./environments/dev/terraform/viino/src/main
   tfVarsFiles:                     # relative to the repo root, not to path
-    - environments/dev/terraform/viino/src/main/tfvars/dev.tfvars
+    - environments/dev/terraform/viino/src/main/env/dev.tfvars
   approvePlan: ""                  # smithd sets the full plan id on approval, then "" again after apply
   storeReadablePlan: human
-  serviceAccountName: tf-runner
+  serviceAccountName: tf-runner-dev
   disableDriftDetection: true      # see Known Limits
   destroyResourcesOnDeletion: false
   alwaysCleanupRunnerPod: true
@@ -403,7 +410,7 @@ awsPackage: {install: false}
 runner:
   image: {repository: ghcr.io/sorenmh/deploysmith-tf-runner, tag: v0.16.6-tofu1.12.9}  # default runner
   serviceAccount:
-    create: false                    # smithd commits tf-runner per namespace
+    create: false                    # smithd commits the runner ServiceAccounts per namespace
     namespacedRoleBindings: true     # never a cluster-wide RoleBinding for runners
 ```
 

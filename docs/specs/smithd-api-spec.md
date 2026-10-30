@@ -493,6 +493,9 @@ Rejects the plan of a terraform deployment that is `awaiting_approval`. The depl
 **Response:** `200 OK` with the deployment. Rejecting a `rejected` deployment is not an error.
 
 **Errors:** `400 not_terraform`, `400 invalid_request` (reason over 1000 characters), `404`, `409 not_awaiting_approval`, and `409 conflict` if the plan was approved in the repo and is being applied.
+
+---
+
 ### 8e. Plan a Terraform Version (plan-only run)
 
 Show what a draft or published terraform version would change in an
@@ -760,6 +763,51 @@ Check if the service is healthy.
 
 ---
 
+### 13. Terraform Environments
+
+Enable Terraform for an application in an environment, and provision what its runner needs: the namespace `tf-<app>` and ServiceAccounts in the gitops repo, and the OpenBao policies, Kubernetes auth roles, AWS secrets engine roles and Transit key. All of these return `400 terraform_disabled` while smithd has no `OPENBAO_ADDR`. Guide: [terraform.md](../terraform.md); what is created: the [chart README](../../charts/smithd/README.md#terraform-apps).
+
+**Enable:** `POST /apps/{appId}/terraform/environments`
+
+```json
+{
+  "environment": "production",
+  "backend": { "bucket": "legacy-tfstate", "key": "prod/terraform.tfstate", "region": "eu-central-1", "lockTable": "legacy-tflock" },
+  "awsRoleArn": "arn:aws:iam::123456789012:role/tf-legacy-prod",
+  "encryptionFallback": true
+}
+```
+
+`backend`, `awsRoleArn` and `encryptionFallback` are optional. Without `backend.bucket` the app gets smithd's shared backend with the state key `<app>/<env>/main/terraform.tfstate`; existing apps pass their own. `awsRoleArn` defaults to `arn:aws:iam::<TERRAFORM_AWS_ACCOUNT_ID>:role/tf-<app>-<env>` (plan-only runs use the same ARN with `-readonly`). `encryptionFallback` lets the first apply read plaintext state and write it back encrypted (see [terraform-migration.md](../terraform-migration.md)).
+
+**Response:** `201 Created` with the environment:
+
+```json
+{
+  "id": "tfenv-1",
+  "appId": "app-123",
+  "appName": "viino",
+  "environment": "production",
+  "backend": { "bucket": "deploysmith-tfstate", "key": "viino/production/main/terraform.tfstate", "region": "eu-north-1", "lockTable": "deploysmith-tflock" },
+  "encryptionFallback": false,
+  "provisionedAt": "2025-01-15T10:40:00Z",
+  "createdAt": "2025-01-15T10:40:00Z",
+  "updatedAt": "2025-01-15T10:40:00Z"
+}
+```
+
+`provisionedAt` is when provisioning last succeeded and `provisionError` the error of the last attempt, kept until a sync succeeds: a provisioning failure does not undo the enabling, and a deploy is refused with `400 terraform_not_provisioned` until it has succeeded. Errors: `400 terraform_disabled`, `400 invalid_request` (names that are not DNS labels, too long for the namespace or IAM role, or no AWS account configured for the default role ARN), `404` for an unknown app or `environment_not_found`, `409 terraform_enabled` if it is already enabled.
+
+**List:** `GET /apps/{appId}/terraform/environments` returns `{"environments": [ ... ]}`.
+
+**Update:** `PATCH /apps/{appId}/terraform/environments/{environment}` with `{"encryptionFallback": false}` changes the setting from the next deploy on. Fields left out are kept.
+
+**Sync:** `POST /apps/{appId}/terraform/sync`, optionally with `{"environment": "production"}`, provisions again (every step is an upsert) and returns `{"environments": [ ... ]}`. smithd also does this at startup.
+
+There is no endpoint to disable Terraform for an environment yet.
+
+---
+
 ## Error Responses
 
 All error responses follow this format:
@@ -781,17 +829,20 @@ All error responses follow this format:
 - `internal_error` - 500 Internal Server Error
 - `service_unavailable` - 503 Service Unavailable
 
+Specific conditions have their own codes in the same shape, for example `validation_failed`, `unsupported_artifact_type`, `terraform_not_enabled`, `plan_not_current`, `destroy_confirmation_required`, `terraform_applying` and `login_required`; they are listed where they occur (Deploy Version, Approve Terraform Plan, Plan a Terraform Version).
+
 ---
 
 ## Authentication
 
-All endpoints except `/health` require the `X-API-Key` header.
+All endpoints except `/health` and the login endpoints (`POST /auth/device`, `POST /auth/device/token`) require the `X-API-Key` header or, for people who signed in with GitHub, `Authorization: Bearer <session token>`.
 
 ```
 X-API-Key: sk_live_abc123def456
+Authorization: Bearer smithd_...
 ```
 
-For MVP, any valid API key has full access to all resources.
+Any valid API key has full access to all resources; a session has the same access and identifies the user (who deployed, who approved a Terraform plan). A few endpoints need a session and refuse API keys, such as local plans (`403 login_required`). Login endpoints: [login-with-github.md](../login-with-github.md#api).
 
 ---
 
@@ -821,7 +872,9 @@ GITOPS_USER_NAME=smithd
 GITOPS_USER_EMAIL=smithd@deploysmith.io
 ```
 
-**Note:** smithd manages a single gitops repository configured globally. All applications use this repo. Manifests are written to: `environments/{environment}/apps/{app_name}/`
+These are the core settings. Everything else (login with GitHub, GitHub App, OpenBao and Terraform, Slack, push, Flux) is listed in the [chart README](../../charts/smithd/README.md#terraform-configuration-reference) and the docs linked from there.
+
+**Note:** smithd manages a single gitops repository configured globally. All applications use this repo. Manifests are written to: `environments/{environment}/apps/{app_name}/`; Terraform bundles to `environments/{environment}/terraform/{app_name}/`
 
 ---
 

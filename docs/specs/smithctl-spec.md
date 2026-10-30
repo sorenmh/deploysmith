@@ -383,6 +383,52 @@ smithctl policy delete my-api-service auto-deploy-main
 
 ---
 
+### `smithctl login`, `logout`, `whoami`
+
+Sign in to smithd with a GitHub account (device flow), end the session, or show who smithd sees. See [login-with-github.md](../login-with-github.md).
+
+```bash
+smithctl login --url https://smithd.example.com
+smithctl whoami
+smithctl logout
+```
+
+The session is stored in `~/.deploysmith/sessions.json` and used instead of the API key until it expires. `smithctl version list --all` also lists the temporary versions of local plans (`forge plan --terraform`).
+
+---
+
+### `smithctl app terraform`
+
+Manage the Terraform environments of an application ([terraform.md](../terraform.md#operator-workflow); API: [smithd API, Terraform Environments](smithd-api-spec.md#13-terraform-environments)).
+
+```bash
+smithctl app terraform enable <app> --env prod [--backend-bucket B --backend-key K --backend-region R --backend-lock-table T] [--aws-role-arn ARN] [--encryption-fallback]
+smithctl app terraform update <app> --env prod --encryption-fallback=false
+smithctl app terraform list <app>
+smithctl app terraform sync <app> [--env prod]
+```
+
+- `enable` records the state backend (the shared one unless `--backend-*` are given) and provisions the runner namespace and the OpenBao roles, policies and Transit key. A provisioning error is shown and kept until a `sync` succeeds.
+- `update` changes `--encryption-fallback` only, from the next deploy on.
+- `list` shows each environment's backend and the outcome of the last provisioning.
+- `sync` provisions again and is safe to repeat.
+
+---
+
+### `smithctl deployment show`, `approve`, `reject`
+
+Review and decide on Terraform deployments ([terraform.md](../terraform.md#deploy-review-approve)).
+
+```bash
+smithctl deployment show <id> [--plan]                # status, plan summary; --plan prints the full plan text
+smithctl deployment approve <id> [--confirm-destroy]  # needed for plans that destroy or replace resources
+smithctl deployment reject <id> [--reason "..."]
+```
+
+`approve` fails with `plan_not_current` if the plan is no longer the controller's current one, and with `destroy_confirmation_required` (listing the resources) for destroys without `--confirm-destroy`. The approver is the signed-in GitHub login, or `api-key`. `smithctl deploy` of a terraform version prints the deployment id and how to approve.
+
+---
+
 ### `smithctl version`
 
 Show the smithctl version.
@@ -495,10 +541,9 @@ Error: --env is required
 
 ## Future Enhancements (Post-MVP)
 
-- `smithctl deployment show` - Show deployment details and logs; for Terraform, the plan (`--plan` for the full text) and who approved it
-- `smithctl deployment approve <id> [--confirm-destroy]` - Approve the plan of a Terraform deployment
-- `smithctl deployment reject <id> [--reason ...]` - Reject the plan of a Terraform deployment
 - `smithctl deployment list` - List deployment history
+- `smithctl plan` - Plan a Terraform version or local files from smithctl (today only `forge plan`)
+- `smithctl app terraform disable` - Turn Terraform off for an app in an environment
 - `smithctl diff` - Compare two versions
 - `smithctl logs` - Stream logs from deployed app (via kubectl integration)
 - `smithctl dashboard` - Open web dashboard
