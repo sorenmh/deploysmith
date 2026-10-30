@@ -63,6 +63,17 @@ func (r *Reporter) Applying(ctx context.Context, d slack.Deploy) {
 		summary(d, "The plan was approved and is being applied."), "")
 }
 
+// Rejected reports a Terraform plan that someone rejected
+func (r *Reporter) Rejected(ctx context.Context, d slack.Deploy, by, reason string) {
+	state := "Rejected by " + by + "."
+	if reason != "" {
+		state = "Rejected by " + by + ": " + reason
+	}
+	r.sendDeploy(ctx, d, StatusCompleted, ConclusionNeutral,
+		fmt.Sprintf("Plan for %s was rejected", d.Environment), summary(d, state), "")
+	r.reportPlan(ctx, d, StatusCompleted, ConclusionNeutral, "Plan rejected", summary(d, state))
+}
+
 // Stale reports a Terraform deployment whose plan can no longer be
 // approved, e.g. because a newer deploy replaced it
 func (r *Reporter) Stale(ctx context.Context, d slack.Deploy, reason string) {

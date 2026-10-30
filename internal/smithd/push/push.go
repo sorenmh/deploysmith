@@ -169,6 +169,15 @@ func planReadyMessage(d slack.Deploy) message {
 	return message{Title: title, Body: fmt.Sprintf("%s: %s", target(d), d.Plan.Counts()), URL: d.URL, Tag: tag(d)}
 }
 
+// Rejected reports a Terraform plan that was rejected, who did and why
+func (n *Notifier) Rejected(ctx context.Context, d slack.Deploy, by, reason string) {
+	body := fmt.Sprintf("%s by %s", target(d), by)
+	if reason != "" {
+		body += ": " + reason
+	}
+	n.send(ctx, message{Title: "Plan rejected", Body: body, URL: d.URL, Tag: tag(d)})
+}
+
 // Applied reports a deployment Flux has applied to the cluster, or for a
 // Terraform deployment, that OpenTofu has applied the plan
 func (n *Notifier) Applied(ctx context.Context, d slack.Deploy, took time.Duration) {

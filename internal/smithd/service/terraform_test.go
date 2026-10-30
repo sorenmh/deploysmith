@@ -28,6 +28,25 @@ type fakeTerraformGitops struct {
 	// deploys are the rendered root files of DeployTerraform
 	deploys   []terraformDeployCall
 	deployErr error
+
+	// roots are the approval state of each root's file, as the real
+	// gitops service keeps it in the file; approvals are the commits of
+	// SetTerraformApproval that changed it
+	roots       map[string]*fakeRootFile
+	approvals   []terraformApproval
+	approvalErr error
+}
+
+// fakeRootFile is what SetTerraformApproval looks at in a root's file
+type fakeRootFile struct {
+	deploymentID string
+	approvePlan  string
+}
+
+type terraformApproval struct {
+	deploymentID string
+	planID       string // "" is a reset
+	message      string
 }
 
 type terraformDeployCall struct {
@@ -54,7 +73,46 @@ func (f *fakeTerraformGitops) DeployTerraform(d gitops.TerraformDeploy) (gitops.
 		return gitops.TerraformCommits{}, err
 	}
 	f.deploys = append(f.deploys, terraformDeployCall{deploy: d, manifest: string(manifest), commits: commits})
+	if f.roots == nil {
+		f.roots = map[string]*fakeRootFile{}
+	}
+	f.roots[d.App+"/"+d.Environment+"/"+d.Root] = &fakeRootFile{deploymentID: annotation(string(manifest), "deploysmith.io/deployment-id")}
 	return commits, nil
+}
+
+// annotation returns the value of a metadata annotation of a rendered file
+func annotation(manifest, key string) string {
+	for _, line := range strings.Split(manifest, "\n") {
+		if value, ok := strings.CutPrefix(strings.TrimSpace(line), key+": "); ok {
+			return value
+		}
+	}
+	return ""
+}
+
+// SetTerraformApproval keeps the approval of a root's file like the real
+// service: only for the file's deployment, and a commit only if it changes
+func (f *fakeTerraformGitops) SetTerraformApproval(appName, environment, root, deploymentID, planID, message string) (string, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.approvalErr != nil {
+		return "", f.approvalErr
+	}
+	file := f.roots[appName+"/"+environment+"/"+root]
+	if file == nil || file.deploymentID != deploymentID || (planID != "" && file.approvePlan != "" && file.approvePlan != planID) {
+		return "", gitops.ErrRootNotCurrent
+	}
+	if file.approvePlan != planID {
+		file.approvePlan = planID
+		f.approvals = append(f.approvals, terraformApproval{deploymentID, planID, message})
+	}
+	return strings.Repeat("a", 40), nil
+}
+
+func (f *fakeTerraformGitops) Approvals() []terraformApproval {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return append([]terraformApproval(nil), f.approvals...)
 }
 
 func (f *fakeTerraformGitops) Deploys() []terraformDeployCall {
