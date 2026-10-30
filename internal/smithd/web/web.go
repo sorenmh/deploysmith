@@ -29,9 +29,10 @@ const Prefix = "/ui"
 
 // UI serves the web interface
 type UI struct {
-	svc   *service.Service
-	auth  AuthConfig
-	pages map[string]*template.Template
+	svc       *service.Service
+	decisions decider
+	auth      AuthConfig
+	pages     map[string]*template.Template
 }
 
 // page is the data passed to every page template
@@ -46,6 +47,11 @@ type page struct {
 
 // New returns the UI handler, to be mounted at Prefix
 func New(svc *service.Service, authCfg AuthConfig) (http.Handler, error) {
+	return newHandler(svc, svc, authCfg)
+}
+
+// newHandler is New with the plans approved and rejected through decisions
+func newHandler(svc *service.Service, decisions decider, authCfg AuthConfig) (http.Handler, error) {
 	authenticate, err := Authenticate(authCfg)
 	if err != nil {
 		return nil, err
@@ -56,7 +62,7 @@ func New(svc *service.Service, authCfg AuthConfig) (http.Handler, error) {
 		return nil, err
 	}
 
-	ui := &UI{svc: svc, auth: authCfg, pages: pages}
+	ui := &UI{svc: svc, decisions: decisions, auth: authCfg, pages: pages}
 
 	static, err := fs.Sub(assets, "static")
 	if err != nil {
@@ -113,6 +119,8 @@ func New(svc *service.Service, authCfg AuthConfig) (http.Handler, error) {
 		r.Post("/environments/{environmentId}", ui.handleUpdateEnvironment)
 		r.Post("/environments/{environmentId}/delete", ui.handleDeleteEnvironment)
 		r.Get("/deployments/{deploymentId}", ui.handleDeployment)
+		r.Post("/deployments/{deploymentId}/approve", ui.handleApprove)
+		r.Post("/deployments/{deploymentId}/reject", ui.handleReject)
 	})
 
 	return r, nil
@@ -165,6 +173,8 @@ func templateFuncs() (template.FuncMap, error) {
 	return template.FuncMap{
 		"ago":      ago,
 		"shortSHA": shortSHA,
+		"counts":   counts,
+		"actions":  actions,
 		"asset": func(name string) (string, error) {
 			version, ok := versions[name]
 			if !ok {

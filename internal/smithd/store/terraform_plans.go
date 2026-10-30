@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/sorenmh/deploysmith/internal/smithd/db"
@@ -78,6 +79,41 @@ func (s *TerraformPlanStore) Get(deploymentID string) (*models.TerraformPlan, er
 		}
 	}
 	return &plan, nil
+}
+
+// Summaries returns the plans of the given deployments by deployment id,
+// with the counts only (no resources or text), for listings. Deployments
+// without a plan are left out.
+func (s *TerraformPlanStore) Summaries(deploymentIDs []string) (map[string]models.TerraformPlan, error) {
+	summaries := map[string]models.TerraformPlan{}
+	if len(deploymentIDs) == 0 {
+		return summaries, nil
+	}
+
+	placeholders := strings.TrimSuffix(strings.Repeat("?, ", len(deploymentIDs)), ", ")
+	args := make([]any, len(deploymentIDs))
+	for i, id := range deploymentIDs {
+		args[i] = id
+	}
+	rows, err := s.db.Query(`
+		SELECT deployment_id, plan_id, to_add, to_change, to_destroy, destroys
+		FROM terraform_plans
+		WHERE deployment_id IN (`+placeholders+`)
+	`, args...)
+	if err != nil {
+		return nil, fmt.Errorf("failed to list terraform plans: %w", err)
+	}
+	defer rows.Close()
+
+	for rows.Next() {
+		var id string
+		var plan models.TerraformPlan
+		if err := rows.Scan(&id, &plan.PlanID, &plan.ToAdd, &plan.ToChange, &plan.ToDestroy, &plan.Destroys); err != nil {
+			return nil, fmt.Errorf("failed to scan terraform plan: %w", err)
+		}
+		summaries[id] = plan
+	}
+	return summaries, rows.Err()
 }
 
 // SetPlannedAt records that the controller made the same plan again

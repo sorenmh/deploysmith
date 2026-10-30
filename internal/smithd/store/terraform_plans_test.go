@@ -93,6 +93,22 @@ func TestTerraformPlans(t *testing.T) {
 	if got.Resources.Create == nil || got.Resources.Destroy == nil {
 		t.Errorf("nil resource lists %+v", got.Resources)
 	}
+
+	// Listings get the counts only, for the deployments that have a plan
+	if err := plans.Save(deployment.ID, want); err != nil {
+		t.Fatal(err)
+	}
+	summaries, err := plans.Summaries([]string{deployment.ID, "unplanned"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	summary, ok := summaries[deployment.ID]
+	if len(summaries) != 1 || !ok || summary.ToAdd != 2 || summary.ToChange != 1 || summary.ToDestroy != 1 || !summary.Destroys || summary.Text != "" {
+		t.Errorf("unexpected summaries %+v", summaries)
+	}
+	if summaries, err := plans.Summaries(nil); err != nil || len(summaries) != 0 {
+		t.Errorf("summaries of nothing: %+v, %v", summaries, err)
+	}
 }
 
 func TestTransitionTerraform(t *testing.T) {

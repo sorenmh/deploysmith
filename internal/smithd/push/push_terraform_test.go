@@ -15,6 +15,10 @@ func TestTerraformMessages(t *testing.T) {
 	if msg.Title != "Plan ready for approval, destroys resources" || msg.Body != "viino tf1 → prod: 2 to add, 1 to change, 1 to destroy" || msg.URL != d.URL || msg.Tag != "deploy:viino:prod" {
 		t.Errorf("unexpected message %+v", msg)
 	}
+	// Without a public URL the notification still opens the deployment in the UI
+	if msg := planReadyMessage(slack.Deploy{App: "viino", Version: "tf1", Environment: "prod", Terraform: true, Plan: plan, DeploymentID: "d1"}); msg.URL != "/ui/deployments/d1" {
+		t.Errorf("link without a public URL is %q", msg.URL)
+	}
 	d.Plan = &slack.PlanSummary{Add: 1}
 	if msg := planReadyMessage(d); msg.Title != "Plan ready for approval" {
 		t.Errorf("title of a plan without destroys is %q", msg.Title)
