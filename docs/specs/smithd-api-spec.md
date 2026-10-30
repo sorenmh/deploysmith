@@ -414,6 +414,41 @@ List deployments, newest first, across all apps or filtered.
 
 **Response:** `200 OK` with a single deployment object as in List Deployments.
 
+A terraform deployment that has been planned also has its plan in `terraform.plan`, with the full text (listings leave `terraform.plan` out):
+
+```json
+{
+  "id": "deploy-789",
+  "status": "awaiting_approval",
+  "terraform": {
+    "root": "main",
+    "sourceCommitSha": "8fa3d36e98...",
+    "planId": "plan-main-8fa3d36e98",
+    "plan": {
+      "planId": "plan-main-8fa3d36e98",
+      "planHash": "5d41402abc4b2a76b9719d911017c592...",
+      "plannedAt": "2025-01-15T10:41:00Z",
+      "toAdd": 3,
+      "toChange": 1,
+      "toDestroy": 2,
+      "destroys": true,
+      "outputChanges": true,
+      "resources": {
+        "create": ["terraform_data.new"],
+        "update": ["terraform_data.web"],
+        "replace": ["terraform_data.rep"],
+        "destroy": ["terraform_data.with_secret"]
+      },
+      "text": "OpenTofu used the selected providers to generate the following execution plan...",
+      "appliedPlanHash": "5d41402abc4b2a76b9719d911017c592...",
+      "appliedDiffered": false
+    }
+  }
+}
+```
+
+`toAdd`, `toChange` and `toDestroy` are the counts of the plan's `Plan:` line (a replacement counts as an add and a destroy); `destroys` is true if the plan destroys or replaces anything. `text` is `tofu show` of the plan with sensitive values masked by OpenTofu. `appliedPlanHash` and `appliedDiffered` are set after the apply: the controller plans again right before applying, and `appliedDiffered` says that this plan differed from the reviewed one. The deployment's `errorMessage` holds the controller's error for a `failed` run.
+
 Returns `404` if the deployment doesn't exist.
 
 ---

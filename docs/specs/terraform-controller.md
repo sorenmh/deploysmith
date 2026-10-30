@@ -290,6 +290,15 @@ Observed conditions and how smithd maps them to deployment states (DEP-18/19):
 
 The runner pod is deleted after each run, so its logs are gone. The condition message and the Events on the `Terraform` object (`kubectl get events`, reasons `TerraformPlanSucceed`, `TerraformAppliedSucceed`, `TFExecPlanFailed`, …) are what smithd keeps for failed runs.
 
+**As implemented (DEP-19)**, `internal/smithd/service/track_terraform.go`: every 10 seconds smithd looks at the CR of each deployment that is `planning`, `awaiting_approval` or `applying` (state is in the database, so a restart loses nothing; a replica only reports a change it made, through a conditional update). A CR is the deployment's if its annotation `deploysmith.io/deployment-id` says so; one that still names an older deployment is Flux not having applied the commit yet, one naming a newer deployment makes this one `stale`. Within that:
+
+- `planning` → `awaiting_approval`: `lastPlannedRevision` is the deployment's source commit, `Plan=True`/`TerraformPlannedWithChanges`, `plan.pending` is the stored plan id, and the ConfigMap's `savedPlan` is that id. smithd stores the text, summary and `plan-hash`. → `applied`: the same with `Ready=True`/`TerraformPlannedNoChanges`. → `failed`: `Ready=False` with `lastAttemptedRevision` equal to the source commit. Without any of these for an hour (Flux not applying the CR, the readable plan unreadable) it fails.
+- `awaiting_approval` → `stale`: `lastPlannedRevision` or `plan.pending` is another one, the CR is gone, or the controller planned again (`lastPlanAt` changed) and the `plan-hash` is not the stored one. The same plan again only updates `plannedAt`. → `applying` if `spec.approvePlan` is the plan id (an approval made in git).
+- `applying` → `applied`: `Ready=True`/`TerraformAppliedSucceed`, `lastAppliedRevision` is the source commit and `plan.lastApplied` the plan id; smithd then compares the `plan-hash` of the plan made again with the reviewed one and records the result. → `failed`: `Ready=False` for the source commit, or the CR is gone. An applying run is never made stale.
+- A failed run keeps the `Ready` reason and message and the last Warning events of the CR in `error_message`.
+
+DEP-20 sets `applying` when it commits the approval; the watcher accepts that the state has already been changed.
+
 ### Readable Plan
 
 `storeReadablePlan: human` stores the output of `tofu show tfplan` (sensitive values masked) in a **ConfigMap** in the CR's namespace:
