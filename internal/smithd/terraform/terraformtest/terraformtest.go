@@ -15,15 +15,20 @@ import (
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/schema"
+	"k8s.io/client-go/dynamic"
 	dynamicfake "k8s.io/client-go/dynamic/fake"
 
 	"github.com/sorenmh/deploysmith/internal/smithd/terraform"
 )
 
-// Cluster is a fake cluster
+// Cluster is a cluster to put Terraform CRs, plans and events in: a fake one
+// (New), or a real one (NewFor) in which the CRD of InstallCRD is installed
 type Cluster struct {
 	t      *testing.T
-	Client *dynamicfake.FakeDynamicClient
+	Client dynamic.Interface
+	// realCluster is set for a real API server, where status is written to
+	// the status subresource
+	realCluster bool
 }
 
 // New creates an empty cluster
@@ -35,6 +40,51 @@ func New(t *testing.T) *Cluster {
 		terraform.EventGVR:     "EventList",
 	})
 	return &Cluster{t: t, Client: client}
+}
+
+// NewFor uses a real cluster through its dynamic client. The namespaces used
+// must exist, and the CRD of InstallCRD be installed.
+func NewFor(t *testing.T, client dynamic.Interface) *Cluster {
+	t.Helper()
+	return &Cluster{t: t, Client: client, realCluster: true}
+}
+
+// InstallCRD installs a CRD for Terraform CRs (without tofu-controller) in a
+// real cluster, with a status subresource like the controller's, and waits
+// until the API server serves it
+func InstallCRD(t *testing.T, client dynamic.Interface) {
+	t.Helper()
+	crd := &unstructured.Unstructured{Object: map[string]any{
+		"apiVersion": "apiextensions.k8s.io/v1", "kind": "CustomResourceDefinition",
+		"metadata": map[string]any{"name": "terraforms.infra.contrib.fluxcd.io"},
+		"spec": map[string]any{
+			"group": "infra.contrib.fluxcd.io",
+			"names": map[string]any{"kind": "Terraform", "listKind": "TerraformList", "plural": "terraforms", "singular": "terraform"},
+			"scope": "Namespaced",
+			"versions": []any{map[string]any{
+				"name": "v1alpha2", "served": true, "storage": true,
+				"subresources": map[string]any{"status": map[string]any{}},
+				"schema": map[string]any{"openAPIV3Schema": map[string]any{
+					"type": "object", "x-kubernetes-preserve-unknown-fields": true,
+				}},
+			}},
+		},
+	}}
+	crds := client.Resource(schema.GroupVersionResource{Group: "apiextensions.k8s.io", Version: "v1", Resource: "customresourcedefinitions"})
+	if _, err := crds.Create(context.Background(), crd, metav1.CreateOptions{}); err != nil && !apierrors.IsAlreadyExists(err) {
+		t.Fatal(err)
+	}
+	deadline := time.Now().Add(30 * time.Second)
+	for {
+		_, err := client.Resource(terraform.TerraformGVR).Namespace("default").List(context.Background(), metav1.ListOptions{})
+		if err == nil {
+			return
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("the Terraform CRD is not served: %v", err)
+		}
+		time.Sleep(500 * time.Millisecond)
+	}
 }
 
 // Reader returns a reader of the cluster
@@ -156,7 +206,26 @@ func (cr CR) object(namespace, name string, generation int64) *unstructured.Unst
 // SetCR creates or replaces a Terraform CR
 func (c *Cluster) SetCR(namespace, name string, cr CR) {
 	c.t.Helper()
-	c.set(terraform.TerraformGVR, namespace, cr.object(namespace, name, 1))
+	obj := cr.object(namespace, name, 1)
+	if !c.realCluster {
+		c.set(terraform.TerraformGVR, namespace, obj)
+		return
+	}
+
+	// A real API server ignores the status of a new object: write it to the
+	// status subresource
+	status := obj.Object["status"]
+	delete(obj.Object, "status")
+	resource := c.Client.Resource(terraform.TerraformGVR).Namespace(namespace)
+	_ = resource.Delete(context.Background(), name, metav1.DeleteOptions{})
+	created, err := resource.Create(context.Background(), obj, metav1.CreateOptions{})
+	if err != nil {
+		c.t.Fatal(err)
+	}
+	created.Object["status"] = status
+	if _, err := resource.UpdateStatus(context.Background(), created, metav1.UpdateOptions{}); err != nil {
+		c.t.Fatal(err)
+	}
 }
 
 // DeleteCR removes a Terraform CR

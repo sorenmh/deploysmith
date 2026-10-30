@@ -87,9 +87,7 @@ func (s *Service) deployTerraform(ctx context.Context, app *models.Application, 
 			logging.Field("deployment_id", deployment.ID),
 			logging.Field("stale_deployment_id", replaced.ID),
 		)
-	}
-
-	if replaced != nil {
+		// Closes the check runs of the replaced deployment
 		s.notifyReplaced(ctx, app, replaced, deployment)
 	}
 
