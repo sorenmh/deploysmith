@@ -131,7 +131,9 @@ func (s *Service) GetAppDetail(appID string, versionLimit, versionOffset int) (*
 	return detail, nil
 }
 
-// GetDeployment returns a deployment with app, version and policy names
+// GetDeployment returns a deployment with app, version and policy names. A
+// terraform deployment that has been planned also has its plan, with the
+// text; listings leave it out.
 func (s *Service) GetDeployment(deploymentID string) (*models.DeploymentDetail, error) {
 	deployment, err := s.Deployments.GetDetailed(deploymentID)
 	if err != nil {
@@ -139,6 +141,11 @@ func (s *Service) GetDeployment(deploymentID string) (*models.DeploymentDetail, 
 			return nil, notFound("Deployment not found")
 		}
 		return nil, err
+	}
+	if deployment.Terraform != nil && s.TerraformPlans != nil {
+		if deployment.Terraform.Plan, err = s.TerraformPlans.Get(deploymentID); err != nil {
+			return nil, err
+		}
 	}
 	return deployment, nil
 }

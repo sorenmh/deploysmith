@@ -8,6 +8,9 @@ const (
 	EventDeploymentStarted   EventType = "deployment.started"
 	EventDeploymentSucceeded EventType = "deployment.succeeded"
 	EventDeploymentFailed    EventType = "deployment.failed"
+	// EventDeploymentPlanReady is published when the plan of a terraform
+	// deployment is made and waits for approval
+	EventDeploymentPlanReady EventType = "deployment.plan_ready"
 	EventVersionPublished    EventType = "version.published"
 )
 

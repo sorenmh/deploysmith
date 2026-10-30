@@ -139,6 +139,10 @@ func (r *Reporter) Requested(ctx context.Context, d slack.Deploy) {
 // waitingForFlux says whether a final report will follow; if not, this is
 // the final one.
 func (r *Reporter) Committed(ctx context.Context, d slack.Deploy, waitingForFlux bool) {
+	if d.Terraform {
+		r.Planning(ctx, d)
+		return
+	}
 	if waitingForFlux {
 		r.sendDeploy(ctx, d, StatusInProgress, "",
 			fmt.Sprintf("Waiting for Flux to apply %s to %s", d.Version, d.Environment),
@@ -152,6 +156,10 @@ func (r *Reporter) Committed(ctx context.Context, d slack.Deploy, waitingForFlux
 
 // Applied reports a deployment Flux has applied to the cluster
 func (r *Reporter) Applied(ctx context.Context, d slack.Deploy, took time.Duration) {
+	if d.Terraform {
+		r.terraformApplied(ctx, d)
+		return
+	}
 	r.sendDeploy(ctx, d, StatusCompleted, ConclusionSuccess,
 		fmt.Sprintf("Deployed %s to %s", d.Version, d.Environment),
 		summary(d, fmt.Sprintf("Applied by Flux in %s.", took.Round(time.Second))), "")
@@ -159,6 +167,10 @@ func (r *Reporter) Applied(ctx context.Context, d slack.Deploy, took time.Durati
 
 // Failed reports a deployment that failed at the given stage
 func (r *Reporter) Failed(ctx context.Context, d slack.Deploy, stage, errMsg string) {
+	if d.Terraform {
+		r.terraformFailed(ctx, d, stage, errMsg)
+		return
+	}
 	r.sendDeploy(ctx, d, StatusCompleted, ConclusionFailure,
 		fmt.Sprintf("Deployment to %s failed (%s)", d.Environment, stage),
 		summary(d, fmt.Sprintf("Failed at %s.", stage)),
