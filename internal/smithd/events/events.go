@@ -11,7 +11,11 @@ const (
 	// EventDeploymentPlanReady is published when the plan of a terraform
 	// deployment is made and waits for approval
 	EventDeploymentPlanReady EventType = "deployment.plan_ready"
-	EventVersionPublished    EventType = "version.published"
+	// EventDeploymentApproved and EventDeploymentRejected are published when
+	// someone approves or rejects the plan of a terraform deployment
+	EventDeploymentApproved EventType = "deployment.approved"
+	EventDeploymentRejected EventType = "deployment.rejected"
+	EventVersionPublished   EventType = "version.published"
 )
 
 type Event struct {

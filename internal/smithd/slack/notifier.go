@@ -142,6 +142,15 @@ func (n *Notifier) PlanReady(ctx context.Context, d Deploy) {
 	n.send(ctx, text)
 }
 
+// Rejected reports a Terraform plan that was rejected, who did and why
+func (n *Notifier) Rejected(ctx context.Context, d Deploy, by, reason string) {
+	text := fmt.Sprintf(":no_entry_sign: *Plan rejected*: %s by %s", target(d), escape(by))
+	if reason != "" {
+		text += ": " + escape(reason)
+	}
+	n.send(ctx, text+link(d))
+}
+
 // Applied reports a deployment Flux has applied to the cluster, or for a
 // Terraform deployment, that OpenTofu has applied the plan
 func (n *Notifier) Applied(ctx context.Context, d Deploy, took time.Duration) {
