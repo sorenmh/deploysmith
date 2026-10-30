@@ -344,6 +344,29 @@ without `uiProxy` or `uiIngress`. If you protect `/ui` with a different proxy, s
 `config.ui.protectedExternally: true`. Consider a NetworkPolicy so that only
 the ingress controller can reach smithd's service.
 
+#### Deploy status on GitHub
+
+smithd can report each deployment as a check run
+(`deploysmith/deploy-<env>`) on the commit the version was built from, with
+a GitHub App that has **Checks: Read and write** and is installed on the
+repositories (step by step in
+[docs/github-checks.md](../../docs/github-checks.md)):
+
+```yaml
+config:
+  ui:
+    publicUrl: https://smithd.example.com   # for the Details link
+  github:
+    appId: "123456"
+
+secrets:
+  github:
+    privateKey: |   # or github-app-private-key in existingSecret
+      -----BEGIN RSA PRIVATE KEY-----
+      ...
+      -----END RSA PRIVATE KEY-----
+```
+
 #### Terraform apps
 
 smithd can run an app's Terraform through tofu-controller (see

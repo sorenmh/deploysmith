@@ -127,6 +127,11 @@ type Config struct {
 	GitHubAllowedTeam  string   // team slug in GitHubAllowedOrg
 	GitHubAllowedUsers []string // GitHub logins
 	SessionTTL         time.Duration
+
+	// GitHubApp reports deployments as check runs on GitHub (optional). It
+	// is the same GitHub App as for login, which needs its app id and a
+	// private key rather than the client id and secret.
+	GitHubApp GitHubAppConfig
 }
 
 // GitHubLoginEnabled reports whether people can sign in with GitHub
@@ -227,6 +232,12 @@ func Load() (*Config, error) {
 	if err := cfg.validateGitHubLogin(); err != nil {
 		return nil, err
 	}
+
+	githubApp, err := loadGitHubApp()
+	if err != nil {
+		return nil, err
+	}
+	cfg.GitHubApp = githubApp
 
 	// Validate required fields
 	if len(cfg.APIKeys) == 0 || cfg.APIKeys[0] == "" {

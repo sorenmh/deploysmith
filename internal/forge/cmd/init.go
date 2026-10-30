@@ -21,6 +21,9 @@ var (
 	initGitCommitter string
 	initBuildNumber  int
 	initArtifactType string
+	initSourceRepo   string
+	initSourceSHA    string
+	initPullRequest  int
 )
 
 var initCmd = &cobra.Command{
@@ -29,6 +32,10 @@ var initCmd = &cobra.Command{
 	Long: `Initialize a new version draft with smithd and get a presigned URL for uploading manifests.
 
 The presigned URL is saved to .forge/upload-url for use by the upload command.
+
+In GitHub Actions the source repository, commit and pull request are detected
+(for pull_request events the PR's head commit, not the merge commit) and sent
+along, so smithd can report deployments as check runs on the commit.
 
 A version carries Kubernetes manifests, or with --artifact-type terraform an
 OpenTofu bundle, uploaded with 'forge upload --terraform <dir>'.
@@ -49,6 +56,9 @@ func init() {
 	initCmd.Flags().StringVar(&initGitCommitter, "git-committer", "", "Git committer email")
 	initCmd.Flags().IntVar(&initBuildNumber, "build-number", 0, "CI build number")
 	initCmd.Flags().StringVar(&initArtifactType, "artifact-type", "manifests", "What the version carries: manifests or terraform")
+	initCmd.Flags().StringVar(&initSourceRepo, "source-repo", "", "GitHub repository (owner/name) the version is built from (default $GITHUB_REPOSITORY)")
+	initCmd.Flags().StringVar(&initSourceSHA, "source-sha", "", "Full commit SHA to report deployments on (detected in GitHub Actions)")
+	initCmd.Flags().IntVar(&initPullRequest, "pr", 0, "Pull request number (detected in GitHub Actions)")
 
 	initCmd.MarkFlagRequired("version")
 }
@@ -69,8 +79,13 @@ func runInit(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
+	source := resolveSource(detectSource(), initSourceRepo, initSourceSHA, initPullRequest)
+
 	// Set defaults for required fields if not provided
 	gitSHA := initGitSHA
+	if gitSHA == "" && source != nil {
+		gitSHA = source.CommitSHA
+	}
 	if gitSHA == "" {
 		gitSHA = "unknown"
 	}
@@ -100,6 +115,7 @@ func runInit(cmd *cobra.Command, args []string) error {
 		VersionID:    initVersion,
 		Metadata:     metadata,
 		ArtifactType: initArtifactType,
+		Source:       source,
 	}
 
 	// Call smithd API

@@ -162,6 +162,21 @@ forge init \
 - `--git-committer` (optional): Git committer email
 - `--build-number` (optional): CI build number
 - `--artifact-type` (optional): `manifests` (default) or `terraform` for an OpenTofu bundle
+- `--source-repo` (optional): GitHub repository (`owner/name`) the version is built from
+- `--source-sha` (optional): full commit SHA to report deployments on
+- `--pr` (optional): pull request number
+
+**Source (GitHub check runs):** in GitHub Actions forge detects where the
+version is built from and sends it to smithd, which then reports deployments
+as check runs on that commit (see [github-checks.md](github-checks.md)):
+the repository from `GITHUB_REPOSITORY`, the commit from `GITHUB_SHA` and a
+pull request number from `GITHUB_REF` (`refs/pull/<n>/merge`). For
+`pull_request` events `GITHUB_SHA` is a merge commit GitHub creates for the
+run, which nobody sees in the PR, so forge takes the PR's head commit and
+number from the event payload (`GITHUB_EVENT_PATH`) instead. The flags
+override what is detected; outside GitHub Actions nothing is sent unless
+they are given. Without `--git-sha`, the detected commit is also used as
+the version's git SHA.
 
 **Output:**
 ```json
@@ -178,7 +193,7 @@ forge init \
 3. Saves upload URL to `.forge/upload-url`
 4. Saves version info to `.forge/version-info`
 
-**Required metadata:** If not provided, git-sha and git-branch default to "unknown".
+**Required metadata:** If not provided (or detected), git-sha and git-branch default to "unknown".
 
 ### `forge upload`
 

@@ -9,6 +9,7 @@ import (
 
 	"github.com/sorenmh/deploysmith/internal/smithd/events"
 	"github.com/sorenmh/deploysmith/internal/smithd/flux"
+	"github.com/sorenmh/deploysmith/internal/smithd/github"
 	"github.com/sorenmh/deploysmith/internal/smithd/models"
 	"github.com/sorenmh/deploysmith/internal/smithd/push"
 	"github.com/sorenmh/deploysmith/internal/smithd/slack"
@@ -35,7 +36,7 @@ type FluxPoller interface {
 }
 
 // Deps holds the dependencies of a Service. Optional integrations (Flux,
-// Slack) may be nil.
+// Slack, Web Push, GitHub) may be nil.
 type Deps struct {
 	Apps         *store.ApplicationStore
 	Versions     *store.VersionStore
@@ -53,6 +54,7 @@ type Deps struct {
 	Slack                 *slack.Notifier
 	Push                  *push.Notifier
 	PushSubscriptions     *store.PushSubscriptionStore
+	GitHub                *github.Reporter
 
 	// UIBaseURL is the web UI's public URL, used to link to deployments
 	// from notifications. Empty if there is none.

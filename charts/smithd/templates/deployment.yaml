@@ -119,6 +119,12 @@ spec:
               name: {{ include "smithd.secretName" . }}
               key: github-client-secret
               optional: true
+        - name: GITHUB_APP_PRIVATE_KEY
+          valueFrom:
+            secretKeyRef:
+              name: {{ include "smithd.secretName" . }}
+              key: github-app-private-key
+              optional: true
         livenessProbe:
           {{- toYaml .Values.livenessProbe | nindent 12 }}
         readinessProbe:

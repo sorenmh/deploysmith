@@ -217,6 +217,13 @@ to `UI_PUBLIC_URL`. Every signed-in user then gets an **Enable notifications**
 button in the UI header, and each device that taps it receives every event
 Slack does. On iOS the button only works from the Home Screen app.
 
+### Deploy status on GitHub
+
+With a GitHub App (`GITHUB_APP_ID`, `GITHUB_APP_PRIVATE_KEY`), smithd also
+reports each deployment as a `deploysmith/deploy-<env>` check run on the
+commit the version was built from, which `forge init` detects in GitHub
+Actions. See [docs/github-checks.md](docs/github-checks.md).
+
 ### Running
 
 ```bash

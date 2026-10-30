@@ -23,6 +23,7 @@ import (
 	"github.com/sorenmh/deploysmith/internal/smithd/db"
 	"github.com/sorenmh/deploysmith/internal/smithd/events"
 	"github.com/sorenmh/deploysmith/internal/smithd/flux"
+	"github.com/sorenmh/deploysmith/internal/smithd/github"
 	"github.com/sorenmh/deploysmith/internal/smithd/gitops"
 	"github.com/sorenmh/deploysmith/internal/smithd/models"
 	"github.com/sorenmh/deploysmith/internal/smithd/push"
@@ -66,6 +67,14 @@ func NewServer(cfg *config.Config, database *db.DB) *Server {
 
 	publisher := events.New(cfg.NATSUrl)
 
+	githubReporter, err := github.NewReporter(cfg.GitHubApp.ID, cfg.GitHubApp.PrivateKey, cfg.GitHubAPIURL)
+	if err != nil {
+		log.Fatalf("Failed to set up GitHub App: %v", err)
+	}
+	if githubReporter != nil {
+		log.Printf("Reporting deployments to GitHub as check runs (app %s)", cfg.GitHubApp.ID)
+	}
+
 	s := &Server{
 		cfg:              cfg,
 		db:               database,
@@ -94,6 +103,7 @@ func NewServer(cfg *config.Config, database *db.DB) *Server {
 		Slack:                 slack.NewNotifier(cfg.SlackWebhookURL),
 		Push:                  push.NewNotifier(s.pushStore, cfg.VAPIDPublicKey, cfg.VAPIDPrivateKey, vapidSubject(cfg)),
 		PushSubscriptions:     s.pushStore,
+		GitHub:                githubReporter,
 		UIBaseURL:             cfg.UIPublicURL,
 	}
 	// Assign only when available, so the interface is nil rather than
@@ -404,6 +414,12 @@ func (s *Server) handleDraftVersion(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "invalid_request", "metadata must include gitSha, gitBranch, and timestamp")
 		return
 	}
+	if req.Source != nil {
+		if err := req.Source.Validate(); err != nil {
+			writeError(w, http.StatusBadRequest, "invalid_request", err.Error())
+			return
+		}
+	}
 
 	if req.ArtifactType == "" {
 		req.ArtifactType = models.ArtifactManifests
@@ -426,6 +442,12 @@ func (s *Server) handleDraftVersion(w http.ResponseWriter, r *http.Request) {
 		log.Printf("Failed to create version: %v", err)
 		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to create version")
 		return
+	}
+	if req.Source != nil {
+		if err := s.versionStore.SetSource(version.ID, *req.Source); err != nil {
+			// Only reporting to GitHub needs it, so the version is still usable
+			logging.LogWarnCtx(r.Context(), "Failed to store version source: "+err.Error())
+		}
 	}
 
 	// Generate presigned URL for the archive upload
@@ -829,6 +851,9 @@ func (s *Server) handleGetVersion(w http.ResponseWriter, r *http.Request) {
 		},
 		ManifestFiles: manifestFiles,
 		DeployedTo:    deployedTo,
+	}
+	if source, err := s.versionStore.GetSource(version.ID); err == nil && source != (models.VersionSource{}) {
+		resp.Source = &source
 	}
 
 	writeJSON(w, http.StatusOK, resp)

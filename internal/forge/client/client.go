@@ -42,12 +42,21 @@ type VersionMetadata struct {
 	Timestamp    string `json:"timestamp"`
 }
 
+// VersionSource is where a version is built from; smithd reports the
+// version's deployments on this commit in GitHub
+type VersionSource struct {
+	Repository  string `json:"repository,omitempty"` // owner/name
+	CommitSHA   string `json:"commitSha,omitempty"`
+	PullRequest int    `json:"pullRequest,omitempty"`
+}
+
 // DraftVersionRequest is the request body for creating a draft version
 type DraftVersionRequest struct {
 	VersionID string          `json:"versionId"`
 	Metadata  VersionMetadata `json:"metadata"`
 	// ArtifactType is manifests (the default) or terraform
-	ArtifactType string `json:"artifactType,omitempty"`
+	ArtifactType string         `json:"artifactType,omitempty"`
+	Source       *VersionSource `json:"source,omitempty"`
 }
 
 // DraftVersionResponse is the response from creating a draft version
