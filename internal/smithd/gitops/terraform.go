@@ -71,13 +71,14 @@ func (s *Service) WriteTerraformFiles(appName, environment, message string, file
 			}
 		}
 
-		return s.addTerraformResources(worktree, appName, environment, names)
+		return s.addTerraformResources(worktree, terraformAppPath(environment, appName), terraformPath(environment), names...)
 	})
 }
 
-// addTerraformResources lists files in a Terraform app's kustomization and
-// the app in the environment's terraform kustomization
-func (s *Service) addTerraformResources(worktree *git.Worktree, appName, environment string, files []string) error {
+// addTerraformResources lists files in the kustomization of a Terraform
+// app's directory, and the directory in the kustomization of its parent
+// (the environment's terraform directory)
+func (s *Service) addTerraformResources(worktree *git.Worktree, appDir, parentDir string, files ...string) error {
 	addResource := func(dir, resource string) error {
 		filename, changed, err := ensureKustomizationResource(filepath.Join(s.workDir, dir), resource)
 		if err != nil {
@@ -91,11 +92,11 @@ func (s *Service) addTerraformResources(worktree *git.Worktree, appName, environ
 		return nil
 	}
 	for _, name := range files {
-		if err := addResource(terraformAppPath(environment, appName), name); err != nil {
+		if err := addResource(appDir, name); err != nil {
 			return err
 		}
 	}
-	return addResource(terraformPath(environment), appName)
+	return addResource(parentDir, filepath.Base(appDir))
 }
 
 // TerraformDeploy is a deploy of one root of a Terraform app
@@ -123,6 +124,16 @@ type TerraformCommits struct {
 	Manifest string
 }
 
+// rootLayout is where a Terraform deploy puts its files in the repository
+// (all repo-relative): the source, the root's file, the kustomization that
+// lists the file, and the one that lists that directory
+type rootLayout struct {
+	sourcePath string
+	file       string
+	appDir     string
+	parentDir  string
+}
+
 // DeployTerraform writes a root of a Terraform app in two commits, pushed
 // together: first the bundle source in src/<root>/, replacing what was
 // there, then the root's file <root>.yaml from d.Manifest, listed in the
@@ -139,10 +150,21 @@ func (s *Service) DeployTerraform(d TerraformDeploy) (TerraformCommits, error) {
 			return TerraformCommits{}, fmt.Errorf("invalid app, environment or root name %q", segment)
 		}
 	}
+	return s.deployRoot(d, rootLayout{
+		sourcePath: TerraformSourcePath(d.Environment, d.App, d.Root),
+		file:       d.Root + ".yaml",
+		appDir:     terraformAppPath(d.Environment, d.App),
+		parentDir:  terraformPath(d.Environment),
+	})
+}
+
+// deployRoot writes the source and the root's file as DeployTerraform does,
+// at the places of layout
+func (s *Service) deployRoot(d TerraformDeploy, layout rootLayout) (TerraformCommits, error) {
 	if len(d.Source) == 0 {
 		return TerraformCommits{}, fmt.Errorf("the bundle of %s has no files", d.App)
 	}
-	sourcePath := TerraformSourcePath(d.Environment, d.App, d.Root)
+	sourcePath := layout.sourcePath
 	names := make([]string, 0, len(d.Source))
 	for name := range d.Source {
 		// Reject entries such as "../x.tf" or "/x.tf" that would escape the
@@ -159,7 +181,7 @@ func (s *Service) DeployTerraform(d TerraformDeploy) (TerraformCommits, error) {
 	var branch string
 	writeSource := func([]string) error {
 		var err error
-		if branch, err = s.branch(); err != nil {
+		if branch, err = s.currentBranch(); err != nil {
 			return err
 		}
 		worktree, err := s.repo.Worktree()
@@ -200,15 +222,14 @@ func (s *Service) DeployTerraform(d TerraformDeploy) (TerraformCommits, error) {
 		if err != nil {
 			return fmt.Errorf("failed to get worktree: %w", err)
 		}
-		file := d.Root + ".yaml"
-		rel := filepath.Join(terraformAppPath(d.Environment, d.App), file)
+		rel := filepath.Join(layout.appDir, layout.file)
 		if err := os.WriteFile(filepath.Join(s.workDir, rel), content, 0644); err != nil {
-			return fmt.Errorf("failed to write %s: %w", file, err)
+			return fmt.Errorf("failed to write %s: %w", layout.file, err)
 		}
 		if _, err := worktree.Add(rel); err != nil {
-			return fmt.Errorf("failed to add %s to git: %w", file, err)
+			return fmt.Errorf("failed to add %s to git: %w", layout.file, err)
 		}
-		return s.addTerraformResources(worktree, d.App, d.Environment, []string{file})
+		return s.addTerraformResources(worktree, layout.appDir, layout.parentDir, layout.file)
 	}
 
 	shas, err := s.changeSteps([]step{
