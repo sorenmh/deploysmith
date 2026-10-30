@@ -43,6 +43,8 @@ func writeServiceError(w http.ResponseWriter, err error, fallback string) {
 			status = http.StatusNotFound
 		case service.KindConflict:
 			status = http.StatusConflict
+		case service.KindForbidden:
+			status = http.StatusForbidden
 		}
 		writeError(w, status, svcErr.Code, svcErr.Message)
 		return

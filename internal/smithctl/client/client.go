@@ -85,6 +85,10 @@ type Version struct {
 	CreatedAt    time.Time  `json:"createdAt"`
 	PublishedAt  *time.Time `json:"publishedAt,omitempty"`
 	Deployments  []string   `json:"deployedTo,omitempty"`
+	// Temporary versions are the bundles of local plans (forge plan
+	// --terraform); they can't be deployed and expire
+	Temporary bool       `json:"temporary,omitempty"`
+	ExpiresAt *time.Time `json:"expiresAt,omitempty"`
 }
 
 // Deployment represents a deployment, as the API returns it with the names
@@ -303,8 +307,9 @@ type ListVersionsResponse struct {
 	TotalCount int       `json:"totalCount"`
 }
 
-// ListVersions lists all versions for an application
-func (c *Client) ListVersions(appNameOrID, status string, limit, offset int) (*ListVersionsResponse, error) {
+// ListVersions lists the versions of an application; includeTemporary adds
+// the temporary versions of local plans
+func (c *Client) ListVersions(appNameOrID, status string, limit, offset int, includeTemporary bool) (*ListVersionsResponse, error) {
 	// Resolve app name to ID
 	appID, err := c.resolveToAppID(appNameOrID)
 	if err != nil {
@@ -325,6 +330,9 @@ func (c *Client) ListVersions(appNameOrID, status string, limit, offset int) (*L
 	}
 	if offset > 0 {
 		q.Set("offset", strconv.Itoa(offset))
+	}
+	if includeTemporary {
+		q.Set("includeTemporary", "true")
 	}
 	u.RawQuery = q.Encode()
 

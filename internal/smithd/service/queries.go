@@ -118,7 +118,7 @@ func (s *Service) GetAppDetail(appID string, versionLimit, versionOffset int) (*
 		}
 	}
 
-	if detail.Versions, detail.TotalVersions, err = s.Versions.List(appID, versionLimit, versionOffset); err != nil {
+	if detail.Versions, detail.TotalVersions, err = s.Versions.List(appID, versionLimit, versionOffset, false); err != nil {
 		return nil, err
 	}
 	if detail.Policies, err = s.Policies.List(appID); err != nil {

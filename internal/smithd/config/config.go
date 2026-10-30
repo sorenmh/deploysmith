@@ -117,6 +117,9 @@ type Config struct {
 	// TerraformAutoPlan starts a plan-only run of every terraform version
 	// when it is published, for each environment with Terraform enabled
 	TerraformAutoPlan bool
+	// TerraformLocalPlanTTL is how long the temporary version of a local
+	// plan (DEP-25) and its bundle live
+	TerraformLocalPlanTTL time.Duration
 
 	// smithd's own namespace and ServiceAccount, which may read the plans
 	// in the runner namespaces
@@ -216,6 +219,9 @@ func Load() (*Config, error) {
 
 	var err error
 	if cfg.TerraformAutoPlan, err = getBool("TERRAFORM_AUTO_PLAN", true); err != nil {
+		return nil, err
+	}
+	if cfg.TerraformLocalPlanTTL, err = getDuration("TERRAFORM_LOCAL_PLAN_TTL", 24*time.Hour); err != nil {
 		return nil, err
 	}
 	if cfg.TerraformRunnerImages, err = parseRunnerImages(getEnv("TERRAFORM_RUNNER_IMAGES", "")); err != nil {

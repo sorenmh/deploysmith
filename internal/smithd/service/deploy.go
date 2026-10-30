@@ -35,6 +35,9 @@ func (s *Service) DeployVersion(ctx context.Context, appID, versionID, environme
 		}
 		return nil, fmt.Errorf("failed to get version: %w", err)
 	}
+	if version.Temporary {
+		return nil, invalid("temporary_version", fmt.Sprintf("Version %s is the temporary version of a local plan; it can be planned but never deployed", version.VersionID))
+	}
 	if version.Status != "published" {
 		return nil, invalid("invalid_status", "Version must be published before deployment")
 	}

@@ -26,7 +26,8 @@ Examples:
   smithctl version list                              # Uses app from binding
   smithctl version list my-api-service               # Uses app name
   smithctl version list --app my-api-service         # Uses --app flag
-  smithctl version list --status published --limit 10`,
+  smithctl version list --status published --limit 10
+  smithctl version list --all                        # with temporary versions of local plans`,
 	Args: cobra.MaximumNArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		// Validate configuration
@@ -50,12 +51,13 @@ Examples:
 
 		status, _ := cmd.Flags().GetString("status")
 		limit, _ := cmd.Flags().GetInt("limit")
+		all, _ := cmd.Flags().GetBool("all")
 
 		// Create API client
 		c := newClient()
 
 		// List versions (use appID since client now resolves internally)
-		resp, err := c.ListVersions(appID, status, limit, 0)
+		resp, err := c.ListVersions(appID, status, limit, 0, all)
 		if err != nil {
 			return err
 		}
@@ -83,10 +85,14 @@ Examples:
 					deployedTo = strings.Join(ver.Deployments, ", ")
 				}
 
+				status := ver.Status
+				if ver.Temporary {
+					status = "temporary"
+				}
 				rows = append(rows, []string{
 					ver.Version,
 					artifactType(ver),
-					ver.Status,
+					status,
 					branch,
 					deployedTo,
 					output.FormatTime(ver.CreatedAt),
@@ -208,6 +214,7 @@ func init() {
 	versionListCmd.Flags().String("app", "", "Application name or ID (optional if app is bound)")
 	versionListCmd.Flags().String("status", "", "Filter by status (draft, published)")
 	versionListCmd.Flags().Int("limit", 20, "Maximum number of results")
+	versionListCmd.Flags().Bool("all", false, "Include the temporary versions of local plans (forge plan --terraform)")
 
 	// Flags for version show
 	versionShowCmd.Flags().String("app", "", "Application name or ID (optional if app is bound)")

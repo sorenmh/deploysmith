@@ -14,6 +14,7 @@ import (
 type Client struct {
 	baseURL string
 	apiKey  string
+	token   string
 	client  *http.Client
 }
 
@@ -26,6 +27,23 @@ func NewClient(baseURL, apiKey string) *Client {
 			Timeout: 30 * time.Second,
 		},
 	}
+}
+
+// WithSessionToken makes the client authenticate as the signed-in user
+// (from smithctl login), instead of with the API key. A local plan needs it.
+func (c *Client) WithSessionToken(token string) *Client {
+	c.token = token
+	return c
+}
+
+// setAuth authenticates a request with the session token if there is one,
+// else with the API key
+func (c *Client) setAuth(req *http.Request) {
+	if c.token != "" {
+		req.Header.Set("Authorization", "Bearer "+c.token)
+		return
+	}
+	req.Header.Set("X-API-Key", c.apiKey)
 }
 
 // joinURL safely joins a base URL with a path, handling trailing slashes

@@ -511,6 +511,18 @@ block or change a real deployment. With `config.terraform.autoPlan` (default
 environment with Terraform enabled, and the plan is reported as the check run
 `deploysmith/plan-<env>` on the version's commit (`docs/github-checks.md`).
 
+**Local plans.** `forge plan --terraform <dir> --env <env>` plans uncommitted
+changes from a laptop without CI: forge packs the bundle and uploads it as a
+temporary version `local-<user>-<content hash>`, which smithd plans as a
+plan-only run in the cluster, so the credentials stay central. It needs a
+signed-in user (`smithctl login`, [login with GitHub](../../docs/login-with-github.md));
+API keys are refused. Temporary versions can't be published or deployed, are
+hidden from version lists (`?includeTemporary=true`, `smithctl version list
+--all`) and are deleted with their bundle after `config.terraform.localPlanTtl`
+(default `24h`). A user's newer local plan for the same app and environment
+replaces their earlier one; it never replaces anyone else's plan or CI's. No
+check runs, Slack or push notifications are sent for local plans.
+
 An existing app keeps its backend:
 `smithctl app terraform enable legacy --env prod --backend-bucket legacy-tfstate --backend-key prod/terraform.tfstate --backend-region eu-central-1 --backend-lock-table legacy-tflock --encryption-fallback`.
 `--encryption-fallback` lets the first apply read the plaintext state and

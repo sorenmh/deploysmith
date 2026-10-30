@@ -64,7 +64,7 @@ func TestPlanAPI(t *testing.T) {
 
 	// With a run, by id and by version
 	s.svc.PlanRuns = planRuns
-	run, _, err := planRuns.Create(app.ID, version, "prod", "main", "alice")
+	run, _, err := planRuns.Create(app.ID, version, "prod", "main", "alice", "")
 	if err != nil {
 		t.Fatal(err)
 	}

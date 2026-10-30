@@ -50,6 +50,7 @@ var (
 	planPollInterval time.Duration
 	planOutput       string
 	planFull         bool
+	planTerraform    string
 )
 
 var planCmd = &cobra.Command{
@@ -74,11 +75,27 @@ stdout.
 
 The version defaults to the one from forge init.
 
+With --terraform <dir> forge plans the working copy instead, without CI and
+without committing or pushing anything: it validates and packs the OpenTofu
+root module in <dir> like 'forge upload --terraform', uploads it as a
+temporary version (local-<user>-<content hash>; the same files give the same
+version), and waits for the plan, which smithd runs in the cluster with the
+read-only credentials, never on your machine. It needs you to be signed in
+('smithctl login'): API keys are refused, because the point is knowing who
+ran the plan. The temporary version can't be deployed, is hidden from
+version lists (smithctl version list --all shows it) and expires, with its
+bundle, after 24 hours (smithd's TERRAFORM_LOCAL_PLAN_TTL). A newer local
+plan of yours for the same app and environment replaces the earlier one;
+nobody else's plans are touched. forge always waits, with the exit codes
+above. The app is --app, or the one from forge app-bind.
+
 Examples:
   forge plan --wait --env production                 # the version from forge init
   forge plan --wait 6996908-12 --env production
   forge plan --wait --env production --output json
-  forge plan --env production                        # start it, don't wait`,
+  forge plan --env production                        # start it, don't wait
+  forge plan --terraform infra/ --env staging        # plan uncommitted changes
+  forge plan --terraform infra/ --env staging --app viino --output json`,
 	Args: cobra.MaximumNArgs(1),
 	RunE: runPlanCmd,
 }
@@ -93,11 +110,18 @@ func init() {
 	planCmd.Flags().DurationVar(&planPollInterval, "poll-interval", 5*time.Second, "How often --wait asks smithd for the result")
 	planCmd.Flags().StringVarP(&planOutput, "output", "o", "text", "Output format: text or json")
 	planCmd.Flags().BoolVar(&planFull, "full", false, "Print the full plan, as tofu shows it")
+	planCmd.Flags().StringVar(&planTerraform, "terraform", "", "Plan the OpenTofu root module in this directory (a local plan, needs smithctl login)")
 	_ = planCmd.MarkFlagRequired("env")
 	planCmd.SilenceUsage = true
 }
 
 func runPlanCmd(cmd *cobra.Command, args []string) error {
+	if planTerraform != "" {
+		if len(args) > 0 {
+			return errors.New("--terraform plans the working copy; do not pass a version as well")
+		}
+		return runLocalPlanCmd(cmd)
+	}
 	if err := ValidateConfig(); err != nil {
 		return err
 	}

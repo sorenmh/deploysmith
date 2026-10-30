@@ -80,6 +80,47 @@ func (c *Client) StartPlan(appID, versionID, environment string) (*PlanRun, erro
 	return c.doPlanRun(req, http.StatusAccepted)
 }
 
+// LocalPlan is the temporary version made for a local plan
+type LocalPlan struct {
+	VersionID     string    `json:"versionId"`
+	UploadURL     string    `json:"uploadUrl"`
+	UploadExpires time.Time `json:"uploadExpires"`
+	ExpiresAt     time.Time `json:"expiresAt"`
+}
+
+// PrepareLocalPlan makes the temporary version for a bundle with the given
+// content hash and returns where to upload the bundle. It needs a session:
+// smithd refuses API keys.
+func (c *Client) PrepareLocalPlan(appID, environment, contentHash string) (*LocalPlan, error) {
+	body, err := json.Marshal(map[string]string{"environment": environment, "contentHash": contentHash})
+	if err != nil {
+		return nil, fmt.Errorf("failed to marshal request: %w", err)
+	}
+	req, err := http.NewRequest("POST", c.joinURL(fmt.Sprintf("api/v1/apps/%s/terraform/local-plans", url.PathEscape(appID))), bytes.NewReader(body))
+	if err != nil {
+		return nil, fmt.Errorf("failed to create request: %w", err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+	c.setAuth(req)
+
+	resp, err := c.client.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("failed to send request: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusCreated {
+		body, _ := io.ReadAll(resp.Body)
+		return nil, &APIError{Status: resp.StatusCode, Body: string(body)}
+	}
+
+	var plan LocalPlan
+	if err := json.NewDecoder(resp.Body).Decode(&plan); err != nil {
+		return nil, fmt.Errorf("failed to decode response: %w", err)
+	}
+	return &plan, nil
+}
+
 // GetPlanRun returns a plan-only run with its plan
 func (c *Client) GetPlanRun(id string) (*PlanRun, error) {
 	req, err := http.NewRequest("GET", c.joinURL("api/v1/plan-runs/"+url.PathEscape(id)), nil)
@@ -90,7 +131,7 @@ func (c *Client) GetPlanRun(id string) (*PlanRun, error) {
 }
 
 func (c *Client) doPlanRun(req *http.Request, wantStatus int) (*PlanRun, error) {
-	req.Header.Set("X-API-Key", c.apiKey)
+	c.setAuth(req)
 
 	resp, err := c.client.Do(req)
 	if err != nil {
