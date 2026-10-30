@@ -40,6 +40,32 @@ type Deploy struct {
 	DeploymentID string
 	SourceRepo   string
 	SourceSHA    string
+
+	// Terraform is set for deployments of terraform versions, which are
+	// planned, wait for approval and are then applied by OpenTofu, not Flux.
+	// Plan is set once there is a plan.
+	Terraform bool
+	Plan      *PlanSummary
+}
+
+// PlanSummary describes a Terraform plan in a notification
+type PlanSummary struct {
+	Add, Change, Destroy int
+	// Resource addresses by action
+	Created, Updated, Replaced, Destroyed []string
+}
+
+// NoChanges reports whether the plan changes no resources
+func (p PlanSummary) NoChanges() bool { return p.Add == 0 && p.Change == 0 && p.Destroy == 0 }
+
+// Destroys reports whether the plan destroys or replaces resources
+func (p PlanSummary) Destroys() bool {
+	return p.Destroy > 0 || len(p.Destroyed) > 0 || len(p.Replaced) > 0
+}
+
+// Counts is the plan's "Plan:" line without the prefix
+func (p PlanSummary) Counts() string {
+	return fmt.Sprintf("%d to add, %d to change, %d to destroy", p.Add, p.Change, p.Destroy)
 }
 
 func (n *Notifier) send(ctx context.Context, text string) {
@@ -88,7 +114,10 @@ func (n *Notifier) Requested(ctx context.Context, d Deploy) {
 // repository. waitingForFlux says whether a final message will follow.
 func (n *Notifier) Committed(ctx context.Context, d Deploy, waitingForFlux bool) {
 	next := ""
-	if waitingForFlux {
+	switch {
+	case waitingForFlux && d.Terraform:
+		next = " Waiting for the plan."
+	case waitingForFlux:
 		next = " Waiting for Flux to apply it."
 	}
 	what := "Committed to gitops"
@@ -98,8 +127,41 @@ func (n *Notifier) Committed(ctx context.Context, d Deploy, waitingForFlux bool)
 	n.send(ctx, fmt.Sprintf(":package: *%s*: %s (commit `%s`).%s%s", what, target(d), shortSHA(d.CommitSHA), next, link(d)))
 }
 
-// Applied reports a deployment Flux has applied to the cluster
+// PlanReady reports a Terraform plan that waits for approval
+func (n *Notifier) PlanReady(ctx context.Context, d Deploy) {
+	if d.Plan == nil {
+		return
+	}
+	text := fmt.Sprintf(":clipboard: *Plan ready for approval*: %s: %s%s", target(d), d.Plan.Counts(), link(d))
+	if d.Plan.Destroys() {
+		text += "\n:warning: *This plan destroys resources*"
+		if list := addresses(append(append([]string(nil), d.Plan.Destroyed...), d.Plan.Replaced...)); list != "" {
+			text += ": " + list
+		}
+	}
+	n.send(ctx, text)
+}
+
+// Rejected reports a Terraform plan that was rejected, who did and why
+func (n *Notifier) Rejected(ctx context.Context, d Deploy, by, reason string) {
+	text := fmt.Sprintf(":no_entry_sign: *Plan rejected*: %s by %s", target(d), escape(by))
+	if reason != "" {
+		text += ": " + escape(reason)
+	}
+	n.send(ctx, text+link(d))
+}
+
+// Applied reports a deployment Flux has applied to the cluster, or for a
+// Terraform deployment, that OpenTofu has applied the plan
 func (n *Notifier) Applied(ctx context.Context, d Deploy, took time.Duration) {
+	if d.Terraform {
+		result := "no changes"
+		if d.Plan != nil && !d.Plan.NoChanges() {
+			result = d.Plan.Counts()
+		}
+		n.send(ctx, fmt.Sprintf(":white_check_mark: *Applied*: %s, %s%s", target(d), result, link(d)))
+		return
+	}
 	what := "Deployed"
 	if d.Rollback {
 		what = "Rollback done"
@@ -113,7 +175,7 @@ func (n *Notifier) Failed(ctx context.Context, d Deploy, stage, errMsg string) {
 	if d.Rollback {
 		what = "Rollback failed"
 	}
-	n.send(ctx, fmt.Sprintf(":x: *%s* (%s): %s%s\n> %s", what, stage, target(d), link(d), escape(errMsg)))
+	n.send(ctx, fmt.Sprintf(":x: *%s* (%s): %s%s\n> %s", what, stage, target(d), link(d), strings.ReplaceAll(escape(errMsg), "\n", "\n> ")))
 }
 
 // VersionPublished reports a new version that was published
@@ -135,6 +197,24 @@ func (n *Notifier) AppRegistered(ctx context.Context, app string) {
 
 func target(d Deploy) string {
 	return fmt.Sprintf("`%s` `%s` → `%s`", escape(d.App), escape(d.Version), escape(d.Environment))
+}
+
+// addresses lists the first resource addresses of a plan
+func addresses(list []string) string {
+	const shown = 5
+	more := len(list) - shown
+	if more > 0 {
+		list = list[:shown]
+	}
+	quoted := make([]string, len(list))
+	for i, address := range list {
+		quoted[i] = "`" + escape(address) + "`"
+	}
+	text := strings.Join(quoted, ", ")
+	if more > 0 {
+		text += fmt.Sprintf(" and %d more", more)
+	}
+	return text
 }
 
 func link(d Deploy) string {

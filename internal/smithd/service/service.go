@@ -5,6 +5,7 @@ package service
 
 import (
 	"context"
+	"sync"
 	"time"
 
 	"github.com/sorenmh/deploysmith/internal/smithd/events"
@@ -68,11 +69,35 @@ type Deps struct {
 	TerraformManifests     terraform.ManifestOptions
 	TerraformRoots         terraform.RootOptions
 	TerraformSharedBackend models.TerraformBackend // default backend of new apps; Key is unused
+	// TerraformPlans holds the readable plans copied from the cluster.
+	// TerraformReader reads the Terraform CRs, plans and events there; runs
+	// are not followed while it is nil, i.e. outside a cluster.
+	TerraformPlans  *store.TerraformPlanStore
+	TerraformReader *terraform.Reader
+
+	// Plan-only runs (DEP-22): PlanRuns holds them and TerraformPlansGitops
+	// writes them to the plans branch. Without either they are off.
+	// TerraformAutoPlan starts one for every environment when a terraform
+	// version is published.
+	PlanRuns             *store.PlanRunStore
+	TerraformPlansGitops TerraformPlansGitops
+	TerraformAutoPlan    bool
+
+	// Local plans (DEP-25): temporary versions expire after
+	// TerraformLocalPlanTTL (24 hours if zero); BundleDeleter deletes their
+	// bundles then. Without it they are not deleted.
+	TerraformLocalPlanTTL time.Duration
+	BundleDeleter         BundleDeleter
 }
 
 // Service implements smithd's operations
 type Service struct {
 	Deps
+
+	// planSweepAt is when the plans branch was last swept for leftovers,
+	// and for expired temporary versions
+	planSweepMu sync.Mutex
+	planSweepAt time.Time
 }
 
 // New creates a Service

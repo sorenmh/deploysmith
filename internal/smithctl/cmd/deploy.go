@@ -95,7 +95,7 @@ Examples:
 		// If no version provided, show interactive version selection
 		if versionID == "" {
 			// List recent versions
-			resp, err := c.ListVersions(appID, "published", 10, 0)
+			resp, err := c.ListVersions(appID, "published", 10, 0, false)
 			if err != nil {
 				return err
 			}
@@ -230,7 +230,7 @@ Examples:
 		fmt.Printf("Current version in %s: %s\n\n", environment, currentDeployment.VersionID)
 
 		// List recent versions
-		resp, err := c.ListVersions(appID, "published", 10, 0)
+		resp, err := c.ListVersions(appID, "published", 10, 0, false)
 		if err != nil {
 			return err
 		}
@@ -310,6 +310,8 @@ func printTerraformRun(resp *client.DeployVersionResponse) {
 	fmt.Printf("  Plan:          %s\n", resp.Terraform.PlanID)
 	fmt.Println()
 	output.Info("Terraform plans the change and waits for approval; nothing is applied until then")
+	output.Info("When the plan is ready, review it with: smithctl deployment show " + resp.DeploymentID + " --plan")
+	output.Info("and then run: smithctl deployment approve " + resp.DeploymentID + " (or reject)")
 }
 
 func init() {

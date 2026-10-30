@@ -31,19 +31,43 @@ var activeTerraformStatuses = "('" + strings.Join(models.ActiveTerraformStatuses
 
 // deploymentColumns are scanned by scanDeployment
 const deploymentColumns = `id, app_id, version_id, environment, status, triggered_by, policy_id, COALESCE(gitops_commit_sha, ''), COALESCE(error_message, ''), started_at, completed_at,
-	COALESCE(terraform_root, ''), COALESCE(terraform_source_sha, ''), COALESCE(terraform_plan_id, '')`
+	COALESCE(terraform_root, ''), COALESCE(terraform_source_sha, ''), COALESCE(terraform_plan_id, ''),
+	approved_by, approved_at, destroy_confirmed, approval_reset_at, rejected_by, rejected_at, reject_reason, rollback`
+
+// terraformDecisions are the scanned approval and rejection columns of a
+// deployment, before they are set on its models.TerraformRun
+type terraformDecisions struct {
+	approvedBy, rejectedBy          string
+	approvedAt, resetAt, rejectedAt sql.NullTime
+}
+
+func (d terraformDecisions) apply(run *models.TerraformRun) {
+	run.ApprovedBy, run.RejectedBy = d.approvedBy, d.rejectedBy
+	for _, t := range []struct {
+		from sql.NullTime
+		to   **time.Time
+	}{{d.approvedAt, &run.ApprovedAt}, {d.resetAt, &run.ApprovalResetAt}, {d.rejectedAt, &run.RejectedAt}} {
+		if t.from.Valid {
+			at := t.from.Time
+			*t.to = &at
+		}
+	}
+}
 
 func scanDeployment(scanner interface{ Scan(...any) error }) (*models.Deployment, error) {
 	var deployment models.Deployment
 	var completedAt sql.NullTime
 	var policyID sql.NullString
 	var run models.TerraformRun
+	var decisions terraformDecisions
 
 	err := scanner.Scan(&deployment.ID, &deployment.AppID, &deployment.VersionID, &deployment.Environment, &deployment.Status, &deployment.TriggeredBy, &policyID, &deployment.GitopsCommitSHA, &deployment.ErrorMessage, &deployment.StartedAt, &completedAt,
-		&run.Root, &run.SourceCommitSHA, &run.PlanID)
+		&run.Root, &run.SourceCommitSHA, &run.PlanID, &decisions.approvedBy, &decisions.approvedAt, &run.DestroyConfirmed, &decisions.resetAt,
+		&decisions.rejectedBy, &decisions.rejectedAt, &run.RejectReason, &run.Rollback)
 	if err != nil {
 		return nil, err
 	}
+	decisions.apply(&run)
 
 	if completedAt.Valid {
 		deployment.CompletedAt = &completedAt.Time
@@ -201,6 +225,125 @@ func (s *DeploymentStore) SetTerraformCommitted(id, status, commitSHA, sourceSHA
 	return nil
 }
 
+// trackedTerraformStatuses are the states of a terraform deployment smithd
+// follows in the cluster: it has been committed and has not finished
+var trackedTerraformStatuses = "('" + strings.Join([]string{models.DeploymentPlanning, models.DeploymentAwaitingApproval, models.DeploymentApplying}, "', '") + "')"
+
+// ListTrackedTerraform returns the terraform deployments that are planning,
+// waiting for approval or applying, oldest first
+func (s *DeploymentStore) ListTrackedTerraform() ([]models.Deployment, error) {
+	rows, err := s.db.Query(`
+		SELECT ` + deploymentColumns + `
+		FROM deployments
+		WHERE terraform_root IS NOT NULL AND status IN ` + trackedTerraformStatuses + `
+		ORDER BY started_at ASC
+	`)
+	if err != nil {
+		return nil, fmt.Errorf("failed to list terraform deployments: %w", err)
+	}
+	return scanDeployments(rows)
+}
+
+// TransitionTerraform moves a terraform deployment from one state to another
+// and records errorMsg. It returns false if the deployment was not in the
+// from state any more, e.g. because another smithd replica moved it first, so
+// that only the caller that moved it reports the change. Finishing states
+// (everything but planning, awaiting_approval and applying) complete the
+// deployment.
+func (s *DeploymentStore) TransitionTerraform(id, from, to, errorMsg string) (bool, error) {
+	var completedAt *time.Time
+	switch to {
+	case models.DeploymentPlanning, models.DeploymentAwaitingApproval, models.DeploymentApplying:
+	default:
+		now := time.Now().UTC()
+		completedAt = &now
+	}
+	result, err := s.db.Exec(`
+		UPDATE deployments
+		SET status = ?, error_message = ?, completed_at = ?
+		WHERE id = ? AND status = ?
+	`, to, errorMsg, completedAt, id, from)
+	if err != nil {
+		return false, fmt.Errorf("failed to update deployment: %w", err)
+	}
+	rows, err := result.RowsAffected()
+	if err != nil {
+		return false, fmt.Errorf("failed to check rows affected: %w", err)
+	}
+	return rows == 1, nil
+}
+
+// Approve moves a terraform deployment from awaiting_approval to applying
+// and records who approved it, and whether the approval confirmed a plan with
+// destroys. It returns false if the deployment was not awaiting approval any
+// more, e.g. because another request or replica approved it first.
+func (s *DeploymentStore) Approve(id, by string, destroyConfirmed bool) (bool, error) {
+	return s.decide(`
+		UPDATE deployments
+		SET status = ?, approved_by = ?, approved_at = ?, destroy_confirmed = ?, error_message = ''
+		WHERE id = ? AND status = ?
+	`, models.DeploymentApplying, by, time.Now().UTC(), destroyConfirmed, id, models.DeploymentAwaitingApproval)
+}
+
+// Reject moves a terraform deployment from awaiting_approval to rejected,
+// completes it and records who rejected it and why. It returns false if the
+// deployment was not awaiting approval any more.
+func (s *DeploymentStore) Reject(id, by, reason string) (bool, error) {
+	now := time.Now().UTC()
+	message := "Rejected by " + by
+	if reason != "" {
+		message += ": " + reason
+	}
+	return s.decide(`
+		UPDATE deployments
+		SET status = ?, rejected_by = ?, rejected_at = ?, reject_reason = ?, error_message = ?, completed_at = ?
+		WHERE id = ? AND status = ?
+	`, models.DeploymentRejected, by, now, reason, message, now, id, models.DeploymentAwaitingApproval)
+}
+
+func (s *DeploymentStore) decide(query string, args ...any) (bool, error) {
+	result, err := s.db.Exec(query, args...)
+	if err != nil {
+		return false, fmt.Errorf("failed to update deployment: %w", err)
+	}
+	rows, err := result.RowsAffected()
+	if err != nil {
+		return false, fmt.Errorf("failed to check rows affected: %w", err)
+	}
+	return rows == 1, nil
+}
+
+// SetRollback marks a terraform deployment as a rollback to an older version
+func (s *DeploymentStore) SetRollback(id string) error {
+	if _, err := s.db.Exec(`UPDATE deployments SET rollback = TRUE WHERE id = ?`, id); err != nil {
+		return fmt.Errorf("failed to update deployment: %w", err)
+	}
+	return nil
+}
+
+// ListApprovalResets returns the approved terraform deployments that have
+// finished (applied, or failed) and whose approvePlan has not been reset in
+// git yet, oldest first
+func (s *DeploymentStore) ListApprovalResets() ([]models.Deployment, error) {
+	rows, err := s.db.Query(`
+		SELECT ` + deploymentColumns + `
+		FROM deployments
+		WHERE terraform_root IS NOT NULL AND approved_at IS NOT NULL AND approval_reset_at IS NULL
+			AND status IN ('` + models.DeploymentApplied + `', '` + models.DeploymentFailed + `')
+		ORDER BY started_at ASC
+	`)
+	if err != nil {
+		return nil, fmt.Errorf("failed to list approvals to reset: %w", err)
+	}
+	return scanDeployments(rows)
+}
+
+// SetApprovalReset records that approvePlan was reset in git. It returns
+// false if that was already recorded.
+func (s *DeploymentStore) SetApprovalReset(id string) (bool, error) {
+	return s.decide(`UPDATE deployments SET approval_reset_at = ? WHERE id = ? AND approval_reset_at IS NULL`, time.Now().UTC(), id)
+}
+
 // GetByID gets a deployment by ID
 func (s *DeploymentStore) GetByID(id string) (*models.Deployment, error) {
 	deployment, err := scanDeployment(s.db.QueryRow(`
@@ -278,7 +421,8 @@ const deploymentDetailSelect = `
 	SELECT d.id, d.app_id, COALESCE(a.name, ''), COALESCE(v.version_id, ''), d.environment, d.status,
 		COALESCE(d.triggered_by, ''), COALESCE(d.policy_id, ''), COALESCE(p.name, ''),
 		COALESCE(d.gitops_commit_sha, ''), COALESCE(d.error_message, ''), d.started_at, d.completed_at,
-		COALESCE(d.terraform_root, ''), COALESCE(d.terraform_source_sha, ''), COALESCE(d.terraform_plan_id, '')
+		COALESCE(d.terraform_root, ''), COALESCE(d.terraform_source_sha, ''), COALESCE(d.terraform_plan_id, ''),
+		d.approved_by, d.approved_at, d.destroy_confirmed, d.approval_reset_at, d.rejected_by, d.rejected_at, d.reject_reason, d.rollback
 	FROM deployments d
 	LEFT JOIN applications a ON a.id = d.app_id
 	LEFT JOIN versions v ON v.id = d.version_id
@@ -288,14 +432,17 @@ func scanDeploymentDetail(scanner interface{ Scan(...any) error }) (models.Deplo
 	var detail models.DeploymentDetail
 	var completedAt sql.NullTime
 	var run models.TerraformRun
+	var decisions terraformDecisions
 
 	err := scanner.Scan(&detail.ID, &detail.AppID, &detail.AppName, &detail.VersionID, &detail.Environment, &detail.Status,
 		&detail.TriggeredBy, &detail.PolicyID, &detail.PolicyName,
 		&detail.GitopsCommitSHA, &detail.ErrorMessage, &detail.StartedAt, &completedAt,
-		&run.Root, &run.SourceCommitSHA, &run.PlanID)
+		&run.Root, &run.SourceCommitSHA, &run.PlanID, &decisions.approvedBy, &decisions.approvedAt, &run.DestroyConfirmed, &decisions.resetAt,
+		&decisions.rejectedBy, &decisions.rejectedAt, &run.RejectReason, &run.Rollback)
 	if err != nil {
 		return detail, err
 	}
+	decisions.apply(&run)
 
 	if completedAt.Valid {
 		detail.CompletedAt = &completedAt.Time

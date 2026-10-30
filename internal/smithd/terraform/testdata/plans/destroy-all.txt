@@ -1,0 +1,47 @@
+
+OpenTofu used the selected providers to generate the following execution
+plan. Resource actions are indicated with the following symbols:
+  - destroy
+
+OpenTofu will perform the following actions:
+
+  # terraform_data.new will be destroyed
+  - resource "terraform_data" "new" {
+      - id     = "c2ee53df-0d48-6bb2-6113-8b4150429416" -> null
+      - input  = "new" -> null
+      - output = "new" -> null
+    }
+
+  # terraform_data.rep will be destroyed
+  - resource "terraform_data" "rep" {
+      - id               = "db707620-3c17-f586-2b58-4b566e724a89" -> null
+      - triggers_replace = "three" -> null
+    }
+
+  # terraform_data.web will be destroyed
+  - resource "terraform_data" "web" {
+      - id     = "2f0c45f4-9d9b-7eea-3a21-27a42a68f83a" -> null
+      - input  = "web-v3" -> null
+      - output = "web-v3" -> null
+    }
+
+  # module.queues.terraform_data.item["a"] will be destroyed
+  - resource "terraform_data" "item" {
+      - id     = "1c6129f7-676f-a9f7-fabe-5641d7af02e6" -> null
+      - input  = "a" -> null
+      - output = "a" -> null
+    }
+
+  # module.queues.terraform_data.item["c"] will be destroyed
+  - resource "terraform_data" "item" {
+      - id     = "fe4ab4e5-bd5b-76c5-af3b-0e17474609b3" -> null
+      - input  = "c" -> null
+      - output = "c" -> null
+    }
+
+Plan: 0 to add, 0 to change, 5 to destroy.
+
+Changes to Outputs:
+  - extra = "x" -> null
+  - more  = "y" -> null
+  - web   = "2f0c45f4-9d9b-7eea-3a21-27a42a68f83a" -> null

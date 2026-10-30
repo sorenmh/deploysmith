@@ -118,7 +118,7 @@ func (s *Service) GetAppDetail(appID string, versionLimit, versionOffset int) (*
 		}
 	}
 
-	if detail.Versions, detail.TotalVersions, err = s.Versions.List(appID, versionLimit, versionOffset); err != nil {
+	if detail.Versions, detail.TotalVersions, err = s.Versions.List(appID, versionLimit, versionOffset, false); err != nil {
 		return nil, err
 	}
 	if detail.Policies, err = s.Policies.List(appID); err != nil {
@@ -131,7 +131,9 @@ func (s *Service) GetAppDetail(appID string, versionLimit, versionOffset int) (*
 	return detail, nil
 }
 
-// GetDeployment returns a deployment with app, version and policy names
+// GetDeployment returns a deployment with app, version and policy names. A
+// terraform deployment that has been planned also has its plan, with the
+// text; listings leave it out.
 func (s *Service) GetDeployment(deploymentID string) (*models.DeploymentDetail, error) {
 	deployment, err := s.Deployments.GetDetailed(deploymentID)
 	if err != nil {
@@ -140,7 +142,21 @@ func (s *Service) GetDeployment(deploymentID string) (*models.DeploymentDetail, 
 		}
 		return nil, err
 	}
+	if deployment.Terraform != nil && s.TerraformPlans != nil {
+		if deployment.Terraform.Plan, err = s.TerraformPlans.Get(deploymentID); err != nil {
+			return nil, err
+		}
+	}
 	return deployment, nil
+}
+
+// TerraformPlanSummaries returns the plan counts of the given deployments by
+// deployment id, for listings; deployments without a plan are left out
+func (s *Service) TerraformPlanSummaries(deploymentIDs []string) (map[string]models.TerraformPlan, error) {
+	if s.TerraformPlans == nil {
+		return map[string]models.TerraformPlan{}, nil
+	}
+	return s.TerraformPlans.Summaries(deploymentIDs)
 }
 
 // ListDeployments lists deployments, newest first

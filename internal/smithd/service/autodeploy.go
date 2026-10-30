@@ -17,6 +17,12 @@ func (s *Service) VersionPublished(ctx context.Context, app *models.Application,
 // TriggerAutoDeploys starts an auto-deploy, in the background, for every
 // enabled policy of the app that matches the version's branch
 func (s *Service) TriggerAutoDeploys(ctx context.Context, app *models.Application, version *models.Version) {
+	// The temporary version of a local plan is a draft and never published,
+	// but make sure
+	if version.Temporary {
+		return
+	}
+
 	// A terraform deploy plans changes to infrastructure that someone must
 	// review; policies never start one
 	if version.ArtifactType != models.ArtifactManifests {

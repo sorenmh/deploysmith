@@ -3,14 +3,21 @@
 {{end}}
 
 {{/* deployment-detail is also served on its own for live refreshes while
-     the deployment is pending */}}
+     the deployment is pending, planning or applying */}}
 {{define "deployment-detail"}}
-<div id="deployment"{{if eq .Status "pending"}} hx-get="/ui/deployments/{{.ID}}?partial=1" hx-trigger="every 3s" hx-swap="outerHTML"{{end}}>
+<div id="deployment"{{if .Polls}} hx-get="/ui/deployments/{{.ID}}?partial=1" hx-trigger="every 3s" hx-swap="outerHTML"{{end}}>
   <h1 class="page-title">{{.AppName}} <span class="id title-id">{{.VersionID}}</span> to {{.Environment}}</h1>
-  <p class="detail-status">{{template "status" .}}</p>
+  <p class="detail-status">{{template "status" .}}{{if and .Terraform .Terraform.Rollback}} <span class="tag">Rollback</span>{{end}}</p>
+
+  {{with .Error}}
+  <div class="error" role="alert">
+    <p>{{.}}</p>
+  </div>
+  {{end}}
 
   {{if .ErrorMessage}}
-  <div class="error" role="alert">
+  {{/* A plan that went stale or was rejected is not a failure */}}
+  <div class="{{if or (eq .Status "stale") (eq .Status "rejected")}}notice notice--{{.Status}}{{else}}error{{end}}" role="alert">
     <p>{{.ErrorMessage}}</p>
   </div>
   {{end}}
@@ -23,6 +30,46 @@
     <div><dt>Started</dt><dd>{{template "time" .StartedAt}}</dd></div>
     {{with .CompletedAt}}<div><dt>Finished</dt><dd>{{template "time" .}}</dd></div>{{end}}
     {{with .GitopsCommitSHA}}<div><dt>Gitops commit</dt><dd><span class="id" title="{{.}}">{{shortSHA .}}</span></dd></div>{{end}}
+    {{with .Terraform}}
+    <div><dt>Root</dt><dd>{{.Root}}</dd></div>
+    {{with $.SourceURL}}<div><dt>Source commit</dt><dd><a class="id" href="{{.}}" title="{{$.Terraform.SourceCommitSHA}}">{{shortSHA $.Terraform.SourceCommitSHA}}</a></dd></div>{{end}}
+    {{with .ApprovedBy}}<div><dt>Approved by</dt><dd>{{.}}{{with $.Terraform.ApprovedAt}} {{template "time" .}}{{end}}{{if $.Terraform.DestroyConfirmed}} <span class="muted">(destroys confirmed)</span>{{end}}</dd></div>{{end}}
+    {{with .RejectedBy}}<div><dt>Rejected by</dt><dd>{{.}}{{with $.Terraform.RejectedAt}} {{template "time" .}}{{end}}</dd></div>{{end}}
+    {{with .RejectReason}}<div><dt>Reason</dt><dd>{{.}}</dd></div>{{end}}
+    {{end}}
   </dl>
+
+  {{with .Terraform}}{{with .Plan}}{{template "plan" .}}{{end}}{{end}}
+
+  {{if .CanDecide}}
+  <section class="decision" aria-labelledby="decision-title">
+    <h2 class="section-title" id="decision-title">Decision</h2>
+    {{if not .Terraform.Plan}}
+    <p class="muted">The plan is not available yet. Reload the page in a moment.</p>
+    {{else}}
+    <div class="decision__forms">
+      <form class="decision__form" method="post" action="/ui/deployments/{{.ID}}/approve" hx-disabled-elt="find button">
+        {{if .NeedsConfirmation}}
+        <div class="fields">
+          <label>Type the environment name, {{.Environment}}, to approve the destroys
+            <input name="confirm" required autocomplete="off" placeholder="{{.Environment}}" aria-describedby="confirm-help">
+          </label>
+        </div>
+        <p class="help muted" id="confirm-help">Approving applies this plan to {{.Environment}}.</p>
+        {{end}}
+        <button type="submit" class="button"{{if not .NeedsConfirmation}} hx-confirm="Approve this plan and apply it to {{.Environment}}?"{{end}}>Approve and apply</button>
+      </form>
+      <form class="decision__form" method="post" action="/ui/deployments/{{.ID}}/reject" hx-disabled-elt="find button">
+        <div class="fields">
+          <label>Reason (optional)
+            <input name="reason" maxlength="1000" autocomplete="off">
+          </label>
+        </div>
+        <button type="submit" class="button button--quiet button--danger">Reject</button>
+      </form>
+    </div>
+    {{end}}
+  </section>
+  {{end}}
 </div>
 {{end}}

@@ -73,6 +73,38 @@ func (c *Client) EnableTerraform(appNameOrID string, req EnableTerraformRequest)
 	return &env, nil
 }
 
+// GetDeployment returns a deployment. A terraform deployment that has been
+// planned has its plan, with the text.
+func (c *Client) GetDeployment(deploymentID string) (*Deployment, error) {
+	var deployment Deployment
+	if err := c.doJSON(http.MethodGet, "api/v1/deployments/"+url.PathEscape(deploymentID), nil, http.StatusOK, &deployment); err != nil {
+		return nil, err
+	}
+	return &deployment, nil
+}
+
+// ApproveDeployment approves the plan of a terraform deployment that is
+// awaiting approval. confirmDestroy is needed if the plan destroys resources.
+func (c *Client) ApproveDeployment(deploymentID string, confirmDestroy bool) (*Deployment, error) {
+	var deployment Deployment
+	req := map[string]bool{"confirmDestroy": confirmDestroy}
+	if err := c.doJSON(http.MethodPost, "api/v1/deployments/"+url.PathEscape(deploymentID)+"/approve", req, http.StatusOK, &deployment); err != nil {
+		return nil, err
+	}
+	return &deployment, nil
+}
+
+// RejectDeployment rejects the plan of a terraform deployment that is
+// awaiting approval
+func (c *Client) RejectDeployment(deploymentID, reason string) (*Deployment, error) {
+	var deployment Deployment
+	req := map[string]string{"reason": reason}
+	if err := c.doJSON(http.MethodPost, "api/v1/deployments/"+url.PathEscape(deploymentID)+"/reject", req, http.StatusOK, &deployment); err != nil {
+		return nil, err
+	}
+	return &deployment, nil
+}
+
 // ListTerraformEnvironments lists the environments an app has Terraform
 // enabled in
 func (c *Client) ListTerraformEnvironments(appNameOrID string) (*ListTerraformEnvironmentsResponse, error) {

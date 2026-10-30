@@ -20,7 +20,7 @@ import (
 // environment: it commits the bundle source and then the root's Terraform
 // CR, pinned to the source commit, to the gitops repo. tofu-controller then
 // plans it and waits for approval; the deployment is left planning, and
-// DEP-19 follows it from the CR's status.
+// trackTerraformRun follows it from the CR's status.
 //
 // A deploy replaces the root's pending plan: a deployment that is planning
 // or awaiting approval becomes stale, and the rewritten CR (approvePlan "")
@@ -34,27 +34,9 @@ import (
 // refused deploy leaves no deployment record and doesn't touch the
 // pending plan.
 func (s *Service) deployTerraform(ctx context.Context, app *models.Application, version *models.Version, environment, triggeredBy string) (*models.Deployment, error) {
-	if err := s.requireTerraform(); err != nil {
-		return nil, err
-	}
-	tfEnv, err := s.TerraformEnvironments.Get(app.ID, environment)
+	tfEnv, err := s.terraformTarget(app, environment)
 	if err != nil {
 		return nil, err
-	}
-	if tfEnv == nil {
-		return nil, invalid("terraform_not_enabled", fmt.Sprintf(
-			"Terraform is not enabled for %s in %s; enable it with 'smithctl app terraform enable %s --env %s'", app.Name, environment, app.Name, environment))
-	}
-	if tfEnv.ProvisionedAt == nil {
-		reason := ""
-		if tfEnv.ProvisionError != nil {
-			reason = ": " + *tfEnv.ProvisionError
-		}
-		return nil, invalid("terraform_not_provisioned", fmt.Sprintf(
-			"Terraform for %s in %s has not been provisioned yet%s; fix the cause and run 'smithctl app terraform sync %s'", app.Name, environment, reason, app.Name))
-	}
-	if err := terraform.ValidateNames(app.Name, environment); err != nil {
-		return nil, invalid("invalid_request", err.Error())
 	}
 
 	bundle, err := s.terraformBundle(app, version)
@@ -82,11 +64,21 @@ func (s *Service) deployTerraform(ctx context.Context, app *models.Application, 
 	}
 
 	ctx = deployCtx(ctx, app.Name, version, environment, "")
+	// An older version than the one applied is a normal deploy with a new
+	// plan; it is only labelled
+	if s.isRollback(deployment, version) {
+		if err := s.Deployments.SetRollback(deployment.ID); err != nil {
+			logging.LogErrorCtx(ctx, "Failed to record the rollback: "+err.Error(), err)
+		}
+		deployment.Terraform.Rollback = true
+	}
 	if replaced != nil {
 		logging.LogInfoCtx(ctx, "Replacing the pending plan of an earlier deployment",
 			logging.Field("deployment_id", deployment.ID),
 			logging.Field("stale_deployment_id", replaced.ID),
 		)
+		// Closes the check runs of the replaced deployment
+		s.notifyReplaced(ctx, app, replaced, deployment)
 	}
 
 	notice := s.slackDeploy(deployment, app, version, nil)
@@ -165,12 +157,13 @@ func (s *Service) deployTerraform(ctx context.Context, app *models.Application, 
 	}
 	deployment.Status = models.DeploymentPlanning
 	deployment.GitopsCommitSHA = commits.Manifest
-	deployment.Terraform = &models.TerraformRun{Root: root, SourceCommitSHA: commits.Source, PlanID: planID}
+	deployment.Terraform = &models.TerraformRun{Root: root, SourceCommitSHA: commits.Source, PlanID: planID, Rollback: deployment.Terraform.Rollback}
 
 	s.FluxReconciler.Trigger(ctx)
 
 	notice.CommitSHA = commits.Manifest
-	s.notifyCommitted(ctx, notice, false)
+	// More follows: the plan, then the apply
+	s.notifyCommitted(ctx, notice, true)
 	logging.LogInfoCtx(ctx, "Terraform deployment committed, waiting for the plan",
 		logging.Field("deployment_id", deployment.ID),
 		logging.Field("commit_sha", commits.Manifest),
@@ -179,16 +172,46 @@ func (s *Service) deployTerraform(ctx context.Context, app *models.Application, 
 	return deployment, nil
 }
 
-// terraformBundle reads and validates a terraform version's bundle. It was
-// validated on publish; this also gives the pinned OpenTofu version.
+// terraformTarget returns the Terraform settings of an app in an environment
+// and checks that a root can be deployed or planned there: Terraform is
+// enabled and provisioned, and the names can be used for it.
+func (s *Service) terraformTarget(app *models.Application, environment string) (*models.TerraformEnvironment, error) {
+	if err := s.requireTerraform(); err != nil {
+		return nil, err
+	}
+	tfEnv, err := s.TerraformEnvironments.Get(app.ID, environment)
+	if err != nil {
+		return nil, err
+	}
+	if tfEnv == nil {
+		return nil, invalid("terraform_not_enabled", fmt.Sprintf(
+			"Terraform is not enabled for %s in %s; enable it with 'smithctl app terraform enable %s --env %s'", app.Name, environment, app.Name, environment))
+	}
+	if tfEnv.ProvisionedAt == nil {
+		reason := ""
+		if tfEnv.ProvisionError != nil {
+			reason = ": " + *tfEnv.ProvisionError
+		}
+		return nil, invalid("terraform_not_provisioned", fmt.Sprintf(
+			"Terraform for %s in %s has not been provisioned yet%s; fix the cause and run 'smithctl app terraform sync %s'", app.Name, environment, reason, app.Name))
+	}
+	if err := terraform.ValidateNames(app.Name, environment); err != nil {
+		return nil, invalid("invalid_request", err.Error())
+	}
+	return tfEnv, nil
+}
+
+// terraformBundle reads and validates a terraform version's bundle, from
+// the published files or, for a draft, the draft's. It was validated on
+// publish; this also gives the pinned OpenTofu version.
 func (s *Service) terraformBundle(app *models.Application, version *models.Version) (*tfbundle.Bundle, error) {
-	files, err := s.Storage.GetAllFiles(app.Name, version.VersionID, true)
+	files, err := s.Storage.GetAllFiles(app.Name, version.VersionID, version.Status == "published")
 	if err != nil {
 		return nil, fmt.Errorf("failed to fetch terraform bundle: %w", err)
 	}
 	archive, ok := files[tfbundle.ArchiveName]
 	if !ok {
-		return nil, fmt.Errorf("version %s has no %s", version.VersionID, tfbundle.ArchiveName)
+		return nil, invalid("no_bundle", fmt.Sprintf("Version %s has no %s; upload the bundle first", version.VersionID, tfbundle.ArchiveName))
 	}
 	bundleFiles, err := tfbundle.Read(bytes.NewReader(archive))
 	if err == nil {

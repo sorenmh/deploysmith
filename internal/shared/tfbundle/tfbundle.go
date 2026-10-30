@@ -22,6 +22,8 @@ import (
 	"archive/tar"
 	"bytes"
 	"compress/gzip"
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"io"
@@ -368,6 +370,19 @@ func Pack(files map[string][]byte) ([]byte, error) {
 		return nil, fmt.Errorf("failed to close gzip writer: %w", err)
 	}
 	return buf.Bytes(), nil
+}
+
+// ContentHash returns a hash of a bundle's files that is the same for the
+// same names and contents, wherever and whenever the bundle was packed. forge
+// names local plans with it.
+func ContentHash(files map[string][]byte) string {
+	h := sha256.New()
+	for _, name := range sortedNames(files) {
+		// Lengths keep the names and contents apart
+		_, _ = fmt.Fprintf(h, "%d:%s%d:", len(name), name, len(files[name]))
+		h.Write(files[name])
+	}
+	return hex.EncodeToString(h.Sum(nil))
 }
 
 // Read extracts the files of a gzipped bundle tarball for Validate.

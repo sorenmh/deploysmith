@@ -31,6 +31,7 @@ import (
 	"github.com/sorenmh/deploysmith/internal/smithd/slack"
 	"github.com/sorenmh/deploysmith/internal/smithd/storage"
 	"github.com/sorenmh/deploysmith/internal/smithd/store"
+	"github.com/sorenmh/deploysmith/internal/smithd/terraform"
 	"github.com/sorenmh/deploysmith/internal/smithd/web"
 	"gopkg.in/yaml.v3"
 )
@@ -114,6 +115,15 @@ func NewServer(cfg *config.Config, database *db.DB) *Server {
 
 	// Terraform apps, only with OpenBao
 	deps.TerraformEnvironments = store.NewTerraformStore(database)
+	deps.TerraformPlans = store.NewTerraformPlanStore(database)
+	// Assign only when available, so the pointer stays nil outside a cluster
+	if reader := terraform.NewReader(); reader != nil {
+		deps.TerraformReader = reader
+	}
+	deps.PlanRuns = store.NewPlanRunStore(database)
+	deps.TerraformAutoPlan = cfg.TerraformAutoPlan
+	deps.TerraformLocalPlanTTL = cfg.TerraformLocalPlanTTL
+	deps.BundleDeleter = s3Storage
 	deps.TerraformSharedBackend = models.TerraformBackend{Bucket: cfg.TerraformStateBucket, Region: cfg.TerraformStateRegion, LockTable: cfg.TerraformLockTable}
 	if deps.TerraformManifests, err = terraformManifestOptions(cfg); err != nil {
 		log.Fatalf("Failed to configure Terraform support: %v", err)
@@ -124,6 +134,8 @@ func NewServer(cfg *config.Config, database *db.DB) *Server {
 	}
 	if deps.Terraform != nil {
 		deps.TerraformGitops = gitopsService
+		// Plan-only runs have a working copy of their own, on their own branch
+		deps.TerraformPlansGitops = gitops.NewBranchService(cfg.GitopsRepo, cfg.GitopsSSHKeyPath, cfg.TerraformPlansBranch)
 		log.Printf("Terraform support enabled (OpenBao at %s)", cfg.OpenBaoAddr)
 	} else {
 		log.Printf("Terraform support disabled: OPENBAO_ADDR is not set")
@@ -181,8 +193,14 @@ func (s *Server) setupAuthenticatedRoutes(r chi.Router) {
 
 	// Deployment routes
 	r.Post("/apps/{appId}/versions/{versionId}/deploy", s.handleDeployVersion)
+	r.Post("/apps/{appId}/versions/{versionId}/plan", s.handlePlanVersion)
+	r.Get("/apps/{appId}/versions/{versionId}/plan", s.handleGetVersionPlan)
+	r.Get("/plan-runs/{planRunId}", s.handleGetPlanRun)
+	r.Post("/apps/{appId}/terraform/local-plans", s.handleLocalPlan)
 	r.Get("/deployments", s.handleListDeployments)
 	r.Get("/deployments/{deploymentId}", s.handleGetDeployment)
+	r.Post("/deployments/{deploymentId}/approve", s.handleApproveDeployment)
+	r.Post("/deployments/{deploymentId}/reject", s.handleRejectDeployment)
 	r.Get("/overview", s.handleOverview)
 
 	// Environment routes
@@ -264,6 +282,7 @@ func newLogin(cfg *config.Config, database *db.DB) *auth.Login {
 func (s *Server) Start() error {
 	go s.svc.WatchStaleDeployments(context.Background())
 	go s.svc.SyncAllTerraform(context.Background())
+	go s.svc.WatchTerraform(context.Background())
 
 	if s.uiRouter != nil {
 		go func() {
@@ -499,6 +518,11 @@ func (s *Server) handlePublishVersion(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	if version.Temporary {
+		writeError(w, http.StatusConflict, "temporary_version", "The temporary version of a local plan can't be published")
+		return
+	}
+
 	// Check if already published
 	if version.Status == "published" {
 		writeError(w, http.StatusConflict, "conflict", "Version is already published")
@@ -543,6 +567,7 @@ func (s *Server) handlePublishVersion(w http.ResponseWriter, r *http.Request) {
 
 	s.svc.VersionPublished(r.Context(), app, version)
 	s.svc.TriggerAutoDeploys(r.Context(), app, version)
+	s.svc.TriggerAutoPlans(r.Context(), app, version)
 
 	resp := models.PublishVersionResponse{
 		VersionID:     version.VersionID,
@@ -756,8 +781,11 @@ func (s *Server) handleListVersions(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	// Temporary versions (local plans) are only listed on request
+	includeTemporary := r.URL.Query().Get("includeTemporary") == "true"
+
 	// List versions
-	versions, total, err := s.versionStore.List(appID, limit, offset)
+	versions, total, err := s.versionStore.List(appID, limit, offset, includeTemporary)
 	if err != nil {
 		log.Printf("Failed to list versions: %v", err)
 		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to list versions")

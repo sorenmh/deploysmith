@@ -85,16 +85,29 @@ type Version struct {
 	CreatedAt    time.Time  `json:"createdAt"`
 	PublishedAt  *time.Time `json:"publishedAt,omitempty"`
 	Deployments  []string   `json:"deployedTo,omitempty"`
+	// Temporary versions are the bundles of local plans (forge plan
+	// --terraform); they can't be deployed and expire
+	Temporary bool       `json:"temporary,omitempty"`
+	ExpiresAt *time.Time `json:"expiresAt,omitempty"`
 }
 
-// Deployment represents a deployment
+// Deployment represents a deployment, as the API returns it with the names
+// of its app, version and policy
 type Deployment struct {
-	ID          string    `json:"id"`
-	AppID       string    `json:"appId"`
-	VersionID   string    `json:"versionId"`
-	Environment string    `json:"environment"`
-	Status      string    `json:"status"`
-	CreatedAt   time.Time `json:"createdAt"`
+	ID              string     `json:"id"`
+	AppID           string     `json:"appId"`
+	AppName         string     `json:"appName"`
+	VersionID       string     `json:"versionId"`
+	Environment     string     `json:"environment"`
+	Status          string     `json:"status"`
+	TriggeredBy     string     `json:"triggeredBy,omitempty"`
+	PolicyName      string     `json:"policyName,omitempty"`
+	GitopsCommitSHA string     `json:"gitopsCommitSha,omitempty"`
+	ErrorMessage    string     `json:"errorMessage,omitempty"`
+	StartedAt       time.Time  `json:"startedAt"`
+	CompletedAt     *time.Time `json:"completedAt,omitempty"`
+	// Terraform is set for terraform versions
+	Terraform *TerraformRun `json:"terraform,omitempty"`
 }
 
 // Policy represents an auto-deployment policy
@@ -294,8 +307,9 @@ type ListVersionsResponse struct {
 	TotalCount int       `json:"totalCount"`
 }
 
-// ListVersions lists all versions for an application
-func (c *Client) ListVersions(appNameOrID, status string, limit, offset int) (*ListVersionsResponse, error) {
+// ListVersions lists the versions of an application; includeTemporary adds
+// the temporary versions of local plans
+func (c *Client) ListVersions(appNameOrID, status string, limit, offset int, includeTemporary bool) (*ListVersionsResponse, error) {
 	// Resolve app name to ID
 	appID, err := c.resolveToAppID(appNameOrID)
 	if err != nil {
@@ -316,6 +330,9 @@ func (c *Client) ListVersions(appNameOrID, status string, limit, offset int) (*L
 	}
 	if offset > 0 {
 		q.Set("offset", strconv.Itoa(offset))
+	}
+	if includeTemporary {
+		q.Set("includeTemporary", "true")
 	}
 	u.RawQuery = q.Encode()
 
@@ -403,6 +420,39 @@ type TerraformRun struct {
 	Root            string `json:"root"`
 	SourceCommitSHA string `json:"sourceCommitSha,omitempty"`
 	PlanID          string `json:"planId,omitempty"`
+	// Rollback is true if the version is older than the one applied
+	Rollback bool `json:"rollback,omitempty"`
+	// Who approved or rejected the plan, and when
+	ApprovedBy       string     `json:"approvedBy,omitempty"`
+	ApprovedAt       *time.Time `json:"approvedAt,omitempty"`
+	DestroyConfirmed bool       `json:"destroyConfirmed,omitempty"`
+	ApprovalResetAt  *time.Time `json:"approvalResetAt,omitempty"`
+	RejectedBy       string     `json:"rejectedBy,omitempty"`
+	RejectedAt       *time.Time `json:"rejectedAt,omitempty"`
+	RejectReason     string     `json:"rejectReason,omitempty"`
+	// Plan is the readable plan, once the controller has made it
+	Plan *TerraformPlan `json:"plan,omitempty"`
+}
+
+// TerraformPlan is the readable plan of a terraform deployment
+type TerraformPlan struct {
+	PlanID        string     `json:"planId"`
+	PlanHash      string     `json:"planHash,omitempty"`
+	PlannedAt     *time.Time `json:"plannedAt,omitempty"`
+	ToAdd         int        `json:"toAdd"`
+	ToChange      int        `json:"toChange"`
+	ToDestroy     int        `json:"toDestroy"`
+	Destroys      bool       `json:"destroys"`
+	OutputChanges bool       `json:"outputChanges,omitempty"`
+	Resources     struct {
+		Create  []string `json:"create"`
+		Update  []string `json:"update"`
+		Replace []string `json:"replace"`
+		Destroy []string `json:"destroy"`
+	} `json:"resources"`
+	Text            string `json:"text,omitempty"`
+	AppliedPlanHash string `json:"appliedPlanHash,omitempty"`
+	AppliedDiffered bool   `json:"appliedDiffered,omitempty"`
 }
 
 // DeployVersion deploys a version to an environment

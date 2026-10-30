@@ -33,6 +33,12 @@ type Version struct {
 	MetadataTimestamp time.Time  `json:"metadataTimestamp,omitempty"`
 	CreatedAt         time.Time  `json:"createdAt"`
 	PublishedAt       *time.Time `json:"publishedAt,omitempty"`
+	// Temporary versions hold the bundle of a local plan: they are drafts
+	// that can't be published or deployed, and are deleted at ExpiresAt.
+	// CreatedBy is the user who made it.
+	Temporary bool       `json:"temporary,omitempty"`
+	ExpiresAt *time.Time `json:"expiresAt,omitempty"`
+	CreatedBy string     `json:"createdBy,omitempty"`
 }
 
 // VersionMetadata represents the metadata in version.yml
@@ -96,6 +102,22 @@ type DraftVersionResponse struct {
 	UploadExpires time.Time `json:"uploadExpires"`
 	Status        string    `json:"status"`
 	ArtifactType  string    `json:"artifactType"`
+}
+
+// LocalPlanRequest is the request to upload the bundle of a local plan: the
+// hash of its content (tfbundle.ContentHash) names the temporary version
+type LocalPlanRequest struct {
+	Environment string `json:"environment"`
+	ContentHash string `json:"contentHash"`
+}
+
+// LocalPlanResponse is the response for a local plan: the temporary version
+// to upload the bundle to, and to plan once it is uploaded
+type LocalPlanResponse struct {
+	VersionID     string    `json:"versionId"`
+	UploadURL     string    `json:"uploadUrl"`
+	UploadExpires time.Time `json:"uploadExpires"`
+	ExpiresAt     time.Time `json:"expiresAt"`
 }
 
 // PublishVersionResponse is the response for publishing a version

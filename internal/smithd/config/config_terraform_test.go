@@ -34,3 +34,37 @@ func TestParseRunnerImages(t *testing.T) {
 		}
 	}
 }
+
+func TestLoadPlanOnlyRuns(t *testing.T) {
+	t.Run("on by default, on the plans branch", func(t *testing.T) {
+		setRequired(t)
+		cfg, err := Load()
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !cfg.TerraformAutoPlan || cfg.TerraformPlansBranch != "plans" {
+			t.Errorf("auto plan = %v, plans branch = %q", cfg.TerraformAutoPlan, cfg.TerraformPlansBranch)
+		}
+	})
+
+	t.Run("configured", func(t *testing.T) {
+		setRequired(t)
+		t.Setenv("TERRAFORM_AUTO_PLAN", "false")
+		t.Setenv("TERRAFORM_PLANS_BRANCH", "plan-only")
+		cfg, err := Load()
+		if err != nil {
+			t.Fatal(err)
+		}
+		if cfg.TerraformAutoPlan || cfg.TerraformPlansBranch != "plan-only" {
+			t.Errorf("auto plan = %v, plans branch = %q", cfg.TerraformAutoPlan, cfg.TerraformPlansBranch)
+		}
+	})
+
+	t.Run("invalid", func(t *testing.T) {
+		setRequired(t)
+		t.Setenv("TERRAFORM_AUTO_PLAN", "sometimes")
+		if _, err := Load(); err == nil {
+			t.Error("Load accepted TERRAFORM_AUTO_PLAN=sometimes")
+		}
+	})
+}
