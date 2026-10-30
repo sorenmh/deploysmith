@@ -8,7 +8,11 @@
   <p>Deployed <span class="id">{{.VersionID}}</span> to {{.Environment}}. Flux will apply it on its next reconciliation.</p>
   {{else if eq .Status "pending"}}
   <p>Deploying <span class="id">{{.VersionID}}</span> to {{.Environment}}…</p>
+  {{else if .Terraform}}{{if ne .Status "failed"}}
+  <p>Started <span class="id">{{.VersionID}}</span> in {{.Environment}}: <a class="status-link" href="/ui/deployments/{{.ID}}">{{template "status" .}}</a>. Follow the plan on its deployment page.</p>
   {{else}}
+  <p>Deploying <span class="id">{{.VersionID}}</span> to {{.Environment}} failed: {{.ErrorMessage}}</p>
+  {{end}}{{else}}
   <p>Deploying <span class="id">{{.VersionID}}</span> to {{.Environment}} failed: {{.ErrorMessage}}</p>
   {{end}}
 </div>
@@ -23,8 +27,8 @@
       <dt>{{$env}}</dt>
       {{$current := index $.Data.Detail.CurrentVersions $env}}
       <dd>{{with $current}}<span class="id">{{.}}</span>{{else}}<span class="muted">Not deployed</span>{{end}}</dd>
-      {{with index $.Data.Detail.LastDeployments $env}}{{if or (ne .Status "success") (ne .VersionID $current)}}
-      <dd class="board-attempt">{{template "status" .}} <span class="id">{{.VersionID}}</span> {{template "time" .StartedAt}}</dd>
+      {{with index $.Data.Detail.LastDeployments $env}}{{if or (and (ne .Status "success") (ne .Status "applied")) (ne .VersionID $current)}}
+      <dd class="board-attempt"><a class="status-link" href="/ui/deployments/{{.ID}}">{{template "status" .}}</a> <span class="id">{{.VersionID}}</span> {{template "time" .StartedAt}}</dd>
       {{end}}{{end}}
     </div>
     {{end}}

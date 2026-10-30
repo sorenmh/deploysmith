@@ -111,6 +111,19 @@ CREATE TABLE IF NOT EXISTS deployments (
     terraform_source_sha TEXT,
     terraform_plan_id TEXT,
 
+    -- Terraform deployments only: who approved or rejected the plan and
+    -- when, whether the approval confirmed destroys, when approvePlan was
+    -- reset after the apply, and whether the version is older than the one
+    -- applied (a rollback)
+    approved_by TEXT NOT NULL DEFAULT '',
+    approved_at TIMESTAMP,
+    destroy_confirmed BOOLEAN NOT NULL DEFAULT FALSE,
+    rejected_by TEXT NOT NULL DEFAULT '',
+    rejected_at TIMESTAMP,
+    reject_reason TEXT NOT NULL DEFAULT '',
+    approval_reset_at TIMESTAMP,
+    rollback BOOLEAN NOT NULL DEFAULT FALSE,
+
     -- Timestamps
     started_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
     completed_at TIMESTAMP,

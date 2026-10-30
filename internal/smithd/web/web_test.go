@@ -29,19 +29,30 @@ func newTestServer(t *testing.T) (*httptest.Server, *service.Service) {
 // authentication
 func newTestServerWithAuth(t *testing.T, database *db.DB, authCfg AuthConfig) (*httptest.Server, *service.Service) {
 	t.Helper()
+	return newTestServerWithDecisions(t, database, authCfg, nil)
+}
+
+// newTestServerWithDecisions is newTestServerWithAuth with the approvals of
+// terraform plans made by decisions instead of the service, if it is not nil
+func newTestServerWithDecisions(t *testing.T, database *db.DB, authCfg AuthConfig, decisions decider) (*httptest.Server, *service.Service) {
+	t.Helper()
 
 	svc := service.New(service.Deps{
-		Apps:         store.NewApplicationStore(database),
-		Versions:     store.NewVersionStore(database),
-		Deployments:  store.NewDeploymentStore(database),
-		Policies:     store.NewPolicyStore(database),
-		Environments: store.NewEnvironmentStore(database),
-		Publisher:    events.NewMemoryPublisher(),
-		Storage:      fakeStorage{},
-		Gitops:       &fakeGitops{},
+		Apps:           store.NewApplicationStore(database),
+		Versions:       store.NewVersionStore(database),
+		Deployments:    store.NewDeploymentStore(database),
+		Policies:       store.NewPolicyStore(database),
+		Environments:   store.NewEnvironmentStore(database),
+		TerraformPlans: store.NewTerraformPlanStore(database),
+		Publisher:      events.NewMemoryPublisher(),
+		Storage:        fakeStorage{},
+		Gitops:         &fakeGitops{},
 	})
+	if decisions == nil {
+		decisions = svc
+	}
 
-	ui, err := New(svc, authCfg)
+	ui, err := newHandler(svc, decisions, authCfg)
 	if err != nil {
 		t.Fatal(err)
 	}

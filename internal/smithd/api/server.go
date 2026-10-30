@@ -199,6 +199,8 @@ func (s *Server) setupAuthenticatedRoutes(r chi.Router) {
 	r.Post("/apps/{appId}/terraform/local-plans", s.handleLocalPlan)
 	r.Get("/deployments", s.handleListDeployments)
 	r.Get("/deployments/{deploymentId}", s.handleGetDeployment)
+	r.Post("/deployments/{deploymentId}/approve", s.handleApproveDeployment)
+	r.Post("/deployments/{deploymentId}/reject", s.handleRejectDeployment)
 	r.Get("/overview", s.handleOverview)
 
 	// Environment routes

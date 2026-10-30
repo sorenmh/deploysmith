@@ -134,7 +134,7 @@ func (n *Notifier) Requested(ctx context.Context, d slack.Deploy) {
 	case d.TriggeredBy != "":
 		by = " (by " + d.TriggeredBy + ")"
 	}
-	n.send(ctx, message{Title: title, Body: target(d) + by, URL: d.URL, Tag: tag(d)})
+	n.send(ctx, message{Title: title, Body: target(d) + by, URL: link(d), Tag: tag(d)})
 }
 
 // Committed reports a deployment whose manifests are pushed to gitops
@@ -150,7 +150,7 @@ func (n *Notifier) Committed(ctx context.Context, d slack.Deploy, waitingForFlux
 	case waitingForFlux:
 		body += ". Waiting for Flux."
 	}
-	n.send(ctx, message{Title: title, Body: body, URL: d.URL, Tag: tag(d)})
+	n.send(ctx, message{Title: title, Body: body, URL: link(d), Tag: tag(d)})
 }
 
 // PlanReady reports a Terraform plan that waits for approval
@@ -166,7 +166,16 @@ func planReadyMessage(d slack.Deploy) message {
 	if d.Plan.Destroys() {
 		title = "Plan ready for approval, destroys resources"
 	}
-	return message{Title: title, Body: fmt.Sprintf("%s: %s", target(d), d.Plan.Counts()), URL: d.URL, Tag: tag(d)}
+	return message{Title: title, Body: fmt.Sprintf("%s: %s", target(d), d.Plan.Counts()), URL: link(d), Tag: tag(d)}
+}
+
+// Rejected reports a Terraform plan that was rejected, who did and why
+func (n *Notifier) Rejected(ctx context.Context, d slack.Deploy, by, reason string) {
+	body := fmt.Sprintf("%s by %s", target(d), by)
+	if reason != "" {
+		body += ": " + reason
+	}
+	n.send(ctx, message{Title: "Plan rejected", Body: body, URL: link(d), Tag: tag(d)})
 }
 
 // Applied reports a deployment Flux has applied to the cluster, or for a
@@ -180,7 +189,7 @@ func (n *Notifier) Applied(ctx context.Context, d slack.Deploy, took time.Durati
 	if d.Rollback {
 		title = "Rollback done"
 	}
-	n.send(ctx, message{Title: title, Body: fmt.Sprintf("%s, applied in %s", target(d), took.Round(time.Second)), URL: d.URL, Tag: tag(d)})
+	n.send(ctx, message{Title: title, Body: fmt.Sprintf("%s, applied in %s", target(d), took.Round(time.Second)), URL: link(d), Tag: tag(d)})
 }
 
 func terraformAppliedMessage(d slack.Deploy) message {
@@ -188,7 +197,7 @@ func terraformAppliedMessage(d slack.Deploy) message {
 	if d.Plan != nil && !d.Plan.NoChanges() {
 		result = d.Plan.Counts()
 	}
-	return message{Title: "Applied", Body: fmt.Sprintf("%s, %s", target(d), result), URL: d.URL, Tag: tag(d)}
+	return message{Title: "Applied", Body: fmt.Sprintf("%s, %s", target(d), result), URL: link(d), Tag: tag(d)}
 }
 
 // Failed reports a deployment that failed at the given stage
@@ -197,7 +206,7 @@ func (n *Notifier) Failed(ctx context.Context, d slack.Deploy, stage, errMsg str
 	if d.Rollback {
 		title = "Rollback failed"
 	}
-	n.send(ctx, message{Title: title, Body: fmt.Sprintf("%s (%s): %s", target(d), stage, errMsg), URL: d.URL, Tag: tag(d)})
+	n.send(ctx, message{Title: title, Body: fmt.Sprintf("%s (%s): %s", target(d), stage, errMsg), URL: link(d), Tag: tag(d)})
 }
 
 // VersionPublished reports a new version that was published
@@ -219,6 +228,16 @@ func (n *Notifier) AppRegistered(ctx context.Context, app string) {
 
 func target(d slack.Deploy) string {
 	return fmt.Sprintf("%s %s → %s", d.App, d.Version, d.Environment)
+}
+
+// link is where a notification opens: the deployment in the web UI. Without
+// a public URL it is a path, which the service worker opens on the UI's own
+// origin, so the plan view is still one tap away.
+func link(d slack.Deploy) string {
+	if d.URL == "" && d.DeploymentID != "" {
+		return "/ui/deployments/" + d.DeploymentID
+	}
+	return d.URL
 }
 
 // tag makes the messages about one deployment replace each other, so the

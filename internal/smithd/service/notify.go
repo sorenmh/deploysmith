@@ -42,6 +42,14 @@ func (s *Service) notifyPlanReady(ctx context.Context, d slack.Deploy) {
 	s.GitHub.PlanReady(ctx, d)
 }
 
+// notifyRejected reports a rejected Terraform plan to everyone, so that the
+// others who were asked to review it know it is settled
+func (s *Service) notifyRejected(ctx context.Context, d slack.Deploy, by, reason string) {
+	s.Slack.Rejected(ctx, d, by, reason)
+	s.Push.Rejected(ctx, d, by, reason)
+	s.GitHub.Rejected(ctx, d, by, reason)
+}
+
 // notifyApplying and notifyStale only update the check runs on GitHub: an
 // approval and a replacement are done by people who see the result, and
 // Slack and Web Push stay with the events that need someone to act.

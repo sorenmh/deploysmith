@@ -1,9 +1,11 @@
 package gitops
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
+	"regexp"
 	"sort"
 	"strings"
 
@@ -240,4 +242,77 @@ func (s *Service) deployRoot(d TerraformDeploy, layout rootLayout) (TerraformCom
 		return TerraformCommits{}, err
 	}
 	return TerraformCommits{Branch: branch, Source: shas[0], Manifest: shas[1]}, nil
+}
+
+// ErrRootNotCurrent is returned by SetTerraformApproval when the root's file
+// in the gitops repo is not the deployment's any more (a newer deploy
+// rewrote it, or it is gone), or holds the approval of another plan
+var ErrRootNotCurrent = errors.New("the terraform root in the gitops repo is not this deployment's")
+
+var approvePlanLine = regexp.MustCompile(`(?m)^([ \t]+approvePlan:)[ \t]*(.*?)[ \t]*$`)
+
+// SetTerraformApproval sets spec.approvePlan of a root's Terraform CR to
+// planID, which is an approval, or to "" to reset it after the apply. It
+// changes that one line in one commit and nothing else: the root's
+// GitRepository is pinned to the source commit, so the revision the
+// controller planned stays the same (see DeployTerraform).
+//
+// It only touches the file of deploymentID (the CR's annotation names it);
+// otherwise, or for an approval when another plan is approved already, it
+// returns ErrRootNotCurrent. If approvePlan already is planID nothing is
+// committed and the current remote SHA is returned, so that the same
+// approval or reset can be repeated, e.g. by another smithd replica.
+func (s *Service) SetTerraformApproval(appName, environment, root, deploymentID, planID, message string) (string, error) {
+	for _, segment := range []string{appName, environment, root} {
+		if !isSafePathSegment(segment) {
+			return "", fmt.Errorf("invalid app, environment or root name %q", segment)
+		}
+	}
+	if planID != "" && !isSafePathSegment(planID) {
+		return "", fmt.Errorf("invalid plan id %q", planID)
+	}
+	rel := filepath.Join(terraformAppPath(environment, appName), root+".yaml")
+
+	return s.change(message, func() error {
+		path := filepath.Join(s.workDir, rel)
+		content, err := os.ReadFile(path)
+		if os.IsNotExist(err) {
+			return fmt.Errorf("%w: %s does not exist", ErrRootNotCurrent, rel)
+		}
+		if err != nil {
+			return fmt.Errorf("failed to read %s: %w", rel, err)
+		}
+		if !strings.Contains(string(content), "deploysmith.io/deployment-id: "+deploymentID+"\n") {
+			return fmt.Errorf("%w: %s belongs to another deployment", ErrRootNotCurrent, rel)
+		}
+
+		match := approvePlanLine.FindSubmatch(content)
+		if match == nil {
+			return fmt.Errorf("%s has no approvePlan", rel)
+		}
+		current := strings.Trim(string(match[2]), `"'`)
+		if planID != "" && current != "" && current != planID {
+			return fmt.Errorf("%w: %s approves plan %s", ErrRootNotCurrent, rel, current)
+		}
+		if current == planID {
+			return nil
+		}
+
+		value := `""`
+		if planID != "" {
+			value = `"` + planID + `"`
+		}
+		updated := approvePlanLine.ReplaceAll(content, []byte("${1} "+value))
+		if err := os.WriteFile(path, updated, 0644); err != nil {
+			return fmt.Errorf("failed to write %s: %w", rel, err)
+		}
+		worktree, err := s.repo.Worktree()
+		if err != nil {
+			return fmt.Errorf("failed to get worktree: %w", err)
+		}
+		if _, err := worktree.Add(rel); err != nil {
+			return fmt.Errorf("failed to add %s to git: %w", rel, err)
+		}
+		return nil
+	})
 }

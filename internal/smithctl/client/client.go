@@ -420,6 +420,16 @@ type TerraformRun struct {
 	Root            string `json:"root"`
 	SourceCommitSHA string `json:"sourceCommitSha,omitempty"`
 	PlanID          string `json:"planId,omitempty"`
+	// Rollback is true if the version is older than the one applied
+	Rollback bool `json:"rollback,omitempty"`
+	// Who approved or rejected the plan, and when
+	ApprovedBy       string     `json:"approvedBy,omitempty"`
+	ApprovedAt       *time.Time `json:"approvedAt,omitempty"`
+	DestroyConfirmed bool       `json:"destroyConfirmed,omitempty"`
+	ApprovalResetAt  *time.Time `json:"approvalResetAt,omitempty"`
+	RejectedBy       string     `json:"rejectedBy,omitempty"`
+	RejectedAt       *time.Time `json:"rejectedAt,omitempty"`
+	RejectReason     string     `json:"rejectReason,omitempty"`
 	// Plan is the readable plan, once the controller has made it
 	Plan *TerraformPlan `json:"plan,omitempty"`
 }

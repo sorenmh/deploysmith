@@ -65,6 +65,7 @@ func (s *Service) pollTerraform(ctx context.Context) {
 	for i := range deployments {
 		s.trackTerraformRun(ctx, &deployments[i])
 	}
+	s.resetApprovals(ctx)
 	s.pollPlanRuns(ctx)
 }
 
@@ -292,9 +293,16 @@ func (r *trackedRun) awaitingApproval(run *terraform.Run) {
 		return
 	}
 	if run.ApprovePlan == planID {
-		// Approved by a commit that did not come from smithd
+		// Approved by a commit that did not come from smithd, or by smithd
+		// before it has recorded that
 		logging.LogInfoCtx(r.ctx, "Terraform plan approved in git", logging.Field("plan_id", planID))
-		if r.move(models.DeploymentApplying, "") {
+		moved, err := r.s.Deployments.Approve(d.ID, "git", false)
+		if err != nil {
+			logging.LogErrorCtx(r.ctx, "Failed to record the deployment state: "+err.Error(), err)
+			return
+		}
+		if moved {
+			d.Status = models.DeploymentApplying
 			r.s.notifyApplying(r.ctx, r.notice())
 		}
 		return
