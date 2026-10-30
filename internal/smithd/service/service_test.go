@@ -14,11 +14,17 @@ import (
 	"github.com/sorenmh/deploysmith/internal/smithd/store"
 )
 
-type fakeStorage struct{ err error }
+type fakeStorage struct {
+	err   error
+	files map[string][]byte // returned instead of a manifest, if set
+}
 
 func (f *fakeStorage) GetAllFiles(appName, versionID string, published bool) (map[string][]byte, error) {
 	if f.err != nil {
 		return nil, f.err
+	}
+	if f.files != nil {
+		return f.files, nil
 	}
 	return map[string][]byte{"deployment.yaml": []byte("name: " + appName)}, nil
 }
@@ -249,7 +255,7 @@ func TestTriggerAutoDeploys(t *testing.T) {
 	}
 }
 
-func TestTerraformVersionsAreNotDeployed(t *testing.T) {
+func TestTerraformVersionsAreNeverAutoDeployed(t *testing.T) {
 	f := newFixture(t)
 	version := f.createTerraformVersion(t, "tf1", "main")
 
@@ -258,8 +264,8 @@ func TestTerraformVersionsAreNotDeployed(t *testing.T) {
 	}
 	f.svc.TriggerAutoDeploys(context.Background(), f.app, version)
 
-	// A deployment that reaches execute anyway, e.g. resumed after a restart,
-	// fails before touching the gitops repo
+	// A deployment that reaches the manifest flow anyway, e.g. resumed
+	// after a restart, fails before touching the gitops repo
 	deployment, err := f.svc.Deployments.Create(f.app.ID, version.ID, "production", "auto-deploy", nil)
 	if err != nil {
 		t.Fatal(err)

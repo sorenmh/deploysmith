@@ -4,9 +4,14 @@
 //
 // A bundle is one OpenTofu root module:
 //
-//	*.tf                  the configuration, local modules in subdirectories
+//	*.tf, *.tofu          the configuration, local modules in subdirectories
+//	*.tftpl               templates for templatefile(), anywhere
 //	.terraform.lock.hcl   the provider lock file (required)
 //	env/<env>.tfvars      non-secret variables per environment (optional)
+//
+// JSON configuration (*.tf.json, *.tofu.json) is refused rather than left
+// out, since a plan without part of the configuration would destroy what it
+// declares.
 //
 // The OpenTofu version is pinned with an exact required_version in the
 // root module's terraform block, which OpenTofu itself enforces. smithd sets
@@ -96,6 +101,11 @@ func Collect(dir string) (map[string][]byte, error) {
 			return nil
 		}
 
+		if d.Type()&fs.ModeSymlink != 0 {
+			// Reading it would follow it out of the bundle
+			problems = append(problems, fmt.Sprintf("%s: symbolic links must not be in the bundle", rel))
+			return nil
+		}
 		if d.IsDir() {
 			if strings.HasPrefix(d.Name(), ".") {
 				return filepath.SkipDir
@@ -153,7 +163,12 @@ func Validate(files map[string][]byte) (*Bundle, error) {
 			continue
 		}
 		if !included(name) {
-			problems = append(problems, fmt.Sprintf("%s: unexpected file; a bundle holds only *.tf files, %s and %s/<env>.tfvars", name, LockFile, EnvDir))
+			problems = append(problems, fmt.Sprintf("%s: unexpected file; a bundle holds only *.tf, *.tofu and *.tftpl files, %s and %s/<env>.tfvars", name, LockFile, EnvDir))
+			continue
+		}
+		if strings.HasSuffix(name, templateExt) {
+			// Templates are read by templatefile(), not parsed as configuration
+			bundle.Files[name] = content
 			continue
 		}
 
@@ -167,7 +182,7 @@ func Validate(files map[string][]byte) (*Bundle, error) {
 		switch {
 		case strings.HasSuffix(name, ".tfvars"):
 			bundle.Environments = append(bundle.Environments, strings.TrimSuffix(path.Base(name), ".tfvars"))
-		case strings.HasSuffix(name, ".tf") && !strings.Contains(name, "/"):
+		case isConfig(name) && !strings.Contains(name, "/"):
 			// Only the root module's settings apply
 			rootConfigs++
 			filePins, fileProblems := checkTerraformBlocks(file.Body.(*hclsyntax.Body))
@@ -180,7 +195,7 @@ func Validate(files map[string][]byte) (*Bundle, error) {
 		problems = append(problems, fmt.Sprintf("%s is missing: run tofu init and commit the lock file", LockFile))
 	}
 	if rootConfigs == 0 {
-		problems = append(problems, "no *.tf files in the root directory")
+		problems = append(problems, "no *.tf or *.tofu files in the root directory")
 	}
 
 	switch {
@@ -271,15 +286,25 @@ func forbidden(name string) string {
 		return fmt.Sprintf("%s: %s is loaded automatically and must not be in the bundle; use %s/<env>.tfvars for non-secret variables", name, base, EnvDir)
 	case isOverride(base):
 		return fmt.Sprintf("%s: override files must not be in the bundle; the controller writes backend_override.tf with smithd's backend configuration", name)
+	case strings.HasSuffix(base, ".tf.json") || strings.HasSuffix(base, ".tofu.json"):
+		return fmt.Sprintf("%s: JSON configuration is not supported; write it in HCL (*.tf or *.tofu)", name)
 	}
 	return ""
 }
 
+// templateExt is the extension of templatefile() templates
+const templateExt = ".tftpl"
+
+// isConfig reports whether a file is OpenTofu configuration in HCL
+func isConfig(name string) bool {
+	return strings.HasSuffix(name, ".tf") || strings.HasSuffix(name, ".tofu")
+}
+
 // isOverride reports whether a file name is an OpenTofu override file
-// (override.tf, *_override.tf and their .tf.json variants), which could
-// replace the backend configuration smithd sets
+// (override.tf, *_override.tf and their .tofu and JSON variants), which
+// could replace the backend configuration smithd sets
 func isOverride(base string) bool {
-	for _, ext := range []string{".tf", ".tf.json"} {
+	for _, ext := range []string{".tf", ".tf.json", ".tofu", ".tofu.json"} {
 		if stem, ok := strings.CutSuffix(base, ext); ok && (stem == "override" || strings.HasSuffix(stem, "_override")) {
 			return true
 		}
@@ -292,7 +317,7 @@ func included(name string) bool {
 	switch {
 	case name == LockFile:
 		return true
-	case strings.HasSuffix(name, ".tf"):
+	case isConfig(name) || strings.HasSuffix(name, templateExt):
 		return true
 	case path.Dir(name) == EnvDir && strings.HasSuffix(name, ".tfvars") && path.Base(name) != ".tfvars":
 		return true

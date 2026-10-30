@@ -146,9 +146,11 @@ func (s *Service) GetDeployment(deploymentID string) (*models.DeploymentDetail, 
 // ListDeployments lists deployments, newest first
 func (s *Service) ListDeployments(filter store.DeploymentFilter, limit, offset int) ([]models.DeploymentDetail, int, error) {
 	switch filter.Status {
-	case "", "pending", "success", "failed":
+	case "", models.DeploymentPending, models.DeploymentSuccess, models.DeploymentFailed,
+		models.DeploymentPlanning, models.DeploymentAwaitingApproval, models.DeploymentApplying,
+		models.DeploymentApplied, models.DeploymentStale, models.DeploymentRejected:
 	default:
-		return nil, 0, invalid("invalid_request", "status must be one of: pending, success, failed")
+		return nil, 0, invalid("invalid_request", "status must be one of: pending, success, failed, planning, awaiting_approval, applying, applied, stale, rejected")
 	}
 	return s.Deployments.ListDetailed(filter, limit, offset)
 }

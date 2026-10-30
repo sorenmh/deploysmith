@@ -5,6 +5,9 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strings"
+
+	"github.com/go-git/go-git/v5"
 )
 
 // terraformPath returns the repo-relative directory holding an
@@ -19,6 +22,13 @@ func terraformPath(environment string) string {
 // environments/{environment}/terraform/{app_name}
 func terraformAppPath(environment, appName string) string {
 	return filepath.Join(terraformPath(environment), appName)
+}
+
+// TerraformSourcePath returns the repo-relative directory holding the
+// bundle source of a Terraform app's root:
+// environments/{environment}/terraform/{app_name}/src/{root}
+func TerraformSourcePath(environment, appName, root string) string {
+	return filepath.Join(terraformAppPath(environment, appName), "src", root)
 }
 
 // WriteTerraformFiles writes files (name to content) into a Terraform app's
@@ -61,25 +71,152 @@ func (s *Service) WriteTerraformFiles(appName, environment, message string, file
 			}
 		}
 
-		// The app's kustomization lists its files, the environment's lists
-		// its apps
-		addResource := func(dir, resource string) error {
-			filename, changed, err := ensureKustomizationResource(filepath.Join(s.workDir, dir), resource)
-			if err != nil {
-				return fmt.Errorf("failed to update %s kustomization: %w", dir, err)
+		return s.addTerraformResources(worktree, appName, environment, names)
+	})
+}
+
+// addTerraformResources lists files in a Terraform app's kustomization and
+// the app in the environment's terraform kustomization
+func (s *Service) addTerraformResources(worktree *git.Worktree, appName, environment string, files []string) error {
+	addResource := func(dir, resource string) error {
+		filename, changed, err := ensureKustomizationResource(filepath.Join(s.workDir, dir), resource)
+		if err != nil {
+			return fmt.Errorf("failed to update %s kustomization: %w", dir, err)
+		}
+		if changed {
+			if _, err := worktree.Add(filepath.Join(dir, filename)); err != nil {
+				return fmt.Errorf("failed to add %s to git: %w", filepath.Join(dir, filename), err)
 			}
-			if changed {
-				if _, err := worktree.Add(filepath.Join(dir, filename)); err != nil {
-					return fmt.Errorf("failed to add %s to git: %w", filepath.Join(dir, filename), err)
-				}
+		}
+		return nil
+	}
+	for _, name := range files {
+		if err := addResource(terraformAppPath(environment, appName), name); err != nil {
+			return err
+		}
+	}
+	return addResource(terraformPath(environment), appName)
+}
+
+// TerraformDeploy is a deploy of one root of a Terraform app
+type TerraformDeploy struct {
+	App         string
+	Environment string
+	Root        string
+	// Source is the bundle: slash-separated paths relative to the root
+	Source map[string][]byte
+	// Manifest returns the root's file (GitRepository and Terraform CR)
+	// for the gitops branch and the commit holding the source
+	Manifest func(branch, sourceCommit string) ([]byte, error)
+	// Commit messages of the source and the manifest commit
+	SourceMessage   string
+	ManifestMessage string
+}
+
+// TerraformCommits are the commits of a Terraform deploy
+type TerraformCommits struct {
+	// Branch is the gitops branch
+	Branch string
+	// Source holds the bundle source; Manifest, its child, the root's file
+	// pinned to Source
+	Source   string
+	Manifest string
+}
+
+// DeployTerraform writes a root of a Terraform app in two commits, pushed
+// together: first the bundle source in src/<root>/, replacing what was
+// there, then the root's file <root>.yaml from d.Manifest, listed in the
+// app's kustomization. The root's GitRepository must be pinned to the
+// source commit, so that the second commit, and any later commit to the
+// repository such as an approval, leaves the revision the controller plans
+// unchanged (tofu-controller #1878).
+//
+// If the source is unchanged, the source commit is the current remote
+// commit, which holds the same source.
+func (s *Service) DeployTerraform(d TerraformDeploy) (TerraformCommits, error) {
+	for _, segment := range []string{d.App, d.Environment, d.Root} {
+		if !isSafePathSegment(segment) {
+			return TerraformCommits{}, fmt.Errorf("invalid app, environment or root name %q", segment)
+		}
+	}
+	if len(d.Source) == 0 {
+		return TerraformCommits{}, fmt.Errorf("the bundle of %s has no files", d.App)
+	}
+	sourcePath := TerraformSourcePath(d.Environment, d.App, d.Root)
+	names := make([]string, 0, len(d.Source))
+	for name := range d.Source {
+		// Reject entries such as "../x.tf" or "/x.tf" that would escape the
+		// source directory
+		for _, segment := range strings.Split(name, "/") {
+			if !isSafePathSegment(segment) {
+				return TerraformCommits{}, fmt.Errorf("invalid bundle path %q", name)
 			}
-			return nil
+		}
+		names = append(names, name)
+	}
+	sort.Strings(names)
+
+	var branch string
+	writeSource := func([]string) error {
+		var err error
+		if branch, err = s.branch(); err != nil {
+			return err
+		}
+		worktree, err := s.repo.Worktree()
+		if err != nil {
+			return fmt.Errorf("failed to get worktree: %w", err)
+		}
+
+		// Remove the previous source, so files left out of the bundle go
+		if _, err := os.Stat(filepath.Join(s.workDir, sourcePath)); err == nil {
+			if _, err := worktree.Remove(sourcePath); err != nil {
+				return fmt.Errorf("failed to remove the previous source: %w", err)
+			}
 		}
 		for _, name := range names {
-			if err := addResource(terraformAppPath(environment, appName), name); err != nil {
-				return err
+			rel := filepath.Join(sourcePath, filepath.FromSlash(name))
+			full := filepath.Join(s.workDir, rel)
+			if err := os.MkdirAll(filepath.Dir(full), 0755); err != nil {
+				return fmt.Errorf("failed to create directory for %s: %w", name, err)
+			}
+			if err := os.WriteFile(full, d.Source[name], 0644); err != nil {
+				return fmt.Errorf("failed to write %s: %w", name, err)
+			}
+			// One by one, so a .gitignore in the gitops repo (e.g. of
+			// *.tfvars) can't leave files out
+			if _, err := worktree.Add(rel); err != nil {
+				return fmt.Errorf("failed to add %s to git: %w", name, err)
 			}
 		}
-		return addResource(terraformPath(environment), appName)
+		return nil
+	}
+
+	writeManifest := func(previous []string) error {
+		content, err := d.Manifest(branch, previous[0])
+		if err != nil {
+			return fmt.Errorf("failed to render the %s manifest: %w", d.Root, err)
+		}
+		worktree, err := s.repo.Worktree()
+		if err != nil {
+			return fmt.Errorf("failed to get worktree: %w", err)
+		}
+		file := d.Root + ".yaml"
+		rel := filepath.Join(terraformAppPath(d.Environment, d.App), file)
+		if err := os.WriteFile(filepath.Join(s.workDir, rel), content, 0644); err != nil {
+			return fmt.Errorf("failed to write %s: %w", file, err)
+		}
+		if _, err := worktree.Add(rel); err != nil {
+			return fmt.Errorf("failed to add %s to git: %w", file, err)
+		}
+		return s.addTerraformResources(worktree, d.App, d.Environment, []string{file})
+	}
+
+	shas, err := s.changeSteps([]step{
+		{message: d.SourceMessage, write: writeSource},
+		{message: d.ManifestMessage, write: writeManifest},
 	})
+	if err != nil {
+		return TerraformCommits{}, err
+	}
+	return TerraformCommits{Branch: branch, Source: shas[0], Manifest: shas[1]}, nil
 }

@@ -269,17 +269,29 @@ a {
   background: currentColor;
 }
 
-.status--pending {
+.status--pending,
+.status--planning,
+.status--awaiting_approval,
+.status--applying {
   color: var(--ember);
 }
 
-.status--pending::before {
+.status--pending::before,
+.status--planning::before,
+.status--applying::before {
   box-shadow: 0 0 0 0 var(--ember-glow);
   animation: ember 1.6s ease-in-out infinite;
 }
 
-.status--success {
+.status--success,
+.status--applied {
   color: var(--verdigris);
+}
+
+/* Terraform plans that were replaced or rejected: nothing was applied */
+.status--stale,
+.status--rejected {
+  color: var(--muted);
 }
 
 .status--failed {
@@ -298,7 +310,9 @@ a {
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .status--pending::before {
+  .status--pending::before,
+  .status--planning::before,
+  .status--applying::before {
     animation: none;
     box-shadow: 0 0 0 0.25rem var(--ember-glow);
   }

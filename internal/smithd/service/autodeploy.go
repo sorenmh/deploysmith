@@ -17,8 +17,10 @@ func (s *Service) VersionPublished(ctx context.Context, app *models.Application,
 // TriggerAutoDeploys starts an auto-deploy, in the background, for every
 // enabled policy of the app that matches the version's branch
 func (s *Service) TriggerAutoDeploys(ctx context.Context, app *models.Application, version *models.Version) {
-	if requireDeployable(version) != nil {
-		logging.LogInfoCtx(ctx, "Skipping auto-deploy: "+version.ArtifactType+" versions cannot be deployed yet")
+	// A terraform deploy plans changes to infrastructure that someone must
+	// review; policies never start one
+	if version.ArtifactType != models.ArtifactManifests {
+		logging.LogInfoCtx(ctx, "Skipping auto-deploy: "+version.ArtifactType+" versions are never auto-deployed")
 		return
 	}
 

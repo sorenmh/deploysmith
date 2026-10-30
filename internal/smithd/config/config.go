@@ -99,6 +99,15 @@ type Config struct {
 	// TerraformKubeAPICIDRs are the Kubernetes API server addresses runners
 	// may reach; empty allows the private ranges on ports 443 and 6443
 	TerraformKubeAPICIDRs []string
+	// TerraformRunnerImages maps the supported OpenTofu versions to their
+	// runner images; bundles pinning another version are not deployed
+	TerraformRunnerImages map[string]string
+	// TerraformSourceURL is the gitops repository as Flux source-controller
+	// fetches the bundle sources from it, by default GitopsRepo as an
+	// ssh:// URL, and TerraformSourceSecret the Secret in FluxNamespace with
+	// its read-only deploy key ("none" for no Secret)
+	TerraformSourceURL    string
+	TerraformSourceSecret string
 
 	// smithd's own namespace and ServiceAccount, which may read the plans
 	// in the runner namespaces
@@ -176,6 +185,7 @@ func Load() (*Config, error) {
 		TerraformStateRegion:  getEnv("TERRAFORM_STATE_REGION", ""),
 		TerraformLockTable:    getEnv("TERRAFORM_LOCK_TABLE", ""),
 		TerraformKubeAPICIDRs: splitList(getEnv("TERRAFORM_KUBE_API_CIDRS", "")),
+		TerraformSourceSecret: getEnv("TERRAFORM_SOURCE_SECRET", "gitops-readonly"),
 		SmithdServiceAccount:  getEnv("SMITHD_SERVICE_ACCOUNT", "smithd"),
 
 		TerraformControllerNamespace: getEnv("TERRAFORM_CONTROLLER_NAMESPACE", "flux-system"),
@@ -189,8 +199,15 @@ func Load() (*Config, error) {
 	}
 	cfg.OpenBaoRunnerAuthMount = getEnv("OPENBAO_RUNNER_AUTH_MOUNT", cfg.OpenBaoAuthMount)
 	cfg.SmithdNamespace = getEnv("SMITHD_NAMESPACE", podNamespace())
+	cfg.TerraformSourceURL = getEnv("TERRAFORM_SOURCE_URL", sshURL(cfg.GitopsRepo))
+	if cfg.TerraformSourceSecret == "none" {
+		cfg.TerraformSourceSecret = ""
+	}
 
 	var err error
+	if cfg.TerraformRunnerImages, err = parseRunnerImages(getEnv("TERRAFORM_RUNNER_IMAGES", "")); err != nil {
+		return nil, err
+	}
 	if cfg.TerraformRunnerTokenTTL, err = getDuration("TERRAFORM_RUNNER_TOKEN_TTL", 2*time.Hour); err != nil {
 		return nil, err
 	}
@@ -268,6 +285,35 @@ func splitList(value string) []string {
 		}
 	}
 	return items
+}
+
+// parseRunnerImages parses TERRAFORM_RUNNER_IMAGES: comma-separated
+// <OpenTofu version>=<image> pairs
+func parseRunnerImages(value string) (map[string]string, error) {
+	images := map[string]string{}
+	for _, item := range splitList(value) {
+		version, image, ok := strings.Cut(item, "=")
+		version, image = strings.TrimSpace(version), strings.TrimSpace(image)
+		if !ok || version == "" || image == "" {
+			return nil, fmt.Errorf("TERRAFORM_RUNNER_IMAGES must be a list of <OpenTofu version>=<image>, got %q", item)
+		}
+		images[version] = image
+	}
+	return images, nil
+}
+
+// sshURL turns an scp-like git address (git@github.com:org/repo.git), which
+// Flux does not accept, into an ssh:// URL; other URLs are returned as they
+// are
+func sshURL(repo string) string {
+	if strings.Contains(repo, "://") {
+		return repo
+	}
+	userHost, path, ok := strings.Cut(repo, ":")
+	if !ok || !strings.Contains(userHost, "@") || strings.Contains(userHost, "/") {
+		return repo
+	}
+	return "ssh://" + userHost + "/" + strings.TrimPrefix(path, "/")
 }
 
 // serviceAccountDir holds the pod's ServiceAccount token and namespace

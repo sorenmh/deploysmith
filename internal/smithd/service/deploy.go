@@ -38,8 +38,8 @@ func (s *Service) DeployVersion(ctx context.Context, appID, versionID, environme
 	if version.Status != "published" {
 		return nil, invalid("invalid_status", "Version must be published before deployment")
 	}
-	if err := requireDeployable(version); err != nil {
-		return nil, err
+	if version.ArtifactType == models.ArtifactTerraform {
+		return s.deployTerraform(ctx, app, version, environment, triggeredBy)
 	}
 
 	deployment, err := s.Deployments.Create(appID, version.ID, environment, triggeredBy, nil)
@@ -102,9 +102,10 @@ func (s *Service) execute(ctx context.Context, deployment *models.Deployment, ap
 	logging.LogInfoCtx(ctx, "Deployment started", logging.Field("deployment_id", deployment.ID))
 	publish(events.EventDeploymentStarted, nil)
 
-	// Never commit anything but manifests to the gitops repo
-	if err := requireDeployable(version); err != nil {
-		return fail("artifact type", err)
+	// Never commit a bundle as manifests; terraform versions go through
+	// deployTerraform and are never auto-deployed or resumed
+	if version.ArtifactType != models.ArtifactManifests {
+		return fail("artifact type", invalid("unsupported_artifact_type", fmt.Sprintf("Version %s is a %s version, not manifests", version.VersionID, version.ArtifactType)))
 	}
 
 	logging.LogDebugCtx(ctx, "Fetching manifests from storage")

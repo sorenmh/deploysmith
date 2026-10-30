@@ -394,6 +394,15 @@ type DeployVersionResponse struct {
 	Status          string    `json:"status"`
 	GitopsCommitSHA string    `json:"gitopsCommitSha,omitempty"`
 	StartedAt       time.Time `json:"startedAt"`
+	// Terraform is set for terraform versions
+	Terraform *TerraformRun `json:"terraform,omitempty"`
+}
+
+// TerraformRun is what a terraform deployment committed for the controller
+type TerraformRun struct {
+	Root            string `json:"root"`
+	SourceCommitSHA string `json:"sourceCommitSha,omitempty"`
+	PlanID          string `json:"planId,omitempty"`
 }
 
 // DeployVersion deploys a version to an environment

@@ -286,6 +286,20 @@ config:
     # and of its AWS credentials
     runnerTokenTtl: 2h
     stsTtl: 1h
+    # Runner image per supported OpenTofu version, built by CI
+    # (Dockerfile.tf-runner) for the tofu-controller version in use. Bundles
+    # pinning another version are refused. Pin the images by digest
+    # (...:v0.16.6-tofu1.13.2@sha256:...) in production.
+    runnerImages:
+      "1.12.9": ghcr.io/sorenmh/deploysmith-tf-runner:v0.16.6-tofu1.12.9
+      "1.13.2": ghcr.io/sorenmh/deploysmith-tf-runner:v0.16.6-tofu1.13.2
+    # The gitops repository as Flux fetches the bundle sources, e.g.
+    # ssh://git@github.com/sorenmh/gitops.git; defaults to gitops.repo as an
+    # ssh:// URL
+    sourceUrl: ""
+    # Secret in the Flux namespace with a read-only deploy key for sourceUrl
+    # ("" for none, e.g. a public repository)
+    sourceSecret: gitops-readonly
   # Login with GitHub (optional, see docs/login-with-github.md). People log in
   # to smithctl (device flow) and the web UI with a GitHub App or OAuth App;
   # the UI is then served on the main ingress and requires signing in, so

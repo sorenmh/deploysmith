@@ -23,6 +23,10 @@ type TerraformEnvironment struct {
 	// runs use the same ARN with a "-readonly" suffix. Empty means the
 	// convention arn:aws:iam::<account>:role/tf-<app>-<env>.
 	AWSRoleARN string `json:"awsRoleArn,omitempty"`
+	// EncryptionFallback lets runs read plaintext state, for the first
+	// apply of an app whose existing state is not encrypted yet; that
+	// apply writes it back encrypted (docs/terraform-migration.md)
+	EncryptionFallback bool `json:"encryptionFallback"`
 	// ProvisionedAt is when the namespace and OpenBao roles were last set
 	// up without errors; ProvisionError is the error of the last attempt
 	ProvisionedAt  *time.Time `json:"provisionedAt,omitempty"`
@@ -37,6 +41,14 @@ type EnableTerraformRequest struct {
 	Environment string           `json:"environment"`
 	Backend     TerraformBackend `json:"backend"`
 	AWSRoleARN  string           `json:"awsRoleArn,omitempty"`
+	// EncryptionFallback is for existing apps with plaintext state
+	EncryptionFallback bool `json:"encryptionFallback,omitempty"`
+}
+
+// UpdateTerraformRequest changes the settings of a Terraform environment;
+// fields left out are kept
+type UpdateTerraformRequest struct {
+	EncryptionFallback *bool `json:"encryptionFallback,omitempty"`
 }
 
 // SyncTerraformRequest is the request to provision an app's Terraform

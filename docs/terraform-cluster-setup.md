@@ -31,7 +31,7 @@ Then check the setup with the hand-written CR in [examples/terraform/terraform-c
 make docker-build-tf-runner TOFU_VERSION=1.12.9   # → ghcr.io/sorenmh/deploysmith-tf-runner:v0.16.6-tofu1.12.9
 ```
 
-CI builds the supported versions (`tofu` matrix of the `tf-runner` job in `.github/workflows/ci.yml`, now 1.12.9 and 1.13.2) and pushes from master. Add a version there to support it. smithd maps a bundle's pinned OpenTofu version to the tag and pins the image by digest in the CR.
+CI builds the supported versions (`tofu` matrix of the `tf-runner` job in `.github/workflows/ci.yml`, now 1.12.9 and 1.13.2) and pushes from master. Add a version there and to the chart's `config.terraform.runnerImages` (`TERRAFORM_RUNNER_IMAGES`, `<version>=<image>,...`) to support it; pin the images there by digest. smithd puts the image for a bundle's pinned OpenTofu version into the CR and refuses to deploy bundles pinning a version it has no image for.
 
 The entrypoint is `tini -- tf-runner-auth exec tf-runner`; the controller only sets args, which are appended. Before it execs `tf-runner` unchanged, `tf-runner-auth`:
 
@@ -50,12 +50,12 @@ What smithd puts in `runnerPodTemplate.spec.env` (DEP-18):
 | Variable | Value | Notes |
 |---|---|---|
 | `BAO_ADDR` | e.g. `https://openbao.openbao.svc:8200` (`config.openbao.addr`) | `VAULT_ADDR` is set from it unless given |
-| `BAO_CACERT` | path to OpenBao's CA certificate, if not publicly trusted | optional; mounted through `runnerPodTemplate.spec.volumes`; `VAULT_CACERT` is set from it |
+| `BAO_CACERT` | path to OpenBao's CA certificate, if not publicly trusted | optional; mounted through `runnerPodTemplate.spec.volumes`; `VAULT_CACERT` is set from it. smithd does not set it yet |
 | `SMITH_BAO_AUTH_ROLE` | `tf-<app>-<env>`, `tf-<app>-<env>-readonly` for plan-only runs | no login if empty |
 | `SMITH_BAO_AUTH_MOUNT` | `config.openbao.runnerAuthMount` | optional, default `kubernetes` |
 | `SMITH_BAO_AWS_ROLE` | `<app>-<env>`, `<app>-<env>-readonly` for plan-only runs | no AWS credentials if empty |
 | `SMITH_BAO_AWS_MOUNT` | `config.openbao.awsMount` | optional, default `aws` |
-| `SMITH_BAO_JWT_PATH` | path of a projected ServiceAccount token | optional, default `/var/run/secrets/kubernetes.io/serviceaccount/token`; use a projected token with audience `config.openbao.runnerAudience` if that is set |
+| `SMITH_BAO_JWT_PATH` | path of a projected ServiceAccount token | optional, default `/var/run/secrets/kubernetes.io/serviceaccount/token`; with `config.openbao.runnerAudience` smithd mounts a projected token with that audience at `/var/run/secrets/deploysmith/openbao/token` and sets this |
 | `TF_ENCRYPTION` | see [State Encryption](#state-encryption) | |
 
 The runner pod's ServiceAccount is `tf-runner-<env>` (or `tf-runner-<env>-readonly`) in `tf-<app>`, so the OpenBao role only accepts that pod. The token lives as long as the role's `token_ttl` (`config.terraform.runnerTokenTtl`, 2h). It is not renewed, and AWS credentials can only be refreshed while it is valid, so it must cover the longest plan or apply. A runner pod serves one reconcile and logs in again on the next one.
@@ -149,7 +149,7 @@ Remote state of other apps (`terraform_remote_state`) is encrypted with their ke
 
 smithd reads, and never writes, the cluster ([spec, RBAC](specs/terraform-controller.md#rbac)):
 
-- cluster-wide `get`/`list`/`watch` on `terraforms.infra.contrib.fluxcd.io` and `get`/`list` on `gitrepositories.source.toolkit.fluxcd.io`, to poll CR status (DEP-18);
+- cluster-wide `get`/`list`/`watch` on `terraforms.infra.contrib.fluxcd.io` and `get`/`list` on `gitrepositories.source.toolkit.fluxcd.io`, to poll CR status (DEP-19), in the chart's `<release>-flux-reader` ClusterRole;
 - `get`/`list` on ConfigMaps and Events only in `tf-*` namespaces, through the ClusterRole `smithd-terraform-reader` that the chart creates with `rbac.create: true` (DEP-17) and the RoleBinding smithd commits into each runner namespace;
 - no Secrets, Pods or logs. The binary plan Secret never leaves the cluster.
 

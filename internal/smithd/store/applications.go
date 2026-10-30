@@ -130,13 +130,13 @@ func (s *ApplicationStore) GetCurrentVersions(appID string) (map[string]string, 
 		FROM deployments d
 		JOIN versions v ON d.version_id = v.id
 		WHERE d.app_id = ?
-		  AND d.status = 'success'
+		  AND d.status IN `+deployedStatuses+`
 		  AND d.completed_at = (
 			SELECT MAX(d2.completed_at)
 			FROM deployments d2
 			WHERE d2.app_id = d.app_id
 			  AND d2.environment = d.environment
-			  AND d2.status = 'success'
+			  AND d2.status IN `+deployedStatuses+`
 		  )
 		ORDER BY d.environment
 	`, appID)

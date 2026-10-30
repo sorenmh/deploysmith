@@ -39,6 +39,8 @@ func validFiles() map[string][]byte {
 		"env/production.tfvars":  []byte("bucket = \"prod\"\n"),
 		"env/staging.tfvars":     []byte("bucket = \"staging\"\n"),
 		"modules/bucket/main.tf": []byte("variable \"name\" {}\n"),
+		"outputs.tofu":           []byte("output \"bucket\" {\n  value = aws_s3_bucket.this.bucket\n}\n"),
+		"templates/policy.tftpl": []byte("{\"Resource\": \"${arn}\"}\n"),
 	}
 }
 
@@ -207,6 +209,28 @@ func TestValidateRejects(t *testing.T) {
 			problem: "override files must not be in the bundle",
 		},
 		{
+			name:    "override.tofu",
+			mutate:  func(files map[string][]byte) { files["backend_override.tofu"] = []byte("") },
+			problem: "override files must not be in the bundle",
+		},
+		{
+			name:    "JSON configuration",
+			mutate:  func(files map[string][]byte) { files["main.tf.json"] = []byte("{}") },
+			problem: "main.tf.json: JSON configuration is not supported",
+		},
+		{
+			name:    "JSON configuration in a module",
+			mutate:  func(files map[string][]byte) { files["modules/bucket/main.tofu.json"] = []byte("{}") },
+			problem: "JSON configuration is not supported",
+		},
+		{
+			name: "backend with settings in a .tofu file",
+			mutate: func(files map[string][]byte) {
+				files["backend.tofu"] = []byte("terraform {\n  backend \"s3\" {\n    bucket = \"mine\"\n  }\n}\n")
+			},
+			problem: `backend "s3" has settings`,
+		},
+		{
 			name:    "unexpected file",
 			mutate:  func(files map[string][]byte) { files["README.md"] = []byte("# hi") },
 			problem: "README.md: unexpected file",
@@ -236,8 +260,9 @@ func TestValidateRejects(t *testing.T) {
 			mutate: func(files map[string][]byte) {
 				delete(files, "main.tf")
 				delete(files, "versions.tf")
+				delete(files, "outputs.tofu")
 			},
-			problem: "no *.tf files in the root directory",
+			problem: "no *.tf or *.tofu files in the root directory",
 		},
 	}
 
@@ -299,14 +324,19 @@ func TestCollect(t *testing.T) {
 	t.Run("forbidden files", func(t *testing.T) {
 		write("terraform.tfstate", "{}")
 		write("prod.auto.tfvars", "x = 1\n")
+		write("main.tf.json", "{}")
+		if err := os.Symlink("/etc/hostname", filepath.Join(dir, "link.tf")); err != nil {
+			t.Fatal(err)
+		}
 		_, err := Collect(dir)
 		validationErr, ok := AsValidationError(err)
 		if !ok {
 			t.Fatalf("error = %v, want a validation error", err)
 		}
-		if len(validationErr.Problems) != 2 {
-			t.Errorf("problems = %q, want 2", validationErr.Problems)
+		if len(validationErr.Problems) != 4 {
+			t.Errorf("problems = %q, want 4", validationErr.Problems)
 		}
+		requireProblem(t, err, "link.tf: symbolic links must not be in the bundle")
 	})
 }
 

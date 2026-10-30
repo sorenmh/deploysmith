@@ -69,6 +69,13 @@ data:
   {{- end }}
   TERRAFORM_RUNNER_TOKEN_TTL: {{ .runnerTokenTtl | quote }}
   TERRAFORM_STS_TTL: {{ .stsTtl | quote }}
+  {{- with .runnerImages }}
+  TERRAFORM_RUNNER_IMAGES: {{ include "smithd.runnerImages" . | quote }}
+  {{- end }}
+  {{- if .sourceUrl }}
+  TERRAFORM_SOURCE_URL: {{ .sourceUrl | quote }}
+  {{- end }}
+  TERRAFORM_SOURCE_SECRET: {{ default "none" .sourceSecret | quote }}
   {{- end }}
   {{- with .Values.config.ui }}
   {{- if .allowedUsers }}

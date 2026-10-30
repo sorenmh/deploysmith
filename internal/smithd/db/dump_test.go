@@ -23,6 +23,8 @@ func seed(t *testing.T, d *DB) {
 			VALUES ('pol-2', 'app-1', 'off', 'dev', 'production', FALSE)`,
 		`INSERT INTO deployments (id, app_id, version_id, environment, status, triggered_by, policy_id, gitops_commit_sha, completed_at)
 			VALUES ('dep-1', 'app-1', 'ver-1', 'production', 'success', 'auto-deploy', 'pol-1', 'sha-1', '2026-10-19 10:06:00')`,
+		`INSERT INTO deployments (id, app_id, version_id, environment, status, triggered_by, gitops_commit_sha, terraform_root, terraform_source_sha, terraform_plan_id)
+			VALUES ('dep-2', 'app-1', 'ver-2', 'production', 'awaiting_approval', 'alice', 'sha-3', 'main', 'sha-2', 'plan-main-sha-2')`,
 		`INSERT INTO terraform_environments (id, app_id, environment, backend_bucket, backend_key, backend_region, provisioned_at)
 			VALUES ('tf-1', 'app-1', 'production', 'tfstate', 'hello/production/main/terraform.tfstate', 'eu-north-1', '2026-10-19 10:07:00')`,
 	}
@@ -94,6 +96,9 @@ func TestDumpLoadSQLiteToPostgres(t *testing.T) {
 	}
 	if n := count(t, target, `SELECT COUNT(*) FROM deployments WHERE completed_at IS NOT NULL AND policy_id = 'pol-1'`); n != 1 {
 		t.Errorf("%d completed deployments, want 1", n)
+	}
+	if n := count(t, target, `SELECT COUNT(*) FROM deployments WHERE terraform_root = 'main' AND terraform_plan_id = 'plan-main-sha-2'`); n != 1 {
+		t.Errorf("%d terraform deployments, want 1", n)
 	}
 	if n := count(t, target, `SELECT COUNT(*) FROM versions WHERE published_at > metadata_timestamp`); n != 1 {
 		t.Errorf("%d versions with intact timestamps, want 1", n)

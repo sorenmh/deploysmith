@@ -66,6 +66,7 @@ type Deps struct {
 	Terraform              *terraform.Provisioner
 	TerraformGitops        TerraformGitops
 	TerraformManifests     terraform.ManifestOptions
+	TerraformRoots         terraform.RootOptions
 	TerraformSharedBackend models.TerraformBackend // default backend of new apps; Key is unused
 }
 
