@@ -213,6 +213,10 @@ forge help init
 
 ---
 
+## Terraform
+
+`forge init --artifact-type terraform`, `forge upload --terraform <dir>` and `forge plan` (including `forge plan --terraform` for local files) work with OpenTofu bundles instead of manifests. They are specified in [forge.md](../forge.md) and [terraform.md](../terraform.md).
+
 ## Complete Workflow Example
 
 Typical usage in a CI pipeline:

@@ -108,7 +108,7 @@ terraform {
   backend "s3" {} # empty: smithd sets bucket, key, table and encryption
 
   required_providers {
-    aws = { source = "opentofu/aws", version = "~> 6.0" }
+    aws = { source = "hashicorp/aws" } # the lock file pins the exact version
   }
 }
 
@@ -300,7 +300,7 @@ and read them with the `vault` provider, which takes its address and token from 
 ```hcl
 terraform {
   required_providers {
-    vault = { source = "opentofu/vault", version = "~> 5.0" }
+    vault = { source = "hashicorp/vault" }
   }
 }
 
@@ -394,7 +394,7 @@ smithctl deploy "$GIT_SHA" --app viino-backend --env production
 
 smithd does not enforce that order (see "no ordering" above), and an auto-deploy policy can deploy the manifest app on its own as soon as it is published, before the infrastructure is applied. If the order matters, do not give the manifest app an auto-deploy policy for that environment, or accept that the app may start before its infrastructure.
 
-Both apps report on the same commit: the check run is named `deploysmith/deploy-<env>` (and `deploysmith/plan-<env>` for plans) **without the app name**, one run per deployment, with the app in the summary. smithd creates both; whether the GitHub checks list shows both or only the newest run with that name was not tested here, and GitHub may collapse runs that share a name. The app name is in each run's summary and in the web UI link. A follow-up issue tracks naming the checks per app.
+Both apps report on the same commit: the check run is named `deploysmith/deploy-<env>` (and `deploysmith/plan-<env>` for plans) **without the app name**, one run per deployment, with the app in the summary. smithd creates both; whether the GitHub checks list shows both or only the newest run with that name was not tested here, and GitHub may collapse runs that share a name. The app name is in each run's summary and in the web UI link. DEP-38 tracks naming the checks per app.
 
 ## Troubleshooting
 
@@ -428,7 +428,7 @@ Limits of the design:
 - **What is applied is a fresh plan**, not the stored one; see [the model](#lifecycle). smithd detects a difference afterwards (`appliedDiffered`), not beforehand.
 - **A plan waiting for approval does not expire.** It becomes `stale` when something changes.
 - **One root per app and environment** (`main`). The root name is already part of the state key, so more roots later need no migration.
-- **No cross-app ordering**, no approver allowlist, no `disable` command, JSON configuration and data files read with `file()` are not packed (DEP-27), providers are downloaded at runtime and pinned by the lock file.
+- **No cross-app ordering and one app per artifact type** (DEP-38), **no approver allowlist** (DEP-29), **no `disable` command** (DEP-35), **no `smithctl` equivalent of `forge plan`** (DEP-37), drift is not tracked (DEP-36), plan-only runs wait for Flux to poll the `plans` branch (DEP-31), the stale messages differ in wording (DEP-30), JSON configuration and data files read with `file()` are not packed (DEP-27). Providers are downloaded at runtime and pinned by the lock file.
 - **Authentication in CI** is still a stored API key (GitHub Actions OIDC is DEP-28).
 - Plans over 1 MiB are split over several ConfigMaps by the controller; reading them is implemented but was not tested with a real large plan.
 
@@ -440,3 +440,5 @@ Limits of the design:
 - **Plan-only runs on the `plans` branch** in a cluster (the `plan-plans-<sha>` id, cleanup, the `gitops-plans` Flux objects). The Flux Receiver for that branch is not set up; the example polls every minute.
 - The web UI approval flow in a browser with a live smithd, and GitHub check runs against real GitHub (tests use a fake).
 - Moving a real existing app ([migration checklist](terraform-migration.md)).
+
+The end-to-end run, as a runbook, is DEP-34.

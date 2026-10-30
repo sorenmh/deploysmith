@@ -766,7 +766,7 @@ forge help upload
 forge help publish
 ```
 
-For more help, see the [smithd API documentation](smithd-api-spec.md) or check the project repository.
+For more help, see the [smithd API documentation](specs/smithd-api-spec.md) or check the project repository.
 
 ## DeploySmith Container Ecosystem
 

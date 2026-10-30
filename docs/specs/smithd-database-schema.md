@@ -176,6 +176,22 @@ INSERT INTO policies VALUES (
 
 ---
 
+### Terraform and login tables
+
+Added by migrations 003 to 012 (SQL in `internal/smithd/db/migrations/`). Columns are summarised; the migration files are the definition.
+
+| Migration | Change |
+|---|---|
+| 003 | `versions.artifact_type` (`manifests` or `terraform`, default `manifests`) |
+| 004 | `users` (GitHub id, login) and `sessions` (SHA-256 hash of the session token, `cli` or `web`, expiry) |
+| 005 | `terraform_environments`: one row per app and environment with the S3 backend (`backend_bucket`, `backend_key`, `backend_region`, `backend_lock_table`), an optional `aws_role_arn` and the outcome of the last provisioning (`provisioned_at`, `provision_error`); unique per app and environment |
+| 006 | `versions.source_repo`, `source_sha`, `source_pr`: where the version was built from, for GitHub check runs |
+| 007 | `deployments` rebuilt with the Terraform states (`planning`, `awaiting_approval`, `applying`, `applied`, `stale`, `rejected`) and `terraform_root`, `terraform_source_sha`, `terraform_plan_id`; a partial unique index allows one active Terraform deployment per app, environment and root; `terraform_environments.encryption_fallback` |
+| 008 | `terraform_plans`: the readable plan of a deployment (counts, `destroys`, resource addresses by action as JSON, the plan text, `plan_hash`, and `applied_plan_hash` / `applied_differed` after the apply) |
+| 009 | `deployments.approved_by`, `approved_at`, `destroy_confirmed`, `rejected_by`, `rejected_at`, `reject_reason`, `approval_reset_at`, `rollback` |
+| 010 | `plan_runs`: plan-only runs of a version for an environment (status `pending`, `planning`, `planned`, `failed`, `superseded`, the plan, `cleaned_at`); one active run per app, environment and root |
+| 012 | `versions.temporary`, `expires_at`, `created_by` (local plans); `plan_runs.requested_by`, and the active-run index is per requester |
+
 ## Queries
 
 ### Get current deployed version per environment
