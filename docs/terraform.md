@@ -437,7 +437,7 @@ Limits of the design:
 - smithd's flow with a **real tofu-controller**: the controller was exercised in `kind` with smithd's generated files (plan, replace by a new deploy, approve by commit, apply, encrypted state), but with a Kubernetes backend and a static encryption key, and the watcher, approval and reset code was tested against a fake Kubernetes API, not with the controller running.
 - **OpenBao Kubernetes auth and the AWS secrets engine** with the real plugin (`openbao-plugin-secrets-aws`): both were stood in for by the JWT auth method and a KV mount in the tests. The `vault` provider example in this guide, and `skip_child_token`, were derived from the policy smithd writes, not run.
 - The **S3 + DynamoDB backend** with the `tf-app` IAM roles (state locking, the leading-keys condition), and `remediation.retries: 1`.
-- **Plan-only runs on the `plans` branch** in a cluster (the `plan-plans-<sha>` id, cleanup, the `gitops-plans` Flux objects). The Flux Receiver for that branch is not set up; the example polls every minute.
+- **Plan-only runs on the `plans` branch** in a cluster (the `plan-plans-<sha>` id, cleanup, the `gitops-plans` Flux objects). The Receiver entry for that branch ([`receiver.yaml`](examples/terraform/receiver.yaml)) has not been tried against a real Flux either; without it the example polls every minute.
 - The web UI approval flow in a browser with a live smithd, and GitHub check runs against real GitHub (tests use a fake).
 - Moving a real existing app ([migration checklist](terraform-migration.md)).
 
