@@ -1,0 +1,31 @@
+# Flux Receiver that smithd's webhook (FLUX_WEBHOOK_URL) calls after every
+# commit it makes to the gitops repo, so Flux fetches it at once instead of
+# at the next poll. See docs/terraform-cluster-setup.md.
+#
+# Plan-only runs are committed to the branch "plans", which is its own
+# GitRepository (gitops-plans, kustomizations.yaml). It has to be listed here
+# next to the main GitRepository, or a plan starts at the next poll only.
+# The Kustomizations need no entry: they reconcile when their source gets a
+# new revision.
+#
+# If you already have a Receiver for smithd, add gitops-plans to its
+# resources instead of creating a second one: smithd calls one URL.
+apiVersion: notification.toolkit.fluxcd.io/v1
+kind: Receiver
+metadata:
+  name: smithd
+  namespace: flux-system
+spec:
+  type: generic
+  secretRef:
+    # Secret with the key "token". The webhook URL Flux reports in
+    # status.webhookPath contains a hash of it; that URL is what goes into
+    # smithd's secrets.flux.webhookUrl.
+    name: smithd-receiver-token
+  resources:
+    - apiVersion: source.toolkit.fluxcd.io/v1
+      kind: GitRepository
+      name: flux-system
+    - apiVersion: source.toolkit.fluxcd.io/v1
+      kind: GitRepository
+      name: gitops-plans

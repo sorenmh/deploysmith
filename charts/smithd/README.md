@@ -601,7 +601,7 @@ outside Helm set the environment variables.
 | `config.terraform.autoPlan` | `TERRAFORM_AUTO_PLAN` | `true` | Plan every terraform version when it is published, for each environment with Terraform enabled |
 | `config.terraform.localPlanTtl` | `TERRAFORM_LOCAL_PLAN_TTL` | `24h` | Lifetime of the temporary version of a local plan |
 | `config.flux.namespace` | `FLUX_NAMESPACE` | `flux-system` | Namespace of the GitRepositories smithd creates for bundles |
-| `config.flux.kustomizationName`, `secrets.flux.webhookUrl` / `webhookToken` | `FLUX_KUSTOMIZATION_NAME`, `FLUX_WEBHOOK_URL`, `FLUX_WEBHOOK_TOKEN` | | Manifest deployments only; the webhook (a Flux Receiver) is also triggered after Terraform commits |
+| `config.flux.kustomizationName`, `secrets.flux.webhookUrl` / `webhookToken` | `FLUX_KUSTOMIZATION_NAME`, `FLUX_WEBHOOK_URL`, `FLUX_WEBHOOK_TOKEN` | | Manifest deployments only; the webhook (a Flux Receiver) is also triggered after Terraform commits; it must list the `gitops-plans` GitRepository too, see `docs/examples/terraform/receiver.yaml` |
 | (set by the chart) | `SMITHD_NAMESPACE`, `SMITHD_SERVICE_ACCOUNT` | release namespace, ServiceAccount | Subject of the RoleBinding that lets smithd read plans |
 | `config.github.appId`, `secrets.github.privateKey` | `GITHUB_APP_ID`, `GITHUB_APP_PRIVATE_KEY` | `""` | GitHub App for check runs (**Checks: Read and write**); both or neither |
 | `config.ui.publicUrl` | `UI_PUBLIC_URL` | `""` | Links in check runs, Slack and push to the deployment page |
